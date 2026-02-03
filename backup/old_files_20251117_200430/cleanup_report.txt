@@ -1,0 +1,50 @@
+﻿清理报告
+========================================
+清理时间: 2025-11-17 20:07:49
+备份目录: backup/old_files_20251117_200430
+
+已删除的文件:
+----------------------------------------
+旧迁移脚本 (5个):
+  ✓ backend/scripts/add_chapter_outline_id_to_plot_cards.sql
+  ✓ backend/scripts/add_plot_tables.sql
+  ✓ backend/scripts/migration_phase1_create_tables.sql
+  ✓ backend/scripts/migration_phase2_migrate_data.py
+   backend/scripts/migration_phase3_cleanup.sql
+
+Outline 相关文件 (3个):
+  ✓ backend/app/models/outline.py
+  ✓ backend/app/api/outlines.py
+  ✓ backend/app/schemas/outline.py
+
+代码更新:
+   backend/app/models/__init__.py - 移除 Outline 导入
+
+清理统计:
+----------------------------------------
+- 删除文件: 8个
+- 清理缓存: __pycache__, *.pyc, *.pyo
+- 备份文件: 8个
+- 代码更新: 1个文件
+
+备份文件列表:
+----------------------------------------
+
+FullName                                                                                             
+--------                                                                                             
+C:\Users\小海\Downloads\我的项目\MuMuAINovel-main1\MuMuAINovel-main\backup\old_files_20251117_200430\bac...
+C:\Users\小海\Downloads\我的项目\MuMuAINovel-main1\MuMuAINovel-main\backup\old_files_20251117_200430\add...
+C:\Users\小海\Downloads\我的项目\MuMuAINovel-main1\MuMuAINovel-main\backup\old_files_20251117_200430\add...
+C:\Users\小海\Downloads\我的项目\MuMuAINovel-main1\MuMuAINovel-main\backup\old_files_20251117_200430\cle...
+C:\Users\小海\Downloads\我的项目\MuMuAINovel-main1\MuMuAINovel-main\backup\old_files_20251117_200430\mig...
+C:\Users\小海\Downloads\我的项目\MuMuAINovel-main1\MuMuAINovel-main\backup\old_files_20251117_200430\mig...
+C:\Users\小海\Downloads\我的项目\MuMuAINovel-main1\MuMuAINovel-main\backup\old_files_20251117_200430\mig...
+C:\Users\小海\Downloads\我的项目\MuMuAINovel-main1\MuMuAINovel-main\backup\old_files_20251117_200430\bac...
+C:\Users\小海\Downloads\我的项目\MuMuAINovel-main1\MuMuAINovel-main\backup\old_files_20251117_200430\bac...
+C:\Users\小海\Downloads\我的项目\MuMuAINovel-main1\MuMuAINovel-main\backup\old_files_20251117_200430\bac...
+C:\Users\小海\Downloads\我的项目\MuMuAINovel-main1\MuMuAINovel-main\backup\old_files_20251117_200430\bac...
+C:\Users\小海\Downloads\我的项目\MuMuAINovel-main1\MuMuAINovel-main\backup\old_files_20251117_200430\bac...
+C:\Users\小海\Downloads\我的项目\MuMuAINovel-main1\MuMuAINovel-main\backup\old_files_20251117_200430\bac...
+C:\Users\小海\Downloads\我的项目\MuMuAINovel-main1\MuMuAINovel-main\backup\old_files_20251117_200430\bac...
+
+
