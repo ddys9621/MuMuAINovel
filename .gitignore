@@ -1,0 +1,115 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Node.js
+node_modules/
+.npm
+.eslintcache
+
+# Build outputs
+dist/
+build/
+backend/static/
+
+# OS
+Thumbs.db
+.DS_Store
+*.tmp
+
+# User data
+backend/data/*.db
+backend/data/*.db-shm
+backend/data/*.db-wal
+backend/data/users.json
+backend/data/admins.json
+
+# Temporary files
+*.bak
+*.swp
+*.tmp
+.temp/
+temp/
+tmp/
+
+# Coverage
+.coverage
+htmlcov/
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+data/
+docs/
+data_old/
+backend/migrate_all_databases.py
+test_api.py
+
+# 大文件 - 模型和依赖
+backend/embedding/
+backend/embedding.zip
+*.safetensors
+*.zip

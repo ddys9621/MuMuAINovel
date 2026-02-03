@@ -1,0 +1,559 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  Card,
+  Button,
+  Space,
+  Table,
+  Modal,
+  Form,
+  Input,
+  Select,
+  Tag,
+  Popconfirm,
+  Tooltip,
+  Row,
+  Col,
+  Timeline,
+  Descriptions,
+} from 'antd';
+import {
+  PlusOutlined,
+  EditOutlined,
+  DeleteOutlined,
+  RobotOutlined,
+  ReloadOutlined,
+  EyeOutlined,
+} from '@ant-design/icons';
+import { usePlotLineSync, usePlotCardSync } from '../store/plotHooks';
+import { useStore } from '../store';
+import type { PlotLine, PlotLineCreate, PlotLineUpdate, PlotLineGenerateRequest } from '../types';
+
+const { TextArea } = Input;
+const { Option } = Select;
+
+interface PlotLinesProps {
+  projectId?: string;
+}
+
+const PlotLines: React.FC<PlotLinesProps> = ({ projectId }) => {
+  const [form] = Form.useForm();
+  const [generateForm] = Form.useForm();
+  
+  const [isModalVisible, setIsModalVisible] = useState(false);
+  const [isGenerateModalVisible, setIsGenerateModalVisible] = useState(false);
+  const [isDetailModalVisible, setIsDetailModalVisible] = useState(false);
+  const [editingLine, setEditingLine] = useState<PlotLine | null>(null);
+  const [viewingLine, setViewingLine] = useState<PlotLine | null>(null);
+  const [selectedLineType, setSelectedLineType] = useState<string>('');
+  const [loading, setLoading] = useState(false);
+
+  const {
+    plotLines,
+    refreshPlotLines,
+    createPlotLine,
+    updatePlotLine,
+    deletePlotLine,
+    generatePlotLines,
+  } = usePlotLineSync();
+
+  const { plotCards, refreshPlotCards } = usePlotCardSync();
+  const { outlines } = useStore();
+
+  // 剧情线类型选项
+  const lineTypeOptions = [
+    { value: 'main', label: '主线剧情', color: 'red' },
+    { value: 'sub', label: '支线剧情', color: 'blue' },
+    { value: 'character', label: '角色线', color: 'green' },
+  ];
+
+  useEffect(() => {
+    if (projectId) {
+      refreshPlotLines(projectId, { line_type: selectedLineType || undefined });
+    }
+  }, [projectId, selectedLineType, refreshPlotLines]);
+
+  // 只在需要显示卡片选择器时才刷新卡片数据
+  const ensurePlotCardsLoaded = useCallback(() => {
+    if (projectId && plotCards.length === 0) {
+      refreshPlotCards(projectId);
+    }
+  }, [projectId, plotCards.length, refreshPlotCards]);
+
+  const handleCreate = () => {
+    setEditingLine(null);
+    form.resetFields();
+    ensurePlotCardsLoaded(); // 确保卡片数据已加载，用于关联卡片选择
+    setIsModalVisible(true);
+  };
+
+  const handleEdit = (line: PlotLine) => {
+    setEditingLine(line);
+    form.setFieldsValue({
+      title: line.title,
+      description: line.description,
+      line_type: line.line_type,
+      plot_cards: line.plot_cards,
+    });
+    ensurePlotCardsLoaded(); // 确保卡片数据已加载，用于关联卡片选择
+    setIsModalVisible(true);
+  };
+
+  const handleView = (line: PlotLine) => {
+    setViewingLine(line);
+    setIsDetailModalVisible(true);
+  };
+
+  const handleDelete = async (lineId: string) => {
+    try {
+      await deletePlotLine(lineId);
+      if (projectId) {
+        refreshPlotLines(projectId, { line_type: selectedLineType || undefined });
+      }
+    } catch (error) {
+      console.error('删除失败:', error);
+    }
+  };
+
+  const handleSubmit = async (values: any) => {
+    if (!projectId) return;
+
+    try {
+      setLoading(true);
+      const lineData = {
+        ...values,
+        project_id: projectId,
+        plot_cards: values.plot_cards || [],
+      };
+
+      if (editingLine) {
+        await updatePlotLine(editingLine.id, lineData as PlotLineUpdate);
+      } else {
+        await createPlotLine(lineData as PlotLineCreate);
+      }
+
+      setIsModalVisible(false);
+      refreshPlotLines(projectId, { line_type: selectedLineType || undefined });
+    } catch (error) {
+      console.error('保存失败:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGenerate = async (values: any) => {
+    if (!projectId) return;
+
+    try {
+      setLoading(true);
+      const generateData: PlotLineGenerateRequest = {
+        project_id: projectId,
+        outline_id: values.outline_id,
+        prompt: values.prompt,
+        line_type: values.line_type || 'main',
+        based_on_cards: values.based_on_cards,
+        extend_existing: values.extend_existing || false,
+        count: values.count || 3,
+      };
+
+      await generatePlotLines(generateData);
+      setIsGenerateModalVisible(false);
+      refreshPlotLines(projectId, { line_type: selectedLineType || undefined });
+    } catch (error) {
+      console.error('生成失败:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getLineTypeColor = (type: string) => {
+    const option = lineTypeOptions.find(opt => opt.value === type);
+    return option?.color || 'default';
+  };
+
+  const getLineTypeLabel = (type: string) => {
+    const option = lineTypeOptions.find(opt => opt.value === type);
+    return option?.label || type;
+  };
+
+  const renderTimelineData = (timelineData: any) => {
+    if (!timelineData || typeof timelineData !== 'object') return null;
+
+    const { start, developments, climax, resolution } = timelineData;
+    const items = [];
+
+    if (start) items.push({ children: `起始：${start}`, color: 'green' });
+    if (developments && Array.isArray(developments)) {
+      developments.forEach((dev: string, index: number) => {
+        items.push({ children: `发展${index + 1}：${dev}`, color: 'blue' });
+      });
+    }
+    if (climax) items.push({ children: `高潮：${climax}`, color: 'red' });
+    if (resolution) items.push({ children: `结局：${resolution}`, color: 'gray' });
+
+    return items.length > 0 ? <Timeline items={items} /> : null;
+  };
+
+  const columns = [
+    {
+      title: '标题',
+      dataIndex: 'title',
+      key: 'title',
+      width: 200,
+      render: (text: string, record: PlotLine) => (
+        <div>
+          <div style={{ fontWeight: 'bold', marginBottom: 4 }}>{text}</div>
+          <Tag color={getLineTypeColor(record.line_type)}>
+            {getLineTypeLabel(record.line_type)}
+          </Tag>
+        </div>
+      ),
+    },
+    {
+      title: '描述',
+      dataIndex: 'description',
+      key: 'description',
+      ellipsis: true,
+      render: (text: string) => (
+        <div style={{ maxWidth: 300 }}>
+          {text && text.length > 100 ? `${text.substring(0, 100)}...` : text}
+        </div>
+      ),
+    },
+    {
+      title: '关联卡片',
+      dataIndex: 'plot_cards',
+      key: 'plot_cards',
+      width: 100,
+      render: (cards: string[]) => (
+        <Tag color="blue">{cards?.length || 0} 个</Tag>
+      ),
+    },
+    {
+      title: '创建时间',
+      dataIndex: 'created_at',
+      key: 'created_at',
+      width: 120,
+      render: (text: string) => new Date(text).toLocaleDateString(),
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 150,
+      render: (_: any, record: PlotLine) => (
+        <Space size="small">
+          <Tooltip title="查看详情">
+            <Button
+              type="text"
+              icon={<EyeOutlined />}
+              onClick={() => handleView(record)}
+            />
+          </Tooltip>
+          <Tooltip title="编辑">
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              onClick={() => handleEdit(record)}
+            />
+          </Tooltip>
+          <Popconfirm
+            title="确定删除这条剧情线吗？"
+            onConfirm={() => handleDelete(record.id)}
+            okText="确定"
+            cancelText="取消"
+          >
+            <Tooltip title="删除">
+              <Button
+                type="text"
+                danger
+                icon={<DeleteOutlined />}
+              />
+            </Tooltip>
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ];
+
+  return (
+    <div style={{ padding: '24px' }}>
+      <Card>
+        <Row justify="space-between" align="middle" style={{ marginBottom: 16 }}>
+          <Col>
+            <h2 style={{ margin: 0 }}>剧情线</h2>
+            <p style={{ margin: '4px 0 0 0', color: '#666' }}>
+              管理项目的剧情线，整合剧情卡片形成完整的故事线
+            </p>
+          </Col>
+          <Col>
+            <Space>
+              <Select
+                placeholder="筛选剧情线类型"
+                style={{ width: 120 }}
+                allowClear
+                value={selectedLineType || undefined}
+                onChange={setSelectedLineType}
+              >
+                {lineTypeOptions.map(option => (
+                  <Option key={option.value} value={option.value}>
+                    <Tag color={option.color} style={{ margin: 0 }}>
+                      {option.label}
+                    </Tag>
+                  </Option>
+                ))}
+              </Select>
+              <Button
+                icon={<ReloadOutlined />}
+                onClick={() => projectId && refreshPlotLines(projectId, { line_type: selectedLineType || undefined })}
+              >
+                刷新
+              </Button>
+              <Button
+                type="primary"
+                icon={<RobotOutlined />}
+                onClick={() => setIsGenerateModalVisible(true)}
+              >
+                AI生成
+              </Button>
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={handleCreate}
+              >
+                新建剧情线
+              </Button>
+            </Space>
+          </Col>
+        </Row>
+
+        <Table
+          columns={columns}
+          dataSource={plotLines}
+          rowKey="id"
+          pagination={{
+            pageSize: 10,
+            showSizeChanger: true,
+            showQuickJumper: true,
+            showTotal: (total) => `共 ${total} 条剧情线`,
+          }}
+        />
+      </Card>
+
+      {/* 创建/编辑剧情线弹窗 */}
+      <Modal
+        title={editingLine ? '编辑剧情线' : '新建剧情线'}
+        open={isModalVisible}
+        onCancel={() => setIsModalVisible(false)}
+        footer={null}
+        width={700}
+      >
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={handleSubmit}
+        >
+          <Form.Item
+            name="title"
+            label="剧情线标题"
+            rules={[{ required: true, message: '请输入剧情线标题' }]}
+          >
+            <Input placeholder="请输入剧情线标题" />
+          </Form.Item>
+
+          <Form.Item
+            name="line_type"
+            label="剧情线类型"
+            rules={[{ required: true, message: '请选择剧情线类型' }]}
+          >
+            <Select placeholder="请选择剧情线类型">
+              {lineTypeOptions.map(option => (
+                <Option key={option.value} value={option.value}>
+                  <Tag color={option.color} style={{ margin: 0 }}>
+                    {option.label}
+                  </Tag>
+                </Option>
+              ))}
+            </Select>
+          </Form.Item>
+
+          <Form.Item
+            name="description"
+            label="剧情线描述"
+          >
+            <TextArea
+              rows={4}
+              placeholder="请输入剧情线描述"
+            />
+          </Form.Item>
+
+          <Form.Item
+            name="plot_cards"
+            label="关联剧情卡片"
+          >
+            <Select
+              mode="multiple"
+              placeholder="选择要关联的剧情卡片"
+              style={{ width: '100%' }}
+            >
+              {plotCards.map((card: any) => (
+                <Option key={card.id} value={card.id}>
+                  {card.title}
+                </Option>
+              ))}
+            </Select>
+          </Form.Item>
+
+          <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+            <Space>
+              <Button onClick={() => setIsModalVisible(false)}>
+                取消
+              </Button>
+              <Button type="primary" htmlType="submit" loading={loading}>
+                {editingLine ? '更新' : '创建'}
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* AI生成剧情线弹窗 */}
+      <Modal
+        title="AI生成剧情线"
+        open={isGenerateModalVisible}
+        onCancel={() => setIsGenerateModalVisible(false)}
+        footer={null}
+        width={600}
+      >
+        <Form
+          form={generateForm}
+          layout="vertical"
+          onFinish={handleGenerate}
+        >
+          <Form.Item
+            name="outline_id"
+            label="基于大纲"
+          >
+            <Select placeholder="选择要基于的大纲（可选）" allowClear>
+              {outlines.map((outline: any) => (
+                <Option key={outline.id} value={outline.id}>
+                  {outline.title}
+                </Option>
+              ))}
+            </Select>
+          </Form.Item>
+
+          <Form.Item
+            name="line_type"
+            label="剧情线类型"
+            initialValue="main"
+          >
+            <Select>
+              {lineTypeOptions.map(option => (
+                <Option key={option.value} value={option.value}>
+                  <Tag color={option.color} style={{ margin: 0 }}>
+                    {option.label}
+                  </Tag>
+                </Option>
+              ))}
+            </Select>
+          </Form.Item>
+
+          <Form.Item
+            name="based_on_cards"
+            label="基于剧情卡片"
+          >
+            <Select
+              mode="multiple"
+              placeholder="选择要基于的剧情卡片（可选）"
+              allowClear
+            >
+              {plotCards.map((card: any) => (
+                <Option key={card.id} value={card.id}>
+                  {card.title}
+                </Option>
+              ))}
+            </Select>
+          </Form.Item>
+
+          <Form.Item
+            name="count"
+            label="生成数量"
+            initialValue={3}
+            rules={[{ required: true, message: '请选择生成数量' }]}
+          >
+            <Select placeholder="选择要生成的剧情线数量">
+              <Option value={1}>1条</Option>
+              <Option value={2}>2条</Option>
+              <Option value={3}>3条</Option>
+              <Option value={4}>4条</Option>
+              <Option value={5}>5条</Option>
+            </Select>
+          </Form.Item>
+
+          <Form.Item
+            name="prompt"
+            label="生成提示"
+          >
+            <TextArea
+              rows={4}
+              placeholder="请输入生成提示词，描述您希望生成什么样的剧情线"
+            />
+          </Form.Item>
+
+          <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+            <Space>
+              <Button onClick={() => setIsGenerateModalVisible(false)}>
+                取消
+              </Button>
+              <Button type="primary" htmlType="submit" loading={loading}>
+                生成剧情线
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 剧情线详情弹窗 */}
+      <Modal
+        title="剧情线详情"
+        open={isDetailModalVisible}
+        onCancel={() => setIsDetailModalVisible(false)}
+        footer={[
+          <Button key="close" onClick={() => setIsDetailModalVisible(false)}>
+            关闭
+          </Button>
+        ]}
+        width={800}
+      >
+        {viewingLine && (
+          <div>
+            <Descriptions column={2} bordered>
+              <Descriptions.Item label="标题" span={2}>
+                {viewingLine.title}
+              </Descriptions.Item>
+              <Descriptions.Item label="类型">
+                <Tag color={getLineTypeColor(viewingLine.line_type)}>
+                  {getLineTypeLabel(viewingLine.line_type)}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="关联卡片数">
+                {viewingLine.plot_cards?.length || 0} 个
+              </Descriptions.Item>
+              <Descriptions.Item label="描述" span={2}>
+                {viewingLine.description || '暂无描述'}
+              </Descriptions.Item>
+            </Descriptions>
+
+            {viewingLine.timeline_data && (
+              <div style={{ marginTop: 24 }}>
+                <h4>时间线</h4>
+                {renderTimelineData(viewingLine.timeline_data)}
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
+    </div>
+  );
+};
+
+export default PlotLines;

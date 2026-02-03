@@ -1,0 +1,941 @@
+"""剧情线 API 路由"""
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, update, delete, func
+from typing import List, Optional, Dict, Any
+import json
+
+from app.database import get_db
+from app.models import (
+    PlotLine, Project, PlotCard, ChapterOutline,
+    ChapterOutlinePlotLineLink, PlotCardPlotLineLink, PlotCardChapterOutlineLink
+)
+from app.schemas.plot_line import (
+    PlotLineCreate, PlotLineUpdate, PlotLineResponse,
+    PlotLineGenerateRequest, PlotLineReorderRequest, PlotLineListResponse,
+    TimelineDataUpdate
+)
+from app.schemas.link_schemas import (
+    ChapterOutlinePlotLineLinkResponse, PlotCardPlotLineLinkResponse,
+    ChapterOutlineWithLinks, PlotCardWithLinks,
+    LinkChapterOutlinesRequest, LinkPlotCardsToLineRequest, UnlinkRequest
+)
+from app.services.ai_service import AIService
+from app.services.plot_link_service import PlotLinkService
+from app.services.plot_generation_service import PlotGenerationService
+from app.api.settings import get_user_ai_service
+from app.logger import get_logger
+
+router = APIRouter(prefix="/plot-lines", tags=["剧情线"])
+logger = get_logger(__name__)
+
+
+async def _serialize_plot_line(db: AsyncSession, line: PlotLine) -> PlotLineResponse:
+    """将剧情线 ORM 实例转换为响应模型，包含关联统计"""
+
+    timeline_data: Dict[str, Any] | None = None
+    if line.timeline_data:
+        try:
+            timeline_data = json.loads(line.timeline_data)
+        except Exception:
+            timeline_data = None
+
+    try:
+        plot_card_ids = await PlotLinkService.get_plot_line_card_ids(db, line.id)
+    except Exception as e:
+        logger.error(f"查询关联剧情卡片失败: {e}")
+        plot_card_ids = []
+
+    # 获取关联的章纲数量 - 使用服务层方法
+    try:
+        # 直接使用现有的服务方法
+        linked_outlines = await PlotLinkService.get_plot_line_chapter_outlines(db, line.id)
+        chapter_outline_count = len(linked_outlines)
+    except Exception as e:
+        logger.error(f"查询关联章纲数量失败: {e}")
+        chapter_outline_count = 0
+
+    # 构建统一的响应对象
+    response_data = {
+        "id": line.id,
+        "project_id": line.project_id,
+        "story_outline_id": line.story_outline_id,
+        "title": line.title,
+        "description": line.description,
+        "line_type": line.line_type,
+        "order_index": line.order_index,
+        "estimated_chapters": line.estimated_chapters,
+        "plot_cards": plot_card_ids,
+        "timeline_data": timeline_data,
+        "created_at": line.created_at,
+        "updated_at": line.updated_at,
+        # 统一的关联统计
+        "chapter_outlines": [{"id": f"mock_{i}"} for i in range(chapter_outline_count)],
+        "chapter_outline_count": chapter_outline_count,
+        "plot_card_count": len(plot_card_ids) if plot_card_ids else 0
+    }
+
+    logger.debug(f"剧情线响应数据构建完成: {line.title}")
+    response = PlotLineResponse(**response_data)
+
+    return response
+
+
+@router.get("/project/{project_id}", response_model=PlotLineListResponse)
+async def get_plot_lines(
+    project_id: str,
+    skip: int = Query(0, ge=0, description="跳过数量"),
+    limit: int = Query(100, ge=1, le=100, description="限制数量"),
+    line_type: Optional[str] = Query(None, description="剧情线类型筛选"),
+    db: AsyncSession = Depends(get_db)
+):
+    """获取项目的剧情线列表"""
+    
+    # 构建查询
+    query = select(PlotLine).where(PlotLine.project_id == project_id)
+    
+    if line_type:
+        query = query.where(PlotLine.line_type == line_type)
+    
+    # 按排序序号排序
+    query = query.order_by(PlotLine.order_index.asc(), PlotLine.created_at.asc())
+    
+    # 获取总数
+    count_query = select(func.count()).select_from(query.subquery())
+    total_result = await db.execute(count_query)
+    total = total_result.scalar()
+    
+    # 分页查询
+    query = query.offset(skip).limit(limit)
+    result = await db.execute(query)
+    lines = result.scalars().all()
+    
+    serialized_lines: List[PlotLineResponse] = []
+    for line in lines:
+        serialized_lines.append(await _serialize_plot_line(db, line))
+
+    return PlotLineListResponse(total=total, items=serialized_lines)
+
+
+@router.get("/{line_id}", response_model=PlotLineResponse)
+async def get_plot_line(line_id: str, db: AsyncSession = Depends(get_db)):
+    """获取单个剧情线"""
+    
+    result = await db.execute(select(PlotLine).where(PlotLine.id == line_id))
+    line = result.scalar_one_or_none()
+    
+    if not line:
+        raise HTTPException(status_code=404, detail="剧情线不存在")
+    
+    return await _serialize_plot_line(db, line)
+
+
+@router.post("", response_model=PlotLineResponse)
+async def create_plot_line(line_data: PlotLineCreate, db: AsyncSession = Depends(get_db)):
+    """创建剧情线"""
+    
+    # 验证项目存在
+    project_result = await db.execute(select(Project).where(Project.id == line_data.project_id))
+    if not project_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="项目不存在")
+    
+    # 如果没有指定排序序号，自动设置为最大值+1
+    if line_data.order_index is None:
+        max_order_result = await db.execute(
+            select(func.max(PlotLine.order_index)).where(PlotLine.project_id == line_data.project_id)
+        )
+        max_order = max_order_result.scalar() or 0
+        line_data.order_index = max_order + 1
+    
+    # 处理 JSON 字段
+    timeline_data_json = None
+    if line_data.timeline_data:
+        timeline_data_json = json.dumps(line_data.timeline_data, ensure_ascii=False)
+    
+    # 创建剧情线
+    line = PlotLine(
+        project_id=line_data.project_id,
+        story_outline_id=line_data.story_outline_id,
+        title=line_data.title,
+        description=line_data.description,
+        line_type=line_data.line_type,
+        order_index=line_data.order_index,
+        timeline_data=timeline_data_json,
+        estimated_chapters=line_data.estimated_chapters
+    )
+    
+    db.add(line)
+    await db.commit()
+    await db.refresh(line)
+    
+    # 创建剧情卡片关联
+    if line_data.plot_cards:
+        try:
+            await PlotLinkService.add_cards_to_plot_line(
+                db=db,
+                plot_line_id=line.id,
+                card_ids=line_data.plot_cards
+            )
+        except Exception as e:
+            logger.warning(f"创建剧情线时关联剧情卡片失败: {e}")
+    
+    return await _serialize_plot_line(db, line)
+
+
+@router.put("/{line_id}", response_model=PlotLineResponse)
+async def update_plot_line(
+    line_id: str, 
+    line_data: PlotLineUpdate, 
+    db: AsyncSession = Depends(get_db)
+):
+    """更新剧情线"""
+    
+    # 检查剧情线是否存在
+    result = await db.execute(select(PlotLine).where(PlotLine.id == line_id))
+    line = result.scalar_one_or_none()
+    
+    if not line:
+        raise HTTPException(status_code=404, detail="剧情线不存在")
+    
+    # 更新字段
+    update_data = line_data.model_dump(exclude_unset=True)
+    
+    # 提取 plot_cards 用于关联表更新
+    plot_cards = update_data.pop("plot_cards", None)
+    
+    # 处理 JSON 字段
+    if "timeline_data" in update_data and update_data["timeline_data"] is not None:
+        update_data["timeline_data"] = json.dumps(update_data["timeline_data"], ensure_ascii=False)
+    
+    # 更新基本字段
+    if update_data:
+        await db.execute(
+            update(PlotLine).where(PlotLine.id == line_id).values(**update_data)
+        )
+        await db.commit()
+        await db.refresh(line)
+    
+    # 更新剧情卡片关联（如果提供了）
+    if plot_cards is not None:
+        try:
+            # 先删除所有现有关联
+            await db.execute(
+                delete(PlotCardPlotLineLink).where(PlotCardPlotLineLink.plot_line_id == line_id)
+            )
+            await db.commit()
+            
+            # 再创建新关联
+            if plot_cards:
+                await PlotLinkService.add_cards_to_plot_line(
+                    db=db,
+                    plot_line_id=line_id,
+                    card_ids=plot_cards
+                )
+        except Exception as e:
+            logger.warning(f"更新剧情线时关联剧情卡片失败: {e}")
+    
+    return await _serialize_plot_line(db, line)
+
+
+@router.delete("/{line_id}")
+async def delete_plot_line(line_id: str, db: AsyncSession = Depends(get_db)):
+    """删除剧情线"""
+    
+    # 检查剧情线是否存在
+    result = await db.execute(select(PlotLine).where(PlotLine.id == line_id))
+    line = result.scalar_one_or_none()
+    
+    if not line:
+        raise HTTPException(status_code=404, detail="剧情线不存在")
+    
+    await db.execute(delete(PlotLine).where(PlotLine.id == line_id))
+    await db.commit()
+    
+    return {"message": "剧情线删除成功"}
+
+
+@router.post("/reorder")
+async def reorder_plot_lines(
+    reorder_data: PlotLineReorderRequest, 
+    db: AsyncSession = Depends(get_db)
+):
+    """重排序剧情线"""
+    
+    for order_item in reorder_data.orders:
+        line_id = order_item.get("id")
+        new_order = order_item.get("order_index")
+        
+        if line_id and new_order is not None:
+            await db.execute(
+                update(PlotLine)
+                .where(PlotLine.id == line_id)
+                .values(order_index=new_order)
+            )
+    
+    await db.commit()
+    
+    return {"message": "剧情线排序更新成功"}
+
+
+@router.post("/generate", response_model=List[PlotLineResponse])
+async def generate_plot_lines(
+    generate_data: PlotLineGenerateRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user_ai_service: AIService = Depends(get_user_ai_service)
+):
+    """AI生成剧情线"""
+    
+    from app.services.plot_generation_service import PlotGenerationService
+    
+    # 记录MCP状态日志
+    mcp_status = "启用MCP" if generate_data.enable_mcp else "禁用MCP"
+    logger.info(f"🎯 [剧情线生成] 项目 {generate_data.project_id}（{mcp_status}）")
+    logger.info(f"  - DEBUG: enable_mcp={generate_data.enable_mcp}, selected_plugins={generate_data.selected_plugins}")
+    if generate_data.enable_mcp and generate_data.selected_plugins:
+        logger.info(f"  - 选择的插件：{generate_data.selected_plugins}")
+    logger.info(f"  - 大纲ID：{generate_data.story_outline_id or '无'}")
+    logger.info(f"  - 剧情线类型：{generate_data.line_type}")
+    logger.info(f"  - 生成数量：{generate_data.count}条")
+    
+    try:
+        # 使用用户配置的 AI 服务创建生成服务实例
+        plot_generation_service = PlotGenerationService(user_ai_service)
+        
+        # 调用生成服务
+        lines = await plot_generation_service.generate_plot_lines(
+            db=db,
+            project_id=generate_data.project_id,
+            outline_id=generate_data.story_outline_id,
+            line_type=generate_data.line_type,
+            based_on_cards=generate_data.based_on_cards,
+            based_on_lines=generate_data.based_on_lines,
+            custom_prompt=generate_data.prompt,
+            count=generate_data.count,
+            enable_mcp=generate_data.enable_mcp,
+            selected_plugins=generate_data.selected_plugins,
+            user_id=getattr(request.state, 'user_id', None)
+        )
+        
+        responses: List[PlotLineResponse] = []
+        for line in lines:
+            responses.append(await _serialize_plot_line(db, line))
+
+        return responses
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        # 特殊处理 MCP 异常
+        from app.exceptions import MCPToolNotTriggeredError, MCPPlanningFailedError
+
+        if isinstance(e, MCPToolNotTriggeredError):
+            # 简化日志：底层已记录详细信息
+            logger.warning("⚠️ MCP 工具未触发，返回 400 错误")
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "mcp_tool_not_triggered",
+                    "message": str(e),
+                    "suggestion": "请检查 MCP 插件选择，或禁用 MCP 后重试"
+                }
+            )
+        elif isinstance(e, MCPPlanningFailedError):
+            # 简化日志：底层已记录详细信息
+            logger.warning("⚠️ MCP 规划失败，返回 500 错误")
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": "mcp_planning_failed",
+                    "message": str(e),
+                    "suggestion": "MCP 规划阶段失败，请稍后重试或联系管理员"
+                }
+            )
+        else:
+            raise HTTPException(status_code=500, detail=f"生成失败: {str(e)}")
+
+
+@router.get("/project/{project_id}/types")
+async def get_line_types(project_id: str, db: AsyncSession = Depends(get_db)):
+    """获取项目中使用的剧情线类型"""
+    
+    result = await db.execute(
+        select(PlotLine.line_type, func.count(PlotLine.id).label('count'))
+        .where(PlotLine.project_id == project_id)
+        .group_by(PlotLine.line_type)
+        .order_by(func.count(PlotLine.id).desc())
+    )
+    
+    types = result.all()
+    
+    return {
+        "types": [{"type": t.line_type, "count": t.count} for t in types]
+    }
+
+
+@router.post("/{line_id}/add-cards")
+async def add_cards_to_line(
+    line_id: str,
+    card_ids: List[str],
+    db: AsyncSession = Depends(get_db)
+):
+    """向剧情线添加剧情卡片"""
+    
+    try:
+        result = await PlotLinkService.add_cards_to_plot_line(
+            db=db,
+            plot_line_id=line_id,
+            card_ids=card_ids
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"添加失败: {str(e)}")
+
+
+@router.delete("/{line_id}/remove-cards")
+async def remove_cards_from_line(
+    line_id: str,
+    card_ids: List[str],
+    db: AsyncSession = Depends(get_db)
+):
+    """从剧情线移除剧情卡片"""
+    
+    try:
+        result = await PlotLinkService.remove_cards_from_plot_line(
+            db=db,
+            plot_line_id=line_id,
+            card_ids=card_ids
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"移除失败: {str(e)}")
+
+
+
+# ============================================
+# 剧情线关联管理 API
+# ============================================
+
+@router.get("/{line_id}/chapter-outlines", response_model=List[ChapterOutlineWithLinks])
+async def get_plot_line_chapter_outlines(
+    line_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """获取剧情线关联的所有章纲（优化版 - 解决N+1查询）"""
+    
+    # 检查剧情线是否存在
+    line_result = await db.execute(select(PlotLine).where(PlotLine.id == line_id))
+    line = line_result.scalar_one_or_none()
+    
+    if not line:
+        raise HTTPException(status_code=404, detail=f"剧情线不存在: {line_id}")
+    
+    # 优化：使用子查询一次性获取所有统计信息
+    # 子查询：每个章纲的剧情线数量
+    plot_line_count_subq = (
+        select(
+            ChapterOutlinePlotLineLink.chapter_outline_id,
+            func.count(ChapterOutlinePlotLineLink.id).label('plot_line_count')
+        )
+        .group_by(ChapterOutlinePlotLineLink.chapter_outline_id)
+        .subquery()
+    )
+    
+    # 子查询：每个章纲的剧情卡片数量
+    card_count_subq = (
+        select(
+            PlotCardChapterOutlineLink.chapter_outline_id,
+            func.count(PlotCardChapterOutlineLink.id).label('card_count')
+        )
+        .group_by(PlotCardChapterOutlineLink.chapter_outline_id)
+        .subquery()
+    )
+    
+    # 主查询：一次性获取所有数据
+    query = (
+        select(
+            ChapterOutline,
+            func.coalesce(plot_line_count_subq.c.plot_line_count, 0).label('plot_line_count'),
+            func.coalesce(card_count_subq.c.card_count, 0).label('card_count')
+        )
+        .join(
+            ChapterOutlinePlotLineLink,
+            ChapterOutline.id == ChapterOutlinePlotLineLink.chapter_outline_id
+        )
+        .outerjoin(
+            plot_line_count_subq,
+            ChapterOutline.id == plot_line_count_subq.c.chapter_outline_id
+        )
+        .outerjoin(
+            card_count_subq,
+            ChapterOutline.id == card_count_subq.c.chapter_outline_id
+        )
+        .where(ChapterOutlinePlotLineLink.plot_line_id == line_id)
+        .order_by(ChapterOutline.chapter_number.asc())
+    )
+    
+    result = await db.execute(query)
+    rows = result.all()
+    
+    # 构建响应
+    chapter_outlines = [
+        ChapterOutlineWithLinks(
+            id=row[0].id,
+            chapter_number=row[0].chapter_number,
+            title=row[0].title,
+            summary=row[0].summary,
+            plot_line_count=row[1],
+            card_count=row[2]
+        )
+        for row in rows
+    ]
+    
+    return chapter_outlines
+
+
+@router.get("/{line_id}/plot-cards", response_model=List[PlotCardWithLinks])
+async def get_plot_line_plot_cards(
+    line_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """获取剧情线关联的所有剧情卡片（优化版 - 解决N+1查询）"""
+    
+    # 检查剧情线是否存在
+    line_result = await db.execute(select(PlotLine).where(PlotLine.id == line_id))
+    line = line_result.scalar_one_or_none()
+    
+    if not line:
+        raise HTTPException(status_code=404, detail=f"剧情线不存在: {line_id}")
+    
+    # 优化：使用子查询一次性获取所有统计信息
+    # 子查询：每个卡片的剧情线数量
+    line_count_subq = (
+        select(
+            PlotCardPlotLineLink.plot_card_id,
+            func.count(PlotCardPlotLineLink.id).label('plot_line_count')
+        )
+        .group_by(PlotCardPlotLineLink.plot_card_id)
+        .subquery()
+    )
+    
+    # 子查询：每个卡片的章纲数量
+    chapter_count_subq = (
+        select(
+            PlotCardChapterOutlineLink.plot_card_id,
+            func.count(PlotCardChapterOutlineLink.id).label('chapter_count')
+        )
+        .group_by(PlotCardChapterOutlineLink.plot_card_id)
+        .subquery()
+    )
+    
+    # 主查询：一次性获取所有数据
+    query = (
+        select(
+            PlotCard,
+            func.coalesce(line_count_subq.c.plot_line_count, 0).label('plot_line_count'),
+            func.coalesce(chapter_count_subq.c.chapter_count, 0).label('chapter_count')
+        )
+        .join(
+            PlotCardPlotLineLink,
+            PlotCard.id == PlotCardPlotLineLink.plot_card_id
+        )
+        .outerjoin(
+            line_count_subq,
+            PlotCard.id == line_count_subq.c.plot_card_id
+        )
+        .outerjoin(
+            chapter_count_subq,
+            PlotCard.id == chapter_count_subq.c.plot_card_id
+        )
+        .where(PlotCardPlotLineLink.plot_line_id == line_id)
+        .order_by(PlotCard.order_index.asc())
+    )
+    
+    result = await db.execute(query)
+    rows = result.all()
+    
+    # 构建响应
+    plot_cards = [
+        PlotCardWithLinks(
+            id=row[0].id,
+            title=row[0].title,
+            content=row[0].content,
+            card_type=row[0].card_type,
+            plot_line_count=row[1],
+            chapter_count=row[2]
+        )
+        for row in rows
+    ]
+    
+    return plot_cards
+
+
+@router.post("/{line_id}/link-chapter-outlines")
+async def link_chapter_outlines_to_plot_line(
+    line_id: str,
+    request: LinkChapterOutlinesRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """将章纲关联到剧情线"""
+    
+    # 检查剧情线是否存在
+    line_result = await db.execute(select(PlotLine).where(PlotLine.id == line_id))
+    line = line_result.scalar_one_or_none()
+    
+    if not line:
+        raise HTTPException(status_code=404, detail=f"剧情线不存在: {line_id}")
+    
+    # 验证章纲存在且属于同一项目（跨项目校验）
+    outlines_result = await db.execute(
+        select(ChapterOutline).where(
+            ChapterOutline.id.in_(request.chapter_outline_ids),
+            ChapterOutline.project_id == line.project_id  # 添加项目归属校验
+        )
+    )
+    existing_outlines = {outline.id: outline for outline in outlines_result.scalars().all()}
+    
+    # 检查是否有无效的ID（不存在或不属于同一项目）
+    invalid_ids = set(request.chapter_outline_ids) - set(existing_outlines.keys())
+    if invalid_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=f"以下章纲不存在或不属于该项目: {', '.join(list(invalid_ids)[:5])}"
+        )
+    
+    # 创建关联
+    created_count = 0
+    skipped_count = 0
+    
+    for outline_id in request.chapter_outline_ids:
+        # 检查是否已存在关联
+        existing_link = await db.execute(
+            select(ChapterOutlinePlotLineLink).where(
+                ChapterOutlinePlotLineLink.chapter_outline_id == outline_id,
+                ChapterOutlinePlotLineLink.plot_line_id == line_id
+            )
+        )
+        
+        if existing_link.scalar_one_or_none():
+            skipped_count += 1
+            continue  # 跳过已存在的关联
+        
+        # 创建新关联
+        link = ChapterOutlinePlotLineLink(
+            chapter_outline_id=outline_id,
+            plot_line_id=line_id,
+            role=request.role
+        )
+        db.add(link)
+        created_count += 1
+    
+    await db.commit()
+    
+    return {
+        "message": f"成功关联 {created_count} 个章纲到剧情线",
+        "created_count": created_count,
+        "skipped_count": skipped_count
+    }
+
+
+@router.delete("/{line_id}/unlink-chapter-outlines")
+async def unlink_chapter_outlines_from_plot_line(
+    line_id: str,
+    request: UnlinkRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """取消章纲与剧情线的关联"""
+    
+    # 检查剧情线是否存在
+    line_result = await db.execute(select(PlotLine).where(PlotLine.id == line_id))
+    line = line_result.scalar_one_or_none()
+    
+    if not line:
+        raise HTTPException(status_code=404, detail=f"剧情线不存在: {line_id}")
+    
+    # 删除关联
+    result = await db.execute(
+        delete(ChapterOutlinePlotLineLink).where(
+            ChapterOutlinePlotLineLink.plot_line_id == line_id,
+            ChapterOutlinePlotLineLink.chapter_outline_id.in_(request.ids)
+        )
+    )
+    
+    await db.commit()
+    
+    return {
+        "message": f"成功取消 {result.rowcount} 个章纲的关联",
+        "removed_count": result.rowcount
+    }
+
+
+@router.post("/{line_id}/link-plot-cards")
+async def link_plot_cards_to_plot_line(
+    line_id: str,
+    request: LinkPlotCardsToLineRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """将剧情卡片关联到剧情线"""
+    
+    # 检查剧情线是否存在
+    line_result = await db.execute(select(PlotLine).where(PlotLine.id == line_id))
+    line = line_result.scalar_one_or_none()
+    
+    if not line:
+        raise HTTPException(status_code=404, detail=f"剧情线不存在: {line_id}")
+    
+    # 验证剧情卡片存在且属于同一项目（跨项目校验）
+    cards_result = await db.execute(
+        select(PlotCard).where(
+            PlotCard.id.in_(request.plot_card_ids),
+            PlotCard.project_id == line.project_id  # 添加项目归属校验
+        )
+    )
+    existing_cards = {card.id: card for card in cards_result.scalars().all()}
+    
+    # 检查是否有无效的ID
+    invalid_ids = set(request.plot_card_ids) - set(existing_cards.keys())
+    if invalid_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=f"以下剧情卡片不存在或不属于该项目: {', '.join(list(invalid_ids)[:5])}"
+        )
+    
+    # 创建关联
+    created_count = 0
+    skipped_count = 0
+    
+    for card_id in request.plot_card_ids:
+        # 检查是否已存在关联
+        existing_link = await db.execute(
+            select(PlotCardPlotLineLink).where(
+                PlotCardPlotLineLink.plot_card_id == card_id,
+                PlotCardPlotLineLink.plot_line_id == line_id
+            )
+        )
+        
+        if existing_link.scalar_one_or_none():
+            skipped_count += 1
+            continue  # 跳过已存在的关联
+        
+        # 创建新关联
+        link = PlotCardPlotLineLink(
+            plot_card_id=card_id,
+            plot_line_id=line_id
+        )
+        db.add(link)
+        created_count += 1
+    
+    await db.commit()
+    
+    return {
+        "message": f"成功关联 {created_count} 个剧情卡片到剧情线",
+        "created_count": created_count,
+        "skipped_count": skipped_count
+    }
+
+
+@router.delete("/{line_id}/unlink-plot-cards")
+async def unlink_plot_cards_from_plot_line(
+    line_id: str,
+    request: UnlinkRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """取消剧情卡片与剧情线的关联"""
+    
+    # 检查剧情线是否存在
+    line_result = await db.execute(select(PlotLine).where(PlotLine.id == line_id))
+    line = line_result.scalar_one_or_none()
+    
+    if not line:
+        raise HTTPException(status_code=404, detail=f"剧情线不存在: {line_id}")
+    
+    # 删除关联
+    result = await db.execute(
+        delete(PlotCardPlotLineLink).where(
+            PlotCardPlotLineLink.plot_line_id == line_id,
+            PlotCardPlotLineLink.plot_card_id.in_(request.ids)
+        )
+    )
+    
+    await db.commit()
+
+    return {
+        "message": f"成功取消 {result.rowcount} 个剧情卡片的关联",
+        "removed_count": result.rowcount
+    }
+
+
+@router.get("/{line_id}/progress")
+async def get_plot_line_progress(
+    line_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """获取剧情线的节点覆盖进度
+
+    返回剧情线的整体进度和各节点的覆盖情况。
+
+    Args:
+        line_id: 剧情线ID
+
+    Returns:
+        {
+            "plot_line_id": "...",
+            "plot_line_title": "...",
+            "has_beats": true/false,
+            "total_progress": 0.45,  # 整体进度（0-1）
+            "beats": [
+                {
+                    "index": 1,
+                    "key": "opening",
+                    "title": "开端",
+                    "description": "...",
+                    "weight": 0.15,
+                    "coverage": 0.8,  # 该节点覆盖度（0-1）
+                    "status": "completed/in_progress/not_started"
+                }
+            ],
+            "linked_chapters_count": 5  # 关联的章节数量
+        }
+    """
+    # 检查剧情线是否存在
+    line_result = await db.execute(select(PlotLine).where(PlotLine.id == line_id))
+    line = line_result.scalar_one_or_none()
+
+    if not line:
+        raise HTTPException(status_code=404, detail=f"剧情线不存在: {line_id}")
+
+    # 解析剧情线的 timeline_data
+    timeline_data = None
+    beats = None
+
+    if line.timeline_data:
+        try:
+            timeline_data = json.loads(line.timeline_data)
+            beats = timeline_data.get("beats", [])
+        except Exception as e:
+            logger.error(f"解析剧情线 timeline_data 失败: {e}")
+
+    # 如果没有 beats，返回简化的响应
+    if not beats:
+        # 统计关联的章节数量
+        linked_chapters_result = await db.execute(
+            select(func.count(ChapterOutlinePlotLineLink.id)).where(
+                ChapterOutlinePlotLineLink.plot_line_id == line_id
+            )
+        )
+        linked_chapters_count = linked_chapters_result.scalar() or 0
+
+        return {
+            "plot_line_id": line.id,
+            "plot_line_title": line.title,
+            "has_beats": False,
+            "total_progress": None,
+            "beats": [],
+            "linked_chapters_count": linked_chapters_count,
+            "message": "该剧情线尚未定义节点结构（beats），无法计算进度"
+        }
+
+    # 使用 PlotGenerationService 的方法计算进度
+    ai_service = AIService()
+    generation_service = PlotGenerationService(ai_service)
+
+    try:
+        coverage_summary = await generation_service._calculate_beats_coverage(
+            db=db,
+            plot_line_id=line_id,
+            beats=beats
+        )
+
+        # 为每个节点添加状态标记
+        beats_with_status = []
+        for beat_info in coverage_summary.get("beats", []):
+            coverage = beat_info.get("coverage", 0)
+
+            # 确定状态
+            if coverage >= 1.0:
+                status = "completed"
+            elif coverage > 0:
+                status = "in_progress"
+            else:
+                status = "not_started"
+
+            beats_with_status.append({
+                **beat_info,
+                "status": status
+            })
+
+        # 统计关联的章节数量
+        linked_chapters_result = await db.execute(
+            select(func.count(ChapterOutlinePlotLineLink.id)).where(
+                ChapterOutlinePlotLineLink.plot_line_id == line_id
+            )
+        )
+        linked_chapters_count = linked_chapters_result.scalar() or 0
+
+        return {
+            "plot_line_id": line.id,
+            "plot_line_title": line.title,
+            "has_beats": True,
+            "total_progress": coverage_summary.get("total_progress", 0),
+            "beats": beats_with_status,
+            "linked_chapters_count": linked_chapters_count
+        }
+
+    except Exception as e:
+        logger.error(f"计算剧情线进度失败: {e}")
+        raise HTTPException(status_code=500, detail=f"计算进度失败: {str(e)}")
+
+
+# ============================================
+# 时间线编辑 API
+# ============================================
+
+@router.put("/{line_id}/timeline", response_model=PlotLineResponse)
+async def update_plot_line_timeline(
+    line_id: str,
+    timeline_data: TimelineDataUpdate,
+    db: AsyncSession = Depends(get_db)
+):
+    """更新剧情线的时间线数据
+
+    更新剧情线的 timeline_data 字段，包括结构(structure)和节点(beats)。
+
+    Args:
+        line_id: 剧情线ID
+        timeline_data: 时间线数据，包含 structure 和 beats
+
+    Returns:
+        更新后的剧情线完整信息
+
+    Raises:
+        404: 剧情线不存在
+        400: beats 权重总和不为 1.0
+        400: beat index 重复
+    """
+    # 检查剧情线是否存在
+    result = await db.execute(select(PlotLine).where(PlotLine.id == line_id))
+    line = result.scalar_one_or_none()
+
+    if not line:
+        raise HTTPException(status_code=404, detail="剧情线不存在")
+
+    # 将 TimelineDataUpdate 转为 JSON 字符串
+    timeline_json = json.dumps(timeline_data.model_dump(), ensure_ascii=False)
+
+    # 更新 timeline_data 字段
+    await db.execute(
+        update(PlotLine)
+        .where(PlotLine.id == line_id)
+        .values(timeline_data=timeline_json)
+    )
+    await db.commit()
+    await db.refresh(line)
+
+    logger.info(f"✅ 剧情线 {line.title} 的时间线数据已更新")
+
+    # 返回更新后的剧情线
+    return await _serialize_plot_line(db, line)

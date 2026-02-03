@@ -1,0 +1,78 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.eslintcache
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 环境变量文件
+.env
+.env.local
+.env.*.local
+
+# 数据库文件（不包含在镜像中）
+data/*.db
+backend/data/*.db
+postgres_data/
+
+# ChromaDB数据库（不包含在镜像中，会在运行时生成）
+backend/data/chroma_db/
+
+
+# 日志文件
+logs/
+*.log
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# 文档
+docs/
+*.md
+!README.md
+
+# 测试
+tests/
+test/
+*.test.js
+*.spec.js
+
+# 前端构建文件（会在Docker内部构建）
+frontend/dist/
+frontend/build/
+
+# 后端静态文件（会从前端构建阶段复制）
+backend/static/
+
+# Docker相关
+Dockerfile
+.dockerignore
+docker-compose*.yml

@@ -1,0 +1,35 @@
+# MuMuAINovel 配置文件
+# 修改后需要重启应用才能生效
+
+[database]
+# PostgreSQL 数据库连接
+# 格式：postgresql+asyncpg://用户名:密码@主机:端口/数据库名
+# 示例：postgresql+asyncpg://mumuai:mumuai123@localhost:5432/mumuai_novel
+url = postgresql+asyncpg://mumuai:mumuai123@localhost:5432/mumuai_novel
+
+[app]
+# 应用配置
+host = 0.0.0.0
+port = 8000
+debug = false
+
+[ai]
+# AI 服务配置（可选）
+# OpenAI 配置
+openai_api_key = 
+openai_base_url = 
+
+# Anthropic Claude 配置
+anthropic_api_key = 
+anthropic_base_url = 
+
+# Google Gemini 配置
+gemini_api_key = 
+gemini_base_url = 
+
+[auth]
+# 本地账户登录配置
+local_auth_enabled = true
+local_auth_username = admin
+local_auth_password = admin123
+
