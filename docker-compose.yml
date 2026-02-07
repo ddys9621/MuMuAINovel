@@ -81,6 +81,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-mumuai_novel}
       POSTGRES_USER: ${POSTGRES_USER:-mumuai}
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      DATABASE_URL: ${DATABASE_URL:-}
 
       DATABASE_POOL_SIZE: ${DATABASE_POOL_SIZE:-30}
       DATABASE_MAX_OVERFLOW: ${DATABASE_MAX_OVERFLOW:-20}
@@ -118,8 +119,6 @@ services:
       SESSION_REFRESH_THRESHOLD_MINUTES: ${SESSION_REFRESH_THRESHOLD_MINUTES:-30}
     command: >
       /bin/sh -c "set -e;
-      POSTGRES_PASSWORD=$$(cat $${POSTGRES_PASSWORD_FILE});
-      export DATABASE_URL=postgresql+asyncpg://$${POSTGRES_USER}:$${POSTGRES_PASSWORD}@$${POSTGRES_HOST}:$${POSTGRES_PORT}/$${POSTGRES_DB};
       if [ -n \"$${LOCAL_AUTH_PASSWORD_FILE:-}\" ] && [ -f \"$${LOCAL_AUTH_PASSWORD_FILE}\" ]; then export LOCAL_AUTH_PASSWORD=$$(cat $${LOCAL_AUTH_PASSWORD_FILE}); fi;
       exec python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
     restart: unless-stopped

@@ -14,11 +14,13 @@ DATA_DIR.mkdir(exist_ok=True)
 config_logger = logging.getLogger(__name__)
 
 # 数据库配置：PostgreSQL
-# 从环境变量获取数据库URL
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://aaaa:962106@localhost:5432/6666")
+# 从环境变量获取数据库URL（必须显式配置，缺失时启动失败）
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("环境变量 DATABASE_URL 未配置，请在 .env 中设置有效的 PostgreSQL 连接串")
 
-config_logger.debug(f"数据库类型: PostgreSQL")
-config_logger.debug(f"数据库URL: {DATABASE_URL}")
+config_logger.debug("数据库类型: PostgreSQL")
+config_logger.debug("数据库URL已配置: yes")
 
 class Settings(BaseSettings):
     """应用配置"""

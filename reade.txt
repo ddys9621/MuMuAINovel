@@ -1,0 +1,6 @@
+2026-02-07
+- 安全修复：移除 backend/app/config.py 与 backend/start_app.py 中 DATABASE_URL 的不安全默认回退，改为缺失即报错。
+- 部署修复：调整 docker-compose.yml，删除运行时拼接 DATABASE_URL 的逻辑，改为从 .env 显式读取 DATABASE_URL。
+- 配置补充：在 .env.example 新增 DATABASE_URL 示例并提示密码需进行 URL 编码。
+- 脚本增强：deploy.sh 与 deploy.ps1 新增 DATABASE_URL 有效性校验（空值或占位值阻断部署）。
+- 文档统一：README.md 将“backend/.env”旧流程改为“顶层 .env + secrets”流程，并补充 URL 编码注意事项。
