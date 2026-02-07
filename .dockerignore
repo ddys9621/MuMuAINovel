@@ -73,6 +73,7 @@ frontend/build/
 backend/static/
 
 # Docker相关
-Dockerfile
 .dockerignore
-docker-compose*.yml
+
+# Secrets（运行时挂载，不进入构建上下文）
+secrets/*.txt

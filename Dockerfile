@@ -32,9 +32,11 @@ WORKDIR /app
 RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources \
     && sed -i 's/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
 
-# 安装系统依赖
-RUN apt-get update && apt-get install -y \
+# 安装系统依赖并创建非root用户
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    && groupadd -r appgroup \
+    && useradd -r -g appgroup -d /app -s /usr/sbin/nologin appuser \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制后端依赖文件
@@ -52,26 +54,28 @@ COPY backend/ ./
 # 从前端构建阶段复制构建好的静态文件
 COPY --from=frontend-builder /frontend/dist ./static
 
-# 创建必要的目录
-RUN mkdir -p /app/data /app/logs /app/embedding
+# 创建必要的目录并授权
+RUN mkdir -p /app/data /app/logs /app/embedding \
+    && chown -R appuser:appgroup /app
 
 # 复制预下载的Embedding模型到独立目录（避免被docker-compose的data挂载覆盖）
 # 这样可以避免首次运行时联网下载约420MB的模型文件
-COPY backend/embedding /app/embedding
+COPY --chown=appuser:appgroup backend/embedding /app/embedding
+
+# 设置环境变量
+ENV PYTHONUNBUFFERED=1 \
+    APP_HOST=0.0.0.0 \
+    APP_PORT=8000 \
+    TRANSFORMERS_OFFLINE=1 \
+    HF_DATASETS_OFFLINE=1 \
+    HF_HUB_OFFLINE=1 \
+    SENTENCE_TRANSFORMERS_HOME=/app/embedding
+
+# 使用非root用户运行
+USER appuser
 
 # 暴露端口
 EXPOSE 8000
-
-# 设置环境变量
-ENV PYTHONUNBUFFERED=1
-ENV APP_HOST=0.0.0.0
-ENV APP_PORT=8000
-
-# 设置Transformers和Sentence-Transformers离线模式
-ENV TRANSFORMERS_OFFLINE=1
-ENV HF_DATASETS_OFFLINE=1
-ENV HF_HUB_OFFLINE=1
-ENV SENTENCE_TRANSFORMERS_HOME=/app/embedding
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

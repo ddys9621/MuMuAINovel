@@ -1,5 +1,36 @@
 # MuMuAINovel 后端更新记录
 
+## 2026-02-06 容器生产化一键部署改造（方案B）
+
+### 变更概述
+完成 Docker 生产化部署能力建设，新增一键部署脚本、secrets 管理、生产覆盖编排与安全加固。
+
+### 主要变更
+- `docker-compose.yml`
+  - 引入 `env_file` 与 `secrets`，移除明文密码默认值。
+  - 新增 `app_data` 持久化卷，补齐应用数据持久化。
+  - 启动命令改为运行时读取 secrets，动态注入 `DATABASE_URL` 与本地账户密码。
+- `docker-compose.prod.yml`
+  - 新增生产覆盖配置：`mem_limit`、`cpus`、`pids_limit`、日志轮转、安全选项。
+- `Dockerfile`
+  - 切换非 root 用户运行（`appuser`），并补齐目录权限。
+- `.env.example`
+  - 新增生产环境模板，明确变量分组与敏感项通过 secrets 提供。
+- `secrets/README.md`
+  - 新增 secrets 文件规范与跨平台创建示例。
+- `deploy.ps1` / `deploy.sh`
+  - 新增一键部署脚本：环境检查、自动初始化、占位密码拦截、健康检查等待。
+- `README.md`
+  - 新增 Docker 生产部署章节（首启、升级、回滚、备份恢复、排障）。
+- `.dockerignore` / `.gitignore`
+  - 调整忽略规则，保留部署所需文件并防止 secrets 明文入库。
+
+### 验证情况
+- 已完成文件级与IDE诊断检查，无语法告警。
+- 执行 `docker compose ... config` 时，当前环境缺少 Docker 命令，未能完成运行时校验。
+
+---
+
 ## 2025-01-XX 场景级创作循环功能优化（v2.0）
 
 ### 变更概述
