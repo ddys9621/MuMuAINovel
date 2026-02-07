@@ -26,8 +26,10 @@ def check_database_connection():
         from sqlalchemy import text
         from sqlalchemy.ext.asyncio import create_async_engine
 
-        # 从环境变量获取数据库 URL
-        database_url = os.getenv('DATABASE_URL', 'postgresql+asyncpg://aaaa:962106@localhost:5432/6666')
+        # 从环境变量获取数据库 URL（必须显式配置）
+        database_url = os.getenv('DATABASE_URL')
+        if not database_url:
+            return False, "环境变量 DATABASE_URL 未配置，请在 .env 中设置有效的 PostgreSQL 连接串"
 
         async def test_connection():
             engine = create_async_engine(database_url, echo=False)

@@ -47,6 +47,12 @@ if [[ "$postgres_pwd" == CHANGE_ME* || "$local_pwd" == CHANGE_ME* ]]; then
   exit 1
 fi
 
+database_url="$(grep -E '^DATABASE_URL=' .env | tail -n 1 | cut -d'=' -f2- | tr -d '\r\n')"
+if [[ -z "$database_url" || "$database_url" == *REPLACE_WITH_URLENCODED_PASSWORD* ]]; then
+  echo "检测到无效 DATABASE_URL，请在 .env 中配置有效连接串（并将密码做 URL 编码）" >&2
+  exit 1
+fi
+
 log "启动容器"
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 

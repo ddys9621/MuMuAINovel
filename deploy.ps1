@@ -52,6 +52,12 @@ if ($postgresPwd -like 'CHANGE_ME*' -or $localPwd -like 'CHANGE_ME*') {
   throw "Placeholder passwords detected. Update secrets/*.txt before deployment."
 }
 
+$databaseUrlLine = (Get-Content '.env' | Where-Object { $_ -match '^DATABASE_URL=' } | Select-Object -Last 1)
+$databaseUrl = if ($databaseUrlLine) { $databaseUrlLine.Substring('DATABASE_URL='.Length).Trim() } else { '' }
+if ([string]::IsNullOrWhiteSpace($databaseUrl) -or $databaseUrl -like '*REPLACE_WITH_URLENCODED_PASSWORD*') {
+  throw "Invalid DATABASE_URL detected. Configure a valid DSN in .env with URL-encoded password."
+}
+
 $composeArgs = @('-f', 'docker-compose.yml', '-f', 'docker-compose.prod.yml', 'up', '-d')
 if (-not $NoBuild) {
   $composeArgs += '--build'

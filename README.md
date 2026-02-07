@@ -186,23 +186,23 @@ cat backup.sql | docker exec -i mumuainovel-postgres psql -U "$POSTGRES_USER" -d
      ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO mumuai;
      ```
 
-5. **配置 `backend/.env`**
-   - 将 `backend/.env.example` 复制为 `.env`，并至少设置：
+5. **容器部署配置（顶层 `.env`）**
+   - 复制根目录 `.env.example` 为 `.env`，并至少设置：
      ```env
      POSTGRES_DB=mumuai_novel
      POSTGRES_USER=mumuai
-     POSTGRES_PASSWORD=mumuai123
      POSTGRES_PORT=5432
-     DATABASE_URL=postgresql+asyncpg://mumuai:mumuai123@localhost:5432/mumuai_novel
+     DATABASE_URL=postgresql+asyncpg://mumuai:URL_ENCODED_PASSWORD@postgres:5432/mumuai_novel
      ```
-   - 如果数据库部署在远程服务器，替换 `localhost` 与端口即可。
+   - 密码若包含 `@`、`:`、`/`、`#` 等特殊字符，必须先做 URL 编码。
+   - 本项目 Docker 部署密码请通过 `secrets/*.txt` 管理，不建议在 `.env` 明文保存真实密码。
 
 
 7. **常见故障排查**
-   - **认证失败**：确认 `.env` 中的用户名/密码与步骤 2 设置的一致。
+   - **认证失败**：确认 `secrets/*.txt` 与 `.env` 配置一致，且不是 `CHANGE_ME` 占位值。
    - **连接被拒绝**：检查 PostgreSQL 服务是否启动、端口是否被占用或防火墙阻断。
    - **权限不足**：确保数据库所有者为目标用户，或重新执行第 4 步的 GRANT 语句。
-   - **`DATABASE_URL` 格式错误**：必须以 `postgresql+asyncpg://用户:密码@主机:端口/数据库` 形式书写。
+   - **`DATABASE_URL` 格式错误**：必须以 `postgresql+asyncpg://用户:密码@主机:端口/数据库` 形式书写，且密码需 URL 编码。
 
 
 ### Q: Python 或 Node.js 命令不识别
