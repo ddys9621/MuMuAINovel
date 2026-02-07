@@ -25,6 +25,7 @@ New-Item -ItemType Directory -Force -Path $RELEASE_DIR | Out-Null
 New-Item -ItemType Directory -Force -Path "$RELEASE_DIR\backend" | Out-Null
 New-Item -ItemType Directory -Force -Path "$RELEASE_DIR\frontend" | Out-Null
 New-Item -ItemType Directory -Force -Path "$RELEASE_DIR\docs" | Out-Null
+New-Item -ItemType Directory -Force -Path "$RELEASE_DIR\secrets" | Out-Null
 
 # Copy root directory files
 Write-Host "`n[3/6] Copying root files..." -ForegroundColor Yellow
@@ -33,6 +34,10 @@ $rootFiles = @(
     "LICENSE",
     "Dockerfile",
     "docker-compose.yml",
+    "docker-compose.prod.yml",
+    ".env.example",
+    "deploy.ps1",
+    "deploy.sh",
     "config.ini.template",
     "setup_database.ps1"
 )
@@ -47,6 +52,12 @@ foreach ($file in $rootFiles) {
 if (Test-Path "docs") {
     Copy-Item -Recurse "docs\*" "$RELEASE_DIR\docs\" -Force
     Write-Host "  + docs\" -ForegroundColor Green
+}
+
+# Copy secrets template docs
+if (Test-Path "secrets\README.md") {
+    Copy-Item "secrets\README.md" "$RELEASE_DIR\secrets\" -Force
+    Write-Host "  + secrets\README.md" -ForegroundColor Green
 }
 
 # Copy backend files (excluding unnecessary files)

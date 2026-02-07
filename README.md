@@ -42,8 +42,94 @@
    - 前端地址：http://localhost:5173
    - 后端API：http://localhost:8000
    - API文档：http://localhost:8000/docs
-   - 如需配置AI功能，请编辑 `backend\.env` 文件
+   - 如需配置AI功能，请编辑根目录 `.env` 文件（容器部署）或 `backend/.env` 文件（本地开发）
 
+
+## 🐳 Docker 生产部署（推荐服务器）
+
+### 1) 准备配置与密钥
+
+```bash
+cp .env.example .env
+mkdir -p secrets
+# 写入强密码（仅一行）
+echo "请替换为强密码" > secrets/postgres_password.txt
+echo "请替换为强密码" > secrets/local_auth_password.txt
+```
+
+Windows 可直接执行：
+
+```powershell
+./deploy.ps1
+```
+
+Linux/macOS 可执行：
+
+```bash
+chmod +x deploy.sh
+./deploy.sh
+```
+
+> 首次执行会自动检查 Docker / Compose、补齐缺失文件并等待健康检查通过。
+
+### 2) 手动部署命令（等价）
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+```
+
+### 3) 常用运维命令
+
+```bash
+# 查看服务状态
+docker compose ps
+
+# 查看实时日志
+docker compose logs -f mumuainovel
+docker compose logs -f postgres
+
+# 重启服务
+docker compose restart mumuainovel
+
+# 停止服务
+docker compose down
+```
+
+### 4) 升级流程
+
+```bash
+# 1. 拉取最新代码
+# 2. 按需更新 .env 与 secrets
+# 3. 重建并启动
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+```
+
+### 5) 回滚流程（快速）
+
+- 使用上一版本代码目录重新执行同样的 `compose up -d --build`。
+- 若需回滚数据，请先恢复数据库备份后再启动应用。
+
+### 6) 备份与恢复（PostgreSQL）
+
+备份：
+
+```bash
+docker exec -t mumuainovel-postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup.sql
+```
+
+恢复：
+
+```bash
+cat backup.sql | docker exec -i mumuainovel-postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+```
+
+### 7) 排障清单
+
+1. `docker compose ps` 查看是否有容器退出。
+2. `docker compose logs -f` 查看报错栈。
+3. 检查 `secrets/*.txt` 是否仍是 `CHANGE_ME` 占位值。
+4. 检查 `.env` 中端口是否冲突（`APP_PORT` / `POSTGRES_PORT`）。
+5. 验证健康检查：`http://localhost:8000/health`。
 
 ## 📋 详细安装步骤
 

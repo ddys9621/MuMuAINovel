@@ -41,6 +41,8 @@ env/
 .env
 .env.local
 .env.*.local
+secrets/*.txt
+!secrets/README.md
 
 # Database files
 *.db

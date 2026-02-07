@@ -1,0 +1,33 @@
+services:
+  postgres:
+    restart: always
+    mem_limit: 1g
+    cpus: 1.0
+    pids_limit: 200
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  mumuainovel:
+    restart: always
+    mem_limit: 2g
+    cpus: 2.0
+    pids_limit: 512
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+
