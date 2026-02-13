@@ -1,3 +1,25 @@
+2026-02-15
+- 登录页UI重构：从居中卡片式改为左右分栏布局（参考子比主题风格）
+- 左侧品牌展示区：freshTheme渐变背景（樱花粉→薰衣草紫→薄荷绿）、Logo、产品名、Slogan、6项特性列表、装饰光晕
+- 右侧登录表单区：白色背景、freshTheme配色输入框和按钮，与首页风格统一
+- 移动端响应式：≤768px左侧隐藏，右侧全屏居中显示
+- fresh.css新增登录页响应式CSS类（.login-container / .login-left-panel / .login-right-panel）
+- 移除旧深色系配色（#2b5876→#4e4376），全面统一为freshTheme设计令牌
+
+2026-02-14
+- 首页UI优化：移除两个占位过大的快捷入口卡片（灵感模式、向导创建），合并为WelcomeHeader中的内联按钮组
+- WelcomeHeader按钮样式优化：灵感模式使用樱花粉渐变，向导创建使用薰衣草紫渐变
+- 清理WelcomeHeader中未使用的PlusOutlined import
+- UserMenu优化：头像+用户名单行精简，移除副标题行，Avatar缩小至28px，适配freshTheme主题色，移除Space import
+
+2026-02-13
+- UI重构：首页全面升级为文艺清新风格
+- 新增设计令牌系统 (theme.ts)：定义统一色彩、间距、阴影、圆角
+- 新增全局样式 (fresh.css)：CSS变量、动画效果、响应式布局
+- 新增组件：WelcomeHeader 欢迎头部、StatsCard 统计卡片、FreshCard 项目卡片
+- 重构 ProjectList.tsx：应用新设计系统，保留所有原有功能
+- 色彩系统：樱花粉、薄荷绿、天空蓝、薰衣草紫、奶油白
+
 2026-02-07
 - 安全修复：移除 backend/app/config.py 与 backend/start_app.py 中 DATABASE_URL 的不安全默认回退，改为缺失即报错。
 - 部署修复：调整 docker-compose.yml，删除运行时拼接 DATABASE_URL 的逻辑，改为从 .env 显式读取 DATABASE_URL。

@@ -1,0 +1,317 @@
+/**
+ * 文艺清新风格全局样式
+ * Fresh & Artsy Global Styles
+ */
+
+/* ===== CSS 变量定义 ===== */
+:root {
+  /* 主色调 */
+  --fresh-sakura: #FFD6E0;
+  --fresh-mint: #B8E6D4;
+  --fresh-sky: #A8D8EA;
+  --fresh-lavender: #D4B8E6;
+  --fresh-cream: #FFF8F0;
+
+  /* 文字颜色 */
+  --fresh-text-primary: #5D5A6D;
+  --fresh-text-secondary: #8A8699;
+  --fresh-text-light: #B8B4C4;
+
+  /* 背景颜色 */
+  --fresh-bg-card: #FEFEFE;
+  --fresh-bg-border: #E8E4ED;
+  --fresh-bg-hover: #F8F6FA;
+
+  /* 阴影 */
+  --fresh-shadow-soft: 0 2px 12px rgba(93, 90, 109, 0.08);
+  --fresh-shadow-medium: 0 4px 20px rgba(93, 90, 109, 0.1);
+  --fresh-shadow-hover: 0 8px 32px rgba(93, 90, 109, 0.15);
+
+  /* 圆角 */
+  --fresh-radius-sm: 8px;
+  --fresh-radius-md: 12px;
+  --fresh-radius-lg: 16px;
+  --fresh-radius-xl: 20px;
+
+  /* 渐变 */
+  --fresh-gradient-page: linear-gradient(135deg, #FFF8F0 0%, #F8F6FA 50%, #E8F4F0 100%);
+  --fresh-gradient-header: linear-gradient(135deg, rgba(255, 214, 224, 0.3) 0%, rgba(184, 230, 212, 0.3) 100%);
+  --fresh-gradient-sakura-mint: linear-gradient(135deg, #FFD6E0 0%, #B8E6D4 100%);
+  --fresh-gradient-sky-lavender: linear-gradient(135deg, #A8D8EA 0%, #D4B8E6 100%);
+
+  /* 动画 */
+  --fresh-transition-fast: 0.15s ease;
+  --fresh-transition-normal: 0.3s ease;
+  --fresh-transition-slow: 0.5s ease;
+}
+
+/* ===== 全局基础样式 ===== */
+.fresh-page {
+  background: var(--fresh-gradient-page);
+  min-height: 100vh;
+}
+
+/* ===== 卡片样式 ===== */
+.fresh-card {
+  background: var(--fresh-bg-card);
+  border-radius: var(--fresh-radius-lg);
+  box-shadow: var(--fresh-shadow-medium);
+  border: 1px solid var(--fresh-bg-border);
+  transition: all var(--fresh-transition-normal);
+}
+
+.fresh-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--fresh-shadow-hover);
+}
+
+/* 卡片顶部渐变条纹 */
+.fresh-card-stripe {
+  height: 6px;
+  border-radius: var(--fresh-radius-lg) var(--fresh-radius-lg) 0 0;
+}
+
+.fresh-card-stripe.sakura {
+  background: linear-gradient(90deg, #FFD6E0, #FFB8C8);
+}
+
+.fresh-card-stripe.mint {
+  background: linear-gradient(90deg, #B8E6D4, #96D4BE);
+}
+
+.fresh-card-stripe.sky {
+  background: linear-gradient(90deg, #A8D8EA, #8AC8D8);
+}
+
+.fresh-card-stripe.lavender {
+  background: linear-gradient(90deg, #D4B8E6, #BC9ED0);
+}
+
+/* ===== 按钮样式 ===== */
+.fresh-btn {
+  border-radius: var(--fresh-radius-md);
+  font-weight: 500;
+  transition: all var(--fresh-transition-fast);
+  border: none;
+  cursor: pointer;
+}
+
+.fresh-btn-primary {
+  background: var(--fresh-gradient-sakura-mint);
+  color: var(--fresh-text-primary);
+}
+
+.fresh-btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--fresh-shadow-soft);
+}
+
+.fresh-btn-secondary {
+  background: var(--fresh-bg-hover);
+  color: var(--fresh-text-secondary);
+}
+
+.fresh-btn-secondary:hover {
+  background: var(--fresh-bg-border);
+}
+
+/* ===== 标签样式 ===== */
+.fresh-tag {
+  border-radius: 20px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.fresh-tag.planning {
+  background: rgba(168, 216, 234, 0.2);
+  color: #6BAFC4;
+}
+
+.fresh-tag.writing {
+  background: rgba(184, 230, 212, 0.3);
+  color: #5BA88A;
+}
+
+.fresh-tag.revising {
+  background: rgba(255, 214, 224, 0.3);
+  color: #C48A9A;
+}
+
+.fresh-tag.completed {
+  background: rgba(212, 184, 230, 0.3);
+  color: #9B7DB0;
+}
+
+/* ===== 进度条样式 ===== */
+.fresh-progress {
+  height: 6px;
+  background: var(--fresh-bg-border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.fresh-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--fresh-mint), var(--fresh-sky));
+  border-radius: 3px;
+  transition: width var(--fresh-transition-normal);
+}
+
+/* ===== 统计卡片样式 ===== */
+.fresh-stats-card {
+  background: var(--fresh-bg-card);
+  border-radius: var(--fresh-radius-lg);
+  padding: 20px;
+  box-shadow: var(--fresh-shadow-soft);
+  transition: all var(--fresh-transition-normal);
+}
+
+.fresh-stats-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--fresh-shadow-medium);
+}
+
+.fresh-stats-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--fresh-radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+}
+
+.fresh-stats-number {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--fresh-text-primary);
+}
+
+.fresh-stats-label {
+  font-size: 14px;
+  color: var(--fresh-text-secondary);
+}
+
+/* ===== 快捷入口卡片 ===== */
+.fresh-quick-entry {
+  border-radius: var(--fresh-radius-xl);
+  padding: 24px;
+  cursor: pointer;
+  transition: all var(--fresh-transition-normal);
+  position: relative;
+  overflow: hidden;
+}
+
+.fresh-quick-entry:hover {
+  transform: translateY(-4px) scale(1.02);
+}
+
+.fresh-quick-entry.inspiration {
+  background: linear-gradient(135deg, #FFD6E0 0%, #FFC4D0 100%);
+}
+
+.fresh-quick-entry.wizard {
+  background: linear-gradient(135deg, #D4B8E6 0%, #C4A0D8 100%);
+}
+
+/* ===== 动画关键帧 ===== */
+@keyframes freshFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes freshSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes freshPulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* 动画类 */
+.fresh-animate-fade-in {
+  animation: freshFadeIn 0.5s ease forwards;
+}
+
+.fresh-animate-slide-up {
+  animation: freshSlideUp 0.6s ease forwards;
+}
+
+/* ===== 欢迎头部样式 ===== */
+.fresh-welcome-header {
+  background: var(--fresh-gradient-header);
+  border-radius: var(--fresh-radius-xl);
+  padding: 32px;
+  margin-bottom: 24px;
+}
+
+.fresh-welcome-title {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--fresh-text-primary);
+  margin-bottom: 8px;
+}
+
+.fresh-welcome-subtitle {
+  font-size: 16px;
+  color: var(--fresh-text-secondary);
+}
+
+/* ===== 登录页左右分栏响应式 ===== */
+@media (max-width: 768px) {
+  .login-container {
+    flex-direction: column !important;
+  }
+
+  .login-left-panel {
+    display: none !important;
+  }
+
+  .login-right-panel {
+    min-height: 100vh !important;
+    background: var(--fresh-gradient-page) !important;
+    padding: 32px 20px !important;
+  }
+}
+
+/* ===== 响应式布局 ===== */
+@media (max-width: 768px) {
+  .fresh-welcome-header {
+    padding: 20px;
+    border-radius: var(--fresh-radius-lg);
+  }
+
+  .fresh-welcome-title {
+    font-size: 22px;
+  }
+
+  .fresh-stats-card {
+    padding: 16px;
+  }
+
+  .fresh-stats-number {
+    font-size: 24px;
+  }
+}

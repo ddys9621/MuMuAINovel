@@ -89,17 +89,16 @@ Set-Location ..
 Print-Step "Step 4: Launch backend and frontend"
 
 Write-Host "Starting backend service..."
-Set-Location backend
-
+$backendDir = (Resolve-Path ".\backend").Path
 $backendScript = @(
+    "Set-Location '$backendDir'",
     "Write-Host 'Backend service running on http://localhost:8000' -ForegroundColor Green",
     "Write-Host 'Press Ctrl+C to stop this window.' -ForegroundColor Yellow",
     "& .venv\Scripts\Activate.ps1",
     ".\\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
 )
-$backendScript | Set-Content "start_backend.ps1"
-Start-Process powershell -ArgumentList "-NoExit", "-File", "start_backend.ps1"
-Set-Location ..
+$backendScript | Set-Content "$backendDir\start_backend.ps1"
+Start-Process powershell -ArgumentList "-NoExit", "-File", "$backendDir\start_backend.ps1"
 
 Write-Host "Starting frontend service..."
 Set-Location frontend

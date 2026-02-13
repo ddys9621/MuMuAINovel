@@ -23,6 +23,7 @@ import Login from './pages/Login';
 import AuthCallback from './pages/AuthCallback';
 import ProtectedRoute from './components/ProtectedRoute';
 import './App.css';
+import './styles/fresh.css';
 
 function App() {
   return (
