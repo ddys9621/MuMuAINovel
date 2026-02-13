@@ -13,14 +13,8 @@ DATA_DIR.mkdir(exist_ok=True)
 # 配置模块使用标准logging（在logger.py初始化之前）
 config_logger = logging.getLogger(__name__)
 
-# 数据库配置：PostgreSQL
-# 从环境变量获取数据库URL（必须显式配置，缺失时启动失败）
-DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    raise RuntimeError("环境变量 DATABASE_URL 未配置，请在 .env 中设置有效的 PostgreSQL 连接串")
-
-config_logger.debug("数据库类型: PostgreSQL")
-config_logger.debug("数据库URL已配置: yes")
+# 数据库配置在 Settings 中通过 pydantic-settings 从 .env 加载
+# 不再在模块顶层用 os.getenv 提前检查，避免 .env 未加载时误报
 
 class Settings(BaseSettings):
     """应用配置"""
@@ -42,8 +36,8 @@ class Settings(BaseSettings):
     # CORS配置
     cors_origins: list[str] = ["http://localhost:8000", "http://127.0.0.1:8000"]
     
-    # 数据库配置 - PostgreSQL
-    database_url: str = DATABASE_URL
+    # 数据库配置 - PostgreSQL（从 .env 的 DATABASE_URL 读取，无默认值，必须配置）
+    database_url: str
     
     # PostgreSQL连接池配置（优化后支持80-150并发用户）
     database_pool_size: int = 30  # 核心连接池大小（从20提升到30）
@@ -112,7 +106,7 @@ class Settings(BaseSettings):
     SESSION_REFRESH_THRESHOLD_MINUTES: int = 30  # 会话刷新阈值（分钟），剩余时间少于此值时可刷新
     
     class Config:
-        env_file = ".env"
+        env_file = str(PROJECT_ROOT / ".env")
         case_sensitive = False
         extra = "ignore"  # 忽略未定义的环境变量，避免验证错误
 

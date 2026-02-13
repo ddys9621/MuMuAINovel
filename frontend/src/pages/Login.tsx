@@ -1,11 +1,22 @@
 import { useEffect, useState } from 'react';
-import { Button, Card, Space, Typography, message, Spin, Form, Input, Tabs } from 'antd';
-import { UserOutlined, LockOutlined } from '@ant-design/icons';
+import { Button, Typography, message, Spin, Form, Input, Tabs } from 'antd';
+import { UserOutlined, LockOutlined, CheckCircleFilled } from '@ant-design/icons';
 import { authApi } from '../services/api';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import AnnouncementModal from '../components/AnnouncementModal';
+import { freshTheme } from '../styles/theme';
 
 const { Title, Paragraph } = Typography;
+
+/* ── 特性列表数据 ── */
+const features = [
+  'AI 驱动的智能小说创作体验',
+  '全面的角色、世界观管理系统',
+  '可视化大纲与章节编辑器',
+  '一键生成，优雅的写作流程',
+  '多种写作风格，自由切换',
+  '独立数据空间，安全可靠',
+];
 
 export default function Login() {
   const navigate = useNavigate();
@@ -17,23 +28,19 @@ export default function Login() {
   const [form] = Form.useForm();
   const [showAnnouncement, setShowAnnouncement] = useState(false);
 
-  // 检查是否已登录和获取认证配置
   useEffect(() => {
     const checkAuth = async () => {
       try {
         await authApi.getCurrentUser();
-        // 已登录，重定向到首页
         const redirect = searchParams.get('redirect') || '/';
         navigate(redirect);
       } catch {
-        // 未登录，获取认证配置
         try {
           const config = await authApi.getAuthConfig();
           setLocalAuthEnabled(config.local_auth_enabled);
           setLinuxdoEnabled(config.linuxdo_enabled);
         } catch (error) {
           console.error('获取认证配置失败:', error);
-          // 默认显示LinuxDO登录
           setLinuxdoEnabled(true);
         }
         setChecking(false);
@@ -46,14 +53,10 @@ export default function Login() {
     try {
       setLoading(true);
       const response = await authApi.localLogin(values.username, values.password);
-      
       if (response.success) {
         message.success('登录成功！');
-        
-        // 检查今天是否已经显示过公告
         const doNotShowUntil = localStorage.getItem('announcement_do_not_show_until');
         const now = new Date().getTime();
-        
         if (!doNotShowUntil || now > parseInt(doNotShowUntil)) {
           setShowAnnouncement(true);
         } else {
@@ -71,14 +74,8 @@ export default function Login() {
     try {
       setLoading(true);
       const response = await authApi.getLinuxDOAuthUrl();
-      
-      // 保存重定向地址到 sessionStorage
       const redirect = searchParams.get('redirect');
-      if (redirect) {
-        sessionStorage.setItem('login_redirect', redirect);
-      }
-      
-      // 跳转到 LinuxDO 授权页面
+      if (redirect) sessionStorage.setItem('login_redirect', redirect);
       window.location.href = response.auth_url;
     } catch (error) {
       console.error('获取授权地址失败:', error);
@@ -87,115 +84,6 @@ export default function Login() {
     }
   };
 
-  if (checking) {
-    return (
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        minHeight: '100vh',
-        background: 'linear-gradient(135deg, #2b5876 0%, #4e4376 100%)',
-      }}>
-        <Spin size="large" style={{ color: '#fff' }} />
-      </div>
-    );
-  }
-
-  // 渲染本地登录表单
-  const renderLocalLogin = () => (
-    <Form
-      form={form}
-      onFinish={handleLocalLogin}
-      size="large"
-      style={{ marginTop: '24px' }}
-    >
-      <Form.Item
-        name="username"
-        rules={[{ required: true, message: '请输入用户名' }]}
-      >
-        <Input
-          prefix={<UserOutlined style={{ color: '#999' }} />}
-          placeholder="用户名"
-          autoComplete="username"
-        />
-      </Form.Item>
-      <Form.Item
-        name="password"
-        rules={[{ required: true, message: '请输入密码' }]}
-      >
-        <Input.Password
-          prefix={<LockOutlined style={{ color: '#999' }} />}
-          placeholder="密码"
-          autoComplete="current-password"
-        />
-      </Form.Item>
-      <Form.Item style={{ marginBottom: 0 }}>
-        <Button
-          type="primary"
-          htmlType="submit"
-          loading={loading}
-          block
-          style={{
-            height: 48,
-            fontSize: 16,
-            fontWeight: 600,
-            background: 'linear-gradient(135deg, #2b5876 0%, #4e4376 100%)',
-            border: 'none',
-            borderRadius: '12px',
-            boxShadow: '0 4px 16px rgba(0, 0, 0, 0.2)',
-          }}
-        >
-          登录
-        </Button>
-      </Form.Item>
-    </Form>
-  );
-
-  // 渲染LinuxDO登录
-  const renderLinuxDOLogin = () => (
-    <div style={{ padding: '24px 0 8px' }}>
-      <Button
-        type="primary"
-        size="large"
-        icon={
-          <img
-            src="/favicon.ico"
-            alt="LinuxDO"
-            style={{
-              width: 20,
-              height: 20,
-              marginRight: 8,
-              verticalAlign: 'middle',
-            }}
-          />
-        }
-        loading={loading}
-        onClick={handleLinuxDOLogin}
-        block
-        style={{
-          height: 52,
-          fontSize: 16,
-          fontWeight: 600,
-          background: 'linear-gradient(135deg, #2b5876 0%, #4e4376 100%)',
-          border: 'none',
-          borderRadius: '12px',
-          boxShadow: '0 4px 16px rgba(0, 0, 0, 0.2)',
-          transition: 'all 0.3s ease',
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.transform = 'translateY(-2px)';
-          e.currentTarget.style.boxShadow = '0 6px 24px rgba(0, 0, 0, 0.3)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.transform = 'translateY(0)';
-          e.currentTarget.style.boxShadow = '0 4px 16px rgba(0, 0, 0, 0.2)';
-        }}
-      >
-        使用 LinuxDO 登录
-      </Button>
-    </div>
-  );
-
   const handleAnnouncementClose = () => {
     setShowAnnouncement(false);
     const redirect = searchParams.get('redirect') || '/';
@@ -203,160 +91,197 @@ export default function Login() {
   };
 
   const handleDoNotShowToday = () => {
-    // 设置到今天23:59:59不再显示
     const tomorrow = new Date();
     tomorrow.setHours(23, 59, 59, 999);
     localStorage.setItem('announcement_do_not_show_until', tomorrow.getTime().toString());
   };
 
+  /* ── Loading 态 ── */
+  if (checking) {
+    return (
+      <div style={{
+        display: 'flex', justifyContent: 'center', alignItems: 'center',
+        minHeight: '100vh',
+        background: freshTheme.colors.gradients.page,
+      }}>
+        <Spin size="large" />
+      </div>
+    );
+  }
+
+  /* ── 本地登录表单 ── */
+  const renderLocalLogin = () => (
+    <Form form={form} onFinish={handleLocalLogin} size="large" style={{ marginTop: 16 }}>
+      <Form.Item name="username" rules={[{ required: true, message: '请输入用户名' }]}>
+        <Input
+          prefix={<UserOutlined style={{ color: freshTheme.colors.text.light }} />}
+          placeholder="用户名"
+          autoComplete="username"
+          style={{
+            borderRadius: freshTheme.radius.md,
+            border: `1px solid ${freshTheme.colors.background.border}`,
+            height: 48,
+          }}
+        />
+      </Form.Item>
+      <Form.Item name="password" rules={[{ required: true, message: '请输入密码' }]}>
+        <Input.Password
+          prefix={<LockOutlined style={{ color: freshTheme.colors.text.light }} />}
+          placeholder="密码"
+          autoComplete="current-password"
+          style={{
+            borderRadius: freshTheme.radius.md,
+            border: `1px solid ${freshTheme.colors.background.border}`,
+            height: 48,
+          }}
+        />
+      </Form.Item>
+      <Form.Item style={{ marginBottom: 0 }}>
+        <Button type="primary" htmlType="submit" loading={loading} block style={loginBtnStyle}>
+          登 录
+        </Button>
+      </Form.Item>
+    </Form>
+  );
+
+  /* ── LinuxDO 登录 ── */
+  const renderLinuxDOLogin = () => (
+    <div style={{ padding: '16px 0 0' }}>
+      <Button
+        type="primary" size="large" loading={loading}
+        onClick={handleLinuxDOLogin} block
+        icon={<img src="/favicon.ico" alt="LinuxDO" style={{ width: 20, height: 20, marginRight: 8, verticalAlign: 'middle' }} />}
+        style={loginBtnStyle}
+      >
+        使用 LinuxDO 登录
+      </Button>
+    </div>
+  );
+
   return (
     <>
-      <AnnouncementModal
-        visible={showAnnouncement}
-        onClose={handleAnnouncementClose}
-        onDoNotShowToday={handleDoNotShowToday}
-      />
-      <div style={{
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      minHeight: '100vh',
-      background: 'linear-gradient(135deg, #2b5876 0%, #4e4376 100%)',
-      padding: '20px',
-      position: 'relative',
-      overflow: 'hidden',
-    }}>
-      {/* 装饰性背景元素 */}
-      <div style={{
-        position: 'absolute',
-        top: '-10%',
-        right: '-5%',
-        width: '400px',
-        height: '400px',
-        background: 'rgba(255, 255, 255, 0.1)',
-        borderRadius: '50%',
-        filter: 'blur(80px)',
-      }} />
-      <div style={{
-        position: 'absolute',
-        bottom: '-10%',
-        left: '-5%',
-        width: '350px',
-        height: '350px',
-        background: 'rgba(255, 255, 255, 0.05)',
-        borderRadius: '50%',
-        filter: 'blur(80px)',
-      }} />
-      
-      <Card
-        variant="borderless"
-        style={{
-          width: '100%',
-          maxWidth: 420,
-          background: 'rgba(255, 255, 255, 0.1)',
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
-          boxShadow: '0 20px 60px rgba(0, 0, 0, 0.25)',
-          border: '1px solid rgba(255, 255, 255, 0.2)',
-          borderRadius: '20px',
-          position: 'relative',
-          zIndex: 1,
-        }}
-        styles={{
-          body: {
-            padding: '40px 32px',
-          }
-        }}
-      >
-        <Space direction="vertical" size="large" style={{ width: '100%', textAlign: 'center' }}>
-          {/* Logo区域 */}
-          <div style={{ marginBottom: '8px' }}>
+      <AnnouncementModal visible={showAnnouncement} onClose={handleAnnouncementClose} onDoNotShowToday={handleDoNotShowToday} />
+
+      <div className="login-container" style={containerStyle}>
+        {/* ====== 左侧品牌展示区 ====== */}
+        <div className="login-left-panel" style={leftPanelStyle}>
+          {/* 装饰光晕 */}
+          <div style={{ position: 'absolute', top: '-80px', right: '-80px', width: 300, height: 300, borderRadius: '50%', background: 'rgba(255,255,255,0.12)', filter: 'blur(60px)', pointerEvents: 'none' }} />
+          <div style={{ position: 'absolute', bottom: '-60px', left: '-60px', width: 240, height: 240, borderRadius: '50%', background: 'rgba(255,255,255,0.08)', filter: 'blur(60px)', pointerEvents: 'none' }} />
+
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            {/* Logo */}
             <div style={{
-              width: '72px',
-              height: '72px',
-              margin: '0 auto 20px',
-              background: 'linear-gradient(135deg, #2b5876 0%, #4e4376 100%)',
-              borderRadius: '20px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.2)',
-              border: '1px solid rgba(255,255,255,0.2)'
+              width: 64, height: 64, borderRadius: freshTheme.radius.lg,
+              background: 'rgba(255,255,255,0.2)', backdropFilter: 'blur(10px)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              marginBottom: 28, border: '1px solid rgba(255,255,255,0.3)',
             }}>
-              <img
-                src="/logo.svg"
-                alt="Logo"
-                style={{
-                  width: '48px',
-                  height: '48px',
-                  filter: 'brightness(0) invert(1)',
-                }}
-              />
+              <img src="/logo.svg" alt="Logo" style={{ width: 40, height: 40, filter: 'brightness(0) invert(1)' }} />
             </div>
-            <Title level={2} style={{
-              marginBottom: 8,
-              color: '#fff',
-              fontWeight: 700,
-              textShadow: '0 2px 4px rgba(0,0,0,0.2)'
-            }}>
+
+            <Title level={2} style={{ color: '#fff', fontWeight: 700, marginBottom: 4, fontSize: 30 }}>
               AI小说创作助手
             </Title>
-            <Paragraph style={{
-              color: 'rgba(255,255,255,0.65)',
-              fontSize: '14px',
-              marginBottom: 0,
-            }}>
-              {localAuthEnabled && linuxdoEnabled ? '选择登录方式' :
+            <div style={{ width: 40, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.5)', margin: '16px 0 20px' }} />
+            <Paragraph style={{ color: 'rgba(255,255,255,0.85)', fontSize: 18, fontWeight: 500, marginBottom: 36 }}>
+              更优雅的创作体验
+            </Paragraph>
+
+            {/* 特性列表 */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {features.map((text, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <CheckCircleFilled style={{ color: 'rgba(255,255,255,0.85)', fontSize: 16 }} />
+                  <span style={{ color: 'rgba(255,255,255,0.9)', fontSize: 15 }}>{text}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* ====== 右侧登录表单区 ====== */}
+        <div className="login-right-panel" style={rightPanelStyle}>
+          <div style={formWrapperStyle}>
+            <Title level={3} style={{ color: freshTheme.colors.text.primary, fontWeight: 700, marginBottom: 4 }}>
+              登录
+            </Title>
+            <Paragraph style={{ color: freshTheme.colors.text.secondary, marginBottom: 28 }}>
+              {localAuthEnabled && linuxdoEnabled ? '没有账号？首次登录自动注册 >' :
                localAuthEnabled ? '使用账户密码登录' :
                '使用 LinuxDO 账号登录'}
             </Paragraph>
-          </div>
 
-          {/* 登录方式 */}
-          {localAuthEnabled && linuxdoEnabled ? (
-            <Tabs
-              defaultActiveKey="local"
-              centered
-              items={[
-                {
-                  key: 'local',
-                  label: '账户密码',
-                  children: renderLocalLogin(),
-                },
-                {
-                  key: 'linuxdo',
-                  label: 'LinuxDO',
-                  children: renderLinuxDOLogin(),
-                },
-              ]}
-            />
-          ) : localAuthEnabled ? (
-            renderLocalLogin()
-          ) : (
-            renderLinuxDOLogin()
-          )}
+            {localAuthEnabled && linuxdoEnabled ? (
+              <Tabs
+                defaultActiveKey="local" centered
+                items={[
+                  { key: 'local', label: '账户密码', children: renderLocalLogin() },
+                  { key: 'linuxdo', label: 'LinuxDO', children: renderLinuxDOLogin() },
+                ]}
+              />
+            ) : localAuthEnabled ? renderLocalLogin() : renderLinuxDOLogin()}
 
-          {/* 提示信息 */}
-          <div style={{
-            padding: '16px',
-            background: 'rgba(255, 255, 255, 0.05)',
-            borderRadius: '12px',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-          }}>
-            <Paragraph style={{
-              fontSize: 13,
-              color: 'rgba(255,255,255,0.65)',
-              marginBottom: 0,
-              lineHeight: 1.6,
+            {/* 底部提示 */}
+            <div style={{
+              marginTop: 28, padding: 16,
+              background: `linear-gradient(135deg, ${freshTheme.colors.primary.sakura}18 0%, ${freshTheme.colors.primary.mint}18 100%)`,
+              borderRadius: freshTheme.radius.md,
+              border: `1px solid ${freshTheme.colors.background.border}`,
             }}>
-              🎉 首次登录将自动创建账号
-              <br />
-              🔒 每个用户拥有独立的数据空间
-            </Paragraph>
+              <Paragraph style={{ fontSize: 13, color: freshTheme.colors.text.secondary, marginBottom: 0, lineHeight: 1.8 }}>
+                🎉 首次登录将自动创建账号<br />
+                🔒 每个用户拥有独立的数据空间
+              </Paragraph>
+            </div>
           </div>
-        </Space>
-      </Card>
-    </div>
+        </div>
+      </div>
     </>
   );
 }
+
+/* ══════════ 样式常量 ══════════ */
+
+const containerStyle: React.CSSProperties = {
+  display: 'flex',
+  minHeight: '100vh',
+  background: freshTheme.colors.gradients.page,
+};
+
+const leftPanelStyle: React.CSSProperties = {
+  flex: '0 0 45%',
+  background: `linear-gradient(135deg, ${freshTheme.colors.primary.sakura} 0%, #E8A0B4 30%, ${freshTheme.colors.primary.lavender} 70%, ${freshTheme.colors.primary.mint} 100%)`,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: '60px 48px',
+  position: 'relative',
+  overflow: 'hidden',
+};
+
+const rightPanelStyle: React.CSSProperties = {
+  flex: 1,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: '40px 24px',
+  background: freshTheme.colors.background.card,
+};
+
+const formWrapperStyle: React.CSSProperties = {
+  width: '100%',
+  maxWidth: 400,
+};
+
+const loginBtnStyle: React.CSSProperties = {
+  height: 48,
+  fontSize: 16,
+  fontWeight: 600,
+  background: freshTheme.colors.gradients.sakuraMint,
+  border: 'none',
+  borderRadius: freshTheme.radius.md,
+  boxShadow: freshTheme.shadow.soft,
+  color: freshTheme.colors.text.primary,
+  transition: freshTheme.transition.normal,
+};

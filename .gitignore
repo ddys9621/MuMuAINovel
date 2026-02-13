@@ -115,3 +115,13 @@ backend/embedding/
 backend/embedding.zip
 *.safetensors
 *.zip
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.onnx
+models/
+
+# 本地发布产物与本机配置
+release/
+config.ini

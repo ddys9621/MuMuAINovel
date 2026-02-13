@@ -5,6 +5,7 @@ import { authApi } from '../services/api';
 import type { User } from '../types';
 import type { MenuProps } from 'antd';
 import { useNavigate } from 'react-router-dom';
+import { freshTheme } from '../styles/theme';
 
 const { Text } = Typography;
 
@@ -120,73 +121,59 @@ export default function UserMenu() {
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
-            gap: 12,
-            padding: '8px 16px',
-            background: 'rgba(255, 255, 255, 0.95)',
-            backdropFilter: 'blur(10px)',
-            WebkitBackdropFilter: 'blur(10px)',
-            borderRadius: 24,
-            border: '1px solid rgba(102, 126, 234, 0.2)',
-            transition: 'all 0.3s ease',
-            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+            gap: 8,
+            padding: '4px 12px 4px 4px',
+            background: freshTheme.colors.background.card,
+            borderRadius: freshTheme.radius.xxl,
+            border: `1px solid ${freshTheme.colors.background.border}`,
+            transition: freshTheme.transition.normal,
+            boxShadow: freshTheme.shadow.soft,
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'rgba(255, 255, 255, 1)';
-            e.currentTarget.style.transform = 'translateY(-2px)';
-            e.currentTarget.style.boxShadow = '0 4px 12px rgba(102, 126, 234, 0.3)';
+            e.currentTarget.style.background = freshTheme.colors.background.hover;
+            e.currentTarget.style.boxShadow = freshTheme.shadow.medium;
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'rgba(255, 255, 255, 0.95)';
-            e.currentTarget.style.transform = 'translateY(0)';
-            e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.1)';
+            e.currentTarget.style.background = freshTheme.colors.background.card;
+            e.currentTarget.style.boxShadow = freshTheme.shadow.soft;
           }}
         >
           <div style={{ position: 'relative' }}>
             <Avatar
               src={currentUser.avatar_url}
               icon={<UserOutlined />}
-              size={40}
+              size={28}
               style={{
-                backgroundColor: '#1890ff',
-                border: '3px solid #fff',
-                boxShadow: '0 2px 8px rgba(102, 126, 234, 0.3)',
+                backgroundColor: freshTheme.colors.primary.sky,
+                border: '2px solid #fff',
               }}
             />
             {currentUser.is_admin && (
               <div style={{
                 position: 'absolute',
-                bottom: -2,
-                right: -2,
-                width: 18,
-                height: 18,
+                bottom: -1,
+                right: -1,
+                width: 14,
+                height: 14,
                 background: 'linear-gradient(135deg, #ffd700 0%, #ffaa00 100%)',
                 borderRadius: '50%',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                border: '2px solid white',
-                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
+                border: '1.5px solid white',
               }}>
-                <CrownOutlined style={{ fontSize: 9, color: '#fff' }} />
+                <CrownOutlined style={{ fontSize: 7, color: '#fff' }} />
               </div>
             )}
           </div>
-          <Space direction="vertical" size={0} style={{ display: window.innerWidth <= 768 ? 'none' : 'flex' }}>
-            <Text strong style={{
-              color: '#262626',
-              fontSize: 14,
-              lineHeight: '20px',
-            }}>
-              {currentUser.display_name || currentUser.username}
-            </Text>
-            <Text style={{
-              color: '#8c8c8c',
-              fontSize: 12,
-              lineHeight: '18px',
-            }}>
-              {currentUser.is_admin ? '👑 管理员' : `🎖️ Trust Level ${currentUser.trust_level}`}
-            </Text>
-          </Space>
+          <Text strong style={{
+            color: freshTheme.colors.text.primary,
+            fontSize: 13,
+            lineHeight: '28px',
+            display: window.innerWidth <= 768 ? 'none' : 'inline',
+          }}>
+            {currentUser.display_name || currentUser.username}
+          </Text>
         </div>
       </Dropdown>
 
