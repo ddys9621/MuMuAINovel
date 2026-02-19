@@ -2,8 +2,6 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import ProjectList from './pages/ProjectList';
-import ProjectWizardNew from './pages/ProjectWizardNew';
-import Inspiration from './pages/Inspiration';
 import ProjectDetail from './pages/ProjectDetail';
 import WorldSetting from './pages/WorldSetting';
 import WorldRules from './pages/WorldRules';
@@ -18,7 +16,6 @@ import WritingStyles from './pages/WritingStyles';
 import Settings from './pages/Settings';
 import MCPPlugins from './pages/MCPPlugins';
 import UserManagement from './pages/UserManagement';
-// import Polish from './pages/Polish';
 import Login from './pages/Login';
 import AuthCallback from './pages/AuthCallback';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -37,11 +34,9 @@ function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
-          
+
           <Route path="/" element={<ProtectedRoute><ProjectList /></ProtectedRoute>} />
           <Route path="/projects" element={<ProtectedRoute><ProjectList /></ProtectedRoute>} />
-          <Route path="/wizard" element={<ProtectedRoute><ProjectWizardNew /></ProtectedRoute>} />
-          <Route path="/inspiration" element={<ProtectedRoute><Inspiration /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
           <Route path="/mcp-plugins" element={<ProtectedRoute><MCPPlugins /></ProtectedRoute>} />
           <Route path="/user-management" element={<ProtectedRoute><UserManagement /></ProtectedRoute>} />
@@ -57,7 +52,6 @@ function App() {
             <Route path="chapters" element={<Chapters />} />
             <Route path="chapter-analysis" element={<ChapterAnalysis />} />
             <Route path="writing-styles" element={<WritingStyles />} />
-            {/* <Route path="polish" element={<Polish />} /> */}
           </Route>
         </Routes>
       </BrowserRouter>

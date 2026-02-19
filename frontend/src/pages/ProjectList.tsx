@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, Button, Empty, Modal, message, Spin, Row, Col, Space, Tag, Progress, Typography, Tooltip, Alert, Upload, Checkbox, Divider, Switch, Dropdown } from 'antd';
-import { EditOutlined, DeleteOutlined, BookOutlined, RocketOutlined, CalendarOutlined, FileTextOutlined, TrophyOutlined, SettingOutlined, InfoCircleOutlined, CloseOutlined, UploadOutlined, DownloadOutlined, ApiOutlined, MoreOutlined, BulbOutlined, FireOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { Card, Button, Empty, Modal, message, Spin, Row, Col, Space, Tag, Typography, Tooltip, Alert, Upload, Checkbox, Divider, Switch, Dropdown } from 'antd';
+import { EditOutlined, BookOutlined, RocketOutlined, CalendarOutlined, FileTextOutlined, TrophyOutlined, SettingOutlined, InfoCircleOutlined, CloseOutlined, UploadOutlined, DownloadOutlined, ApiOutlined, MoreOutlined, BulbOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { projectApi } from '../services/api';
 import { useStore } from '../store';
 import { useProjectSync } from '../store/hooks';
@@ -10,14 +10,25 @@ import UserMenu from '../components/UserMenu';
 import WelcomeHeader from '../components/WelcomeHeader';
 import StatsCard from '../components/StatsCard';
 import FreshCard from '../components/FreshCard';
-import { freshTheme, getStatusColor } from '../styles/theme';
+import ProjectWizardModal from '../components/ProjectWizardModal';
+import InspirationDrawer from '../components/InspirationDrawer';
+import { freshTheme } from '../styles/theme';
 
-const { Text, Paragraph } = Typography;
+const { Text } = Typography;
 
 export default function ProjectList() {
   const navigate = useNavigate();
   const { projects, loading, projectsInitialized } = useStore();
-  const [showApiTip, setShowApiTip] = useState(true);
+  const [showApiTip, setShowApiTip] = useState(() => {
+    const saved = localStorage.getItem('hideApiTip');
+    return saved !== 'true';
+  });
+
+  const handleCloseApiTip = () => {
+    setShowApiTip(false);
+    localStorage.setItem('hideApiTip', 'true');
+  };
+
   const [importModalVisible, setImportModalVisible] = useState(false);
   const [exportModalVisible, setExportModalVisible] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -30,6 +41,10 @@ export default function ProjectList() {
     includeWritingStyles: true,
     includeGenerationHistory: true,
   });
+
+  // 新增：Modal 和 Drawer 状态
+  const [wizardModalVisible, setWizardModalVisible] = useState(false);
+  const [inspirationDrawerOpen, setInspirationDrawerOpen] = useState(false);
 
   const { refreshProjects, deleteProject } = useProjectSync();
 
@@ -254,8 +269,8 @@ export default function ProjectList() {
         {/* 欢迎头部 */}
         <WelcomeHeader
           username="创作者"
-          onCreateProject={() => navigate('/wizard')}
-          onInspirationMode={() => navigate('/inspiration')}
+          onCreateProject={() => setWizardModalVisible(true)}
+          onInspirationMode={() => setInspirationDrawerOpen(true)}
         />
 
         {/* 统计卡片区域 */}
@@ -303,7 +318,7 @@ export default function ProjectList() {
 
 
         {/* 首次使用提示 */}
-        {showApiTip && projects.length === 0 && (
+        {showApiTip && projectsInitialized && projects.length === 0 && (
           <Alert
             message={
               <Space align="center">
@@ -328,7 +343,7 @@ export default function ProjectList() {
                   >
                     立即配置
                   </Button>
-                  <Button size="small" onClick={() => setShowApiTip(false)}>
+                  <Button size="small" onClick={handleCloseApiTip}>
                     暂不提醒
                   </Button>
                 </Space>
@@ -338,7 +353,7 @@ export default function ProjectList() {
             showIcon={false}
             closable
             closeIcon={<CloseOutlined />}
-            onClose={() => setShowApiTip(false)}
+            onClose={handleCloseApiTip}
             style={{
               marginBottom: 24,
               borderRadius: freshTheme.radius.lg,
@@ -430,7 +445,7 @@ export default function ProjectList() {
                       <Button
                         type="primary"
                         icon={<BulbOutlined />}
-                        onClick={() => navigate('/inspiration')}
+                        onClick={() => setInspirationDrawerOpen(true)}
                         style={{
                           background: freshTheme.colors.gradients.sakuraMint,
                           border: 'none',
@@ -442,7 +457,7 @@ export default function ProjectList() {
                       <Button
                         type="primary"
                         icon={<RocketOutlined />}
-                        onClick={() => navigate('/wizard')}
+                        onClick={() => setWizardModalVisible(true)}
                         style={{
                           background: freshTheme.colors.gradients.skyLavender,
                           border: 'none',
@@ -650,6 +665,28 @@ export default function ProjectList() {
           )}
         </Space>
       </Modal>
+
+      {/* 项目创建向导 Modal */}
+      <ProjectWizardModal
+        visible={wizardModalVisible}
+        onClose={() => setWizardModalVisible(false)}
+        onSuccess={(projectId) => {
+          setWizardModalVisible(false);
+          refreshProjects();
+          navigate(`/project/${projectId}`);
+        }}
+      />
+
+      {/* 灵感模式 Drawer */}
+      <InspirationDrawer
+        open={inspirationDrawerOpen}
+        onClose={() => setInspirationDrawerOpen(false)}
+        onSuccess={(projectId) => {
+          setInspirationDrawerOpen(false);
+          refreshProjects();
+          navigate(`/project/${projectId}`);
+        }}
+      />
     </div>
   );
 }
