@@ -96,15 +96,26 @@ async def get_settings(
         env_defaults = read_env_defaults()
         logger.info(f"用户 {user.user_id} 首次获取设置，自动从.env同步到数据库")
         
-        # 创建新设置并保存到数据库
-        settings = Settings(
-            user_id=user.user_id,
-            **env_defaults
-        )
-        db.add(settings)
-        await db.commit()
-        await db.refresh(settings)
-        logger.info(f"用户 {user.user_id} 的设置已从.env同步到数据库")
+        # 创建新设置并保存到数据库（处理并发竞争）
+        try:
+            settings = Settings(
+                user_id=user.user_id,
+                **env_defaults
+            )
+            db.add(settings)
+            await db.commit()
+            await db.refresh(settings)
+            logger.info(f"用户 {user.user_id} 的设置已从.env同步到数据库")
+        except Exception:
+            # 并发情况下可能已被另一个请求插入，回滚后重新查询
+            await db.rollback()
+            result = await db.execute(
+                select(Settings).where(Settings.user_id == user.user_id)
+            )
+            settings = result.scalar_one_or_none()
+            if not settings:
+                raise
+            logger.info(f"用户 {user.user_id} 的设置已由并发请求创建，直接使用")
     
     logger.info(f"用户 {user.user_id} 获取已保存的设置")
     return settings

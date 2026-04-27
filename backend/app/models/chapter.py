@@ -1,7 +1,7 @@
 """章节数据模型"""
 from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey
 from sqlalchemy.sql import func
-from app.database import Base
+from app.db_base import Base
 import uuid
 
 

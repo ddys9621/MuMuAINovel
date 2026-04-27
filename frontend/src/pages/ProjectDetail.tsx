@@ -1,49 +1,54 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useParams, useNavigate, Outlet, Link, useLocation } from 'react-router-dom';
-import { Layout, Menu, Spin, Button, Statistic, Row, Col, Card, Drawer } from 'antd';
+import { useEffect, useState, useMemo } from 'react'
+import { useParams, useNavigate, useLocation, Outlet, NavLink } from 'react-router-dom'
 import {
-  ArrowLeftOutlined,
-  FileTextOutlined,
-  TeamOutlined,
-  BookOutlined,
-  // ToolOutlined,
-  GlobalOutlined,
-  MenuFoldOutlined,
-  MenuUnfoldOutlined,
-  ApartmentOutlined,
-  BankOutlined,
-  EditOutlined,
-  FundOutlined,
-  DatabaseOutlined,
-} from '@ant-design/icons';
-import { useStore } from '../store';
-import { useCharacterSync, useOutlineSync, useChapterSync } from '../store/hooks';
-import { projectApi } from '../services/api';
+  ArrowLeft,
+  Globe,
+  Shield,
+  Users,
+  GitBranch,
+  FileText,
+  BookOpen,
+  BarChart3,
+  Palette,
+  Menu,
+  X,
+  PanelLeftClose,
+  PanelLeft,
+  Brain,
+  Wrench,
+  Loader2,
+  Sparkles,
+} from 'lucide-react'
+import { toast } from 'sonner'
+import { useStore } from '@/store/index'
+import { projectApi } from '@/services/api'
+import { useCharacterSync, useOutlineSync, useChapterSync } from '@/store/hooks'
+import { PageLoading } from '@/components/ui/PageLoading'
 
-const { Header, Sider, Content } = Layout;
+const NAV_ITEMS = [
+  { label: '世界设定', icon: Globe, path: 'world-setting' },
+  { label: '世界规则', icon: Shield, path: 'world-rules' },
+  { label: '角色与组织', icon: Users, path: 'characters' },
+  { label: '关系管理', icon: GitBranch, path: 'relationships' },
+  { label: '故事大纲', icon: FileText, path: 'outline' },
+  { label: '章节管理', icon: BookOpen, path: 'chapters' },
+  { label: '剧情分析', icon: BarChart3, path: 'chapter-analysis' },
+  { label: '写作风格', icon: Palette, path: 'writing-styles' },
+  { label: '记忆系统', icon: Brain, path: 'memories' },
+] as const
 
-// 判断是否为移动端
-const isMobile = () => window.innerWidth <= 768;
+const PROJECT_STATUS_META = {
+  planning: { label: '规划中', className: 'bg-orange-100 text-orange-700' },
+  writing: { label: '创作中', className: 'bg-emerald-100 text-emerald-700' },
+  revising: { label: '修改中', className: 'bg-amber-100 text-amber-700' },
+  completed: { label: '已完成', className: 'bg-violet-100 text-violet-700' },
+} as const
 
 export default function ProjectDetail() {
-  const { projectId } = useParams<{ projectId: string }>();
-  const navigate = useNavigate();
-  const location = useLocation();
-  const [collapsed, setCollapsed] = useState(false);
-  const [drawerVisible, setDrawerVisible] = useState(false);
-  const [mobile, setMobile] = useState(isMobile());
+  const { projectId } = useParams<{ projectId: string }>()
+  const navigate = useNavigate()
+  const location = useLocation()
 
-  // 监听窗口大小变化
-  useEffect(() => {
-    const handleResize = () => {
-      setMobile(isMobile());
-      if (!isMobile()) {
-        setDrawerVisible(false);
-      }
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
   const {
     currentProject,
     setCurrentProject,
@@ -53,385 +58,347 @@ export default function ProjectDetail() {
     outlines,
     characters,
     chapters,
-  } = useStore();
+  } = useStore()
 
-  // 使用同步 hooks
-  const { refreshCharacters } = useCharacterSync();
-  const { refreshOutlines } = useOutlineSync();
-  const { refreshChapters } = useChapterSync();
+  const { refreshCharacters } = useCharacterSync()
+  const { refreshOutlines } = useOutlineSync()
+  const { refreshChapters } = useChapterSync()
+
+  const [collapsed, setCollapsed] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const [showRepairPanel, setShowRepairPanel] = useState(false)
+  const [repairLoading, setRepairLoading] = useState(false)
+  const [repairReport, setRepairReport] = useState<Record<string, unknown> | null>(null)
 
   useEffect(() => {
-    const loadProjectData = async (id: string) => {
-      try {
-        setLoading(true);
-        // 加载项目基本信息
-        const project = await projectApi.getProject(id);
-        setCurrentProject(project);
-        
-        // 并行加载其他数据
-        await Promise.all([
-          refreshOutlines(id),
-          refreshCharacters(id),
-          refreshChapters(id),
-        ]);
-      } catch (error) {
-        console.error('加载项目数据失败:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
+    if (!projectId) return
 
-    if (projectId) {
-      loadProjectData(projectId);
+    let cancelled = false
+
+    const load = async () => {
+      try {
+        setLoading(true)
+        const project = await projectApi.getProject(projectId)
+        if (cancelled) return
+        setCurrentProject(project)
+
+        await Promise.all([
+          refreshOutlines(projectId),
+          refreshCharacters(projectId),
+          refreshChapters(projectId),
+        ])
+      } catch {
+        if (!cancelled) {
+          toast.error('加载项目失败')
+          navigate('/')
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
     }
 
+    load()
+
     return () => {
-      clearProjectData();
-    };
-  }, [projectId]);
+      cancelled = true
+      clearProjectData()
+      setCurrentProject(null)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId])
 
-  // 移除事件监听，避免无限循环
-  // Hook 内部已经更新了 store，不需要再次刷新
+  useEffect(() => {
+    setMobileOpen(false)
+  }, [location.pathname])
 
-  const menuItems = [
-    {
-      key: 'world-setting',
-      icon: <GlobalOutlined />,
-      label: <Link to={`/project/${projectId}/world-setting`}>世界设定</Link>,
-    },
-    {
-      key: 'world-rules',
-      icon: <DatabaseOutlined />,
-      label: <Link to={`/project/${projectId}/world-rules`}>世界规则系统</Link>,
-    },
-    {
-      key: 'characters',
-      icon: <TeamOutlined />,
-      label: <Link to={`/project/${projectId}/characters`}>角色管理</Link>,
-    },
-    {
-      key: 'relationships',
-      icon: <ApartmentOutlined />,
-      label: <Link to={`/project/${projectId}/relationships`}>关系管理</Link>,
-    },
-    {
-      key: 'organizations',
-      icon: <BankOutlined />,
-      label: <Link to={`/project/${projectId}/organizations`}>组织管理</Link>,
-    },
-    {
-      key: 'outline',
-      icon: <FileTextOutlined />,
-      label: <Link to={`/project/${projectId}/outline`}>故事大纲 & 剧情</Link>,
-    },
-    {
-      key: 'chapters',
-      icon: <BookOutlined />,
-      label: <Link to={`/project/${projectId}/chapters`}>章节管理</Link>,
-    },
-    {
-      key: 'chapter-analysis',
-      icon: <FundOutlined />,
-      label: <Link to={`/project/${projectId}/chapter-analysis`}>剧情分析</Link>,
-    },
-    {
-      key: 'writing-styles',
-      icon: <EditOutlined />,
-      label: <Link to={`/project/${projectId}/writing-styles`}>写作风格</Link>,
-    },
-    // {
-    //   key: 'polish',
-    //   icon: <ToolOutlined />,
-    //   label: <Link to={`/project/${projectId}/polish`}>AI去味</Link>,
-    // },
-  ];
+  const stats = useMemo(() => {
+    const totalWords = chapters.reduce((sum, ch) => sum + (ch.word_count ?? 0), 0)
+    return {
+      outlines: outlines.length,
+      characters: characters.length,
+      chapters: chapters.length,
+      words: totalWords,
+    }
+  }, [outlines, characters, chapters])
 
-  // 根据当前路径动态确定选中的菜单项
-  const selectedKey = useMemo(() => {
-    const path = location.pathname;
-    if (path.includes('/world-setting')) return 'world-setting';
-    if (path.includes('/relationships')) return 'relationships';
-    if (path.includes('/organizations')) return 'organizations';
-    if (path.includes('/outline')) return 'outline';
-    if (path.includes('/characters')) return 'characters';
-    if (path.includes('/chapter-analysis')) return 'chapter-analysis';
-    if (path.includes('/chapters')) return 'chapters';
-    if (path.includes('/writing-styles')) return 'writing-styles';
-    // if (path.includes('/polish')) return 'polish';
-    return 'world-setting'; // 默认选中世界设定
-  }, [location.pathname]);
+  const formatCount = (n: number) => (n >= 10000 ? `${(n / 10000).toFixed(1)}万` : String(n))
 
-  if (loading || !currentProject) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <Spin size="large" />
-      </div>
-    );
-  }
+  const currentSection = useMemo(() => {
+    return NAV_ITEMS.find((item) => location.pathname.includes(item.path))?.label ?? '创作总览'
+  }, [location.pathname])
 
-  // 渲染菜单内容
-  const renderMenu = () => (
-    <div style={{
-      flex: 1,
-      overflowY: 'auto',
-      overflowX: 'hidden'
-    }}>
-      <Menu
-        mode="inline"
-        selectedKeys={[selectedKey]}
-        style={{
-          borderRight: 0,
-          paddingTop: '16px'
-        }}
-        items={menuItems}
-        onClick={() => mobile && setDrawerVisible(false)}
-      />
-    </div>
-  );
+  const projectStatus = currentProject ? PROJECT_STATUS_META[currentProject.status] : PROJECT_STATUS_META.planning
+  const projectTags = currentProject?.genre?.split(/[,，、/]/).filter(Boolean).slice(0, 3) ?? []
 
-  return (
-    <Layout style={{ minHeight: '100vh' }}>
-      <Header style={{
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-        padding: mobile ? '0 12px' : '0 24px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        zIndex: 1000,
-        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-        height: mobile ? 56 : 70
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', zIndex: 1 }}>
-          <Button
-            type="text"
-            icon={mobile ? <MenuUnfoldOutlined /> : (collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />)}
-            onClick={() => mobile ? setDrawerVisible(true) : setCollapsed(!collapsed)}
-            style={{
-              fontSize: mobile ? '18px' : '20px',
-              color: '#fff',
-              width: mobile ? '36px' : '40px',
-              height: mobile ? '36px' : '40px'
-            }}
-          />
-          {!mobile && (
-            <Button
-              type="text"
-              icon={<ArrowLeftOutlined />}
-              onClick={() => navigate('/')}
-              style={{
-                fontSize: '16px',
-                color: '#fff',
-                height: '40px',
-                padding: '0 16px'
-              }}
-            >
-              返回主页
-            </Button>
-          )}
-        </div>
-        
-        <h2 style={{
-          margin: 0,
-          color: '#fff',
-          fontSize: mobile ? '16px' : '24px',
-          fontWeight: 600,
-          textShadow: '0 2px 4px rgba(0,0,0,0.1)',
-          position: mobile ? 'static' : 'absolute',
-          left: mobile ? 'auto' : '50%',
-          transform: mobile ? 'none' : 'translateX(-50%)',
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          flex: mobile ? 1 : 'none',
-          textAlign: mobile ? 'center' : 'left',
-          paddingLeft: mobile ? '8px' : '0',
-          paddingRight: mobile ? '8px' : '0'
-        }}>
-          {currentProject.title}
-        </h2>
-        
-        {mobile && (
-          <Button
-            type="text"
-            icon={<ArrowLeftOutlined />}
-            onClick={() => navigate('/')}
-            style={{
-              fontSize: '14px',
-              color: '#fff',
-              height: '36px',
-              padding: '0 8px',
-              zIndex: 1
-            }}
-          >
-            主页
-          </Button>
-        )}
-        
-        {!mobile && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', zIndex: 1 }}>
-            <Row gutter={12} style={{ width: '450px', justifyContent: 'flex-end' }}>
-            <Col>
-              <Card
-                size="small"
-                style={{
-                  background: 'rgba(255,255,255,0.95)',
-                  borderRadius: '6px',
-                  border: 'none',
-                  minWidth: '80px',
-                  textAlign: 'center',
-                  padding: '4px 8px'
-                }}
-                styles={{ body: { padding: '8px' } }}
-              >
-                <Statistic
-                  title={<span style={{ fontSize: '11px', color: '#666' }}>大纲</span>}
-                  value={outlines.length}
-                  suffix="条"
-                  valueStyle={{ fontSize: '16px', fontWeight: 600, color: '#667eea' }}
-                />
-              </Card>
-            </Col>
-            <Col>
-              <Card
-                size="small"
-                style={{
-                  background: 'rgba(255,255,255,0.95)',
-                  borderRadius: '6px',
-                  border: 'none',
-                  minWidth: '80px',
-                  textAlign: 'center',
-                  padding: '4px 8px'
-                }}
-                styles={{ body: { padding: '8px' } }}
-              >
-                <Statistic
-                  title={<span style={{ fontSize: '11px', color: '#666' }}>角色</span>}
-                  value={characters.length}
-                  suffix="个"
-                  valueStyle={{ fontSize: '16px', fontWeight: 600, color: '#52c41a' }}
-                />
-              </Card>
-            </Col>
-            <Col>
-              <Card
-                size="small"
-                style={{
-                  background: 'rgba(255,255,255,0.95)',
-                  borderRadius: '6px',
-                  border: 'none',
-                  minWidth: '80px',
-                  textAlign: 'center',
-                  padding: '4px 8px'
-                }}
-                styles={{ body: { padding: '8px' } }}
-              >
-                <Statistic
-                  title={<span style={{ fontSize: '11px', color: '#666' }}>章节</span>}
-                  value={chapters.length}
-                  suffix="章"
-                  valueStyle={{ fontSize: '16px', fontWeight: 600, color: '#1890ff' }}
-                />
-              </Card>
-            </Col>
-            <Col>
-              <Card
-                size="small"
-                style={{
-                  background: 'rgba(255,255,255,0.95)',
-                  borderRadius: '6px',
-                  border: 'none',
-                  minWidth: '80px',
-                  textAlign: 'center',
-                  padding: '4px 8px'
-                }}
-                styles={{ body: { padding: '8px' } }}
-              >
-                <Statistic
-                  title={<span style={{ fontSize: '11px', color: '#666' }}>已写</span>}
-                  value={currentProject.current_words}
-                  suffix="字"
-                  valueStyle={{ fontSize: '16px', fontWeight: 600, color: '#fa8c16' }}
-                />
-              </Card>
-            </Col>
-            </Row>
+  if (loading && !currentProject) return <PageLoading />
+
+  const sidebarContent = (
+    <div className="flex h-full flex-col">
+      <div className="border-b border-white/10 px-3 pb-4 pt-4">
+        <button
+          onClick={() => navigate('/')}
+          className={`flex items-center gap-2 rounded-[18px] px-3 py-3 text-sm text-sidebar-text transition-colors hover:bg-white/8 hover:text-white ${collapsed ? 'justify-center' : ''}`}
+        >
+          <ArrowLeft className="h-4 w-4 shrink-0" />
+          {!collapsed && <span>返回书架</span>}
+        </button>
+
+        {!collapsed && currentProject && (
+          <div className="mt-3 rounded-[24px] border border-white/10 bg-white/6 p-4 text-sidebar-text shadow-[0_18px_40px_-30px_rgba(0,0,0,0.55)] backdrop-blur-sm">
+            <div className="mb-3 inline-flex items-center gap-2 rounded-pill bg-white/10 px-3 py-1 text-xs text-white/90">
+              <Sparkles className="h-3.5 w-3.5 text-brand-200" />
+              当前项目
+            </div>
+            <h2 className="line-clamp-2 text-base font-semibold text-white">{currentProject.title}</h2>
+            <p className="mt-2 line-clamp-2 text-sm leading-6 text-sidebar-text/90">{currentProject.description || '继续完善设定、角色、大纲与章节内容。'}</p>
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              <span className="rounded-pill bg-white/10 px-2.5 py-1 text-[11px] text-sidebar-text/90">世界设定</span>
+              <span className="rounded-pill bg-white/10 px-2.5 py-1 text-[11px] text-sidebar-text/90">角色管理</span>
+              <span className="rounded-pill bg-white/10 px-2.5 py-1 text-[11px] text-sidebar-text/90">章节推进</span>
+            </div>
           </div>
         )}
-      </Header>
+      </div>
 
-      <Layout style={{ marginTop: mobile ? 56 : 70 }}>
-        {mobile ? (
-          <Drawer
-            title="导航菜单"
-            placement="left"
-            onClose={() => setDrawerVisible(false)}
-            open={drawerVisible}
-            width={280}
-            styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column' } }}
+      <nav className="flex-1 space-y-1.5 overflow-y-auto px-2 py-4">
+        {NAV_ITEMS.map(({ label, icon: Icon, path }) => (
+          <NavLink
+            key={path}
+            to={path}
+            className={({ isActive }) =>
+              [
+                'group flex items-center gap-3 rounded-[18px] text-sm transition-all',
+                collapsed ? 'justify-center px-2 py-3' : 'px-3 py-3',
+                isActive
+                  ? 'bg-[linear-gradient(90deg,rgba(255,113,72,0.24),rgba(255,189,112,0.16))] text-white shadow-[0_18px_40px_-30px_rgba(255,113,72,0.95)]'
+                  : 'text-sidebar-text hover:bg-white/8 hover:text-white',
+              ].join(' ')
+            }
+            title={collapsed ? label : undefined}
           >
-            {renderMenu()}
-          </Drawer>
-        ) : (
-          <Sider
-          collapsible
-          collapsed={collapsed}
-          onCollapse={setCollapsed}
-          trigger={null}
-          width={220}
-          collapsedWidth={60}
-          style={{
-            background: '#fff',
-            position: 'fixed',
-            left: 0,
-            top: 70,
-            bottom: 0,
-            overflow: 'hidden',
-            boxShadow: '2px 0 12px rgba(0,0,0,0.08)',
-            transition: 'all 0.2s',
-            height: 'calc(100vh - 70px)'
-          }}
-          >
-            <div style={{
-              height: '100%',
-              display: 'flex',
-              flexDirection: 'column'
-            }}>
-              {renderMenu()}
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-white/10">
+              <Icon className="h-[18px] w-[18px] shrink-0" />
+            </span>
+            {!collapsed && <span className="truncate">{label}</span>}
+          </NavLink>
+        ))}
+      </nav>
+
+      <div className="border-t border-white/10 px-2 py-3">
+        <button
+          onClick={() => setShowRepairPanel(true)}
+          className={`mb-2 flex w-full items-center gap-3 rounded-[18px] px-3 py-3 text-sm text-sidebar-text transition-colors hover:bg-white/8 hover:text-white ${collapsed ? 'justify-center px-2' : ''}`}
+          title="数据修复"
+        >
+          <Wrench className="h-4 w-4 shrink-0" />
+          {!collapsed && <span>数据修复</span>}
+        </button>
+        <button
+          onClick={() => setCollapsed((v) => !v)}
+          className={`hidden w-full items-center gap-3 rounded-[18px] px-3 py-3 text-sm text-sidebar-text transition-colors hover:bg-white/8 hover:text-white lg:flex ${collapsed ? 'justify-center px-2' : ''}`}
+        >
+          {collapsed ? <PanelLeft className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
+          {!collapsed && <span>收起侧栏</span>}
+        </button>
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="flex h-screen overflow-hidden bg-transparent">
+      <aside
+        className={[
+          'hidden lg:flex flex-col overflow-hidden border-r border-white/10 bg-[linear-gradient(180deg,#3b1d16_0%,#2d140f_38%,#24110d_100%)] shadow-[18px_0_50px_-36px_rgba(0,0,0,0.7)] shrink-0 transition-[width] duration-200',
+          collapsed ? 'w-16' : 'w-64',
+        ].join(' ')}
+      >
+        {sidebarContent}
+      </aside>
+
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-[#2d130d]/50 backdrop-blur-sm lg:hidden"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+      <aside
+        className={[
+          'fixed inset-y-0 left-0 z-50 w-64 bg-[linear-gradient(180deg,#3b1d16_0%,#2d140f_38%,#24110d_100%)] transform transition-transform duration-200 lg:hidden',
+          mobileOpen ? 'translate-x-0' : '-translate-x-full',
+        ].join(' ')}
+      >
+        {sidebarContent}
+      </aside>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="border-b border-white/70 bg-white/65 px-4 py-3 backdrop-blur-xl md:px-6">
+          <div className="mx-auto flex max-w-[1600px] items-center gap-4">
+            <button
+              className="fanqie-toolbar-btn h-11 w-11 p-0 lg:hidden"
+              onClick={() => setMobileOpen((v) => !v)}
+            >
+              {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            </button>
+
+            <div className="min-w-0 flex-1">
+              <div className="mb-1 flex items-center gap-2">
+                <span className="fanqie-chip border-brand/10 bg-brand/5 text-brand">项目工作台</span>
+                <span className={`inline-flex rounded-pill px-3 py-1 text-xs font-medium ${projectStatus.className}`}>{projectStatus.label}</span>
+              </div>
+              <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
+                <div className="min-w-0">
+                  <h1 className="truncate text-lg font-semibold text-content md:text-[24px]">{currentProject?.title ?? '加载中…'}</h1>
+                  <p className="truncate text-sm text-content-secondary">当前页面 · {currentSection}</p>
+                </div>
+                <div className="hidden flex-wrap items-center gap-2 text-xs text-content-secondary md:flex">
+                  <span className="fanqie-chip">大纲 {stats.outlines}</span>
+                  <span className="fanqie-chip">角色 {stats.characters}</span>
+                  <span className="fanqie-chip">章节 {stats.chapters}</span>
+                  <span className="fanqie-chip">字数 {formatCount(stats.words)}</span>
+                </div>
+              </div>
             </div>
-          </Sider>
-        )}
+          </div>
+        </header>
 
-        <Layout style={{
-          marginLeft: mobile ? 0 : (collapsed ? 60 : 220),
-          transition: 'all 0.2s'
-        }}>
-          <Content
-            style={{
-              background: '#f5f7fa',
-              padding: mobile ? 12 : 24,
-              minHeight: mobile ? 'calc(100vh - 56px)' : 'calc(100vh - 70px)',
-              display: 'flex',
-              flexDirection: 'column'
-            }}
-          >
-            <div style={{
-              background: '#fff',
-              padding: mobile ? 12 : 24,
-              borderRadius: mobile ? '8px' : '12px',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-              minHeight: '100%',
-              display: 'flex',
-              flexDirection: 'column'
-            }}>
+        <main className="flex-1 overflow-y-auto px-4 pb-5 pt-4 md:px-6 md:pb-6 md:pt-5">
+          <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-4">
+            <section className="hh-hero-shell px-6 py-6">
+              <div className="absolute -right-10 top-0 h-32 w-32 rounded-full bg-white/18 blur-3xl" />
+              <div className="absolute -left-10 bottom-0 h-32 w-32 rounded-full bg-white/14 blur-3xl" />
+              <div className="relative z-10 flex flex-col gap-5 lg:flex-row lg:items-stretch lg:justify-between">
+                <div className="max-w-[820px]">
+                  <div className="hh-hero-eyebrow">
+                    <Sparkles className="h-3.5 w-3.5" />
+                    项目概览
+                  </div>
+                  <h2 className="mt-4 line-clamp-2 text-[28px] font-semibold leading-tight md:text-[34px]">
+                    {currentProject?.title || '当前项目'}
+                  </h2>
+                  <p className="mt-3 max-w-[720px] line-clamp-3 text-sm leading-7 text-white/88 md:text-base">
+                    {currentProject?.description || '项目简介还未填写。你可以直接进入对应模块继续完善世界设定、角色、组织与章节内容。'}
+                  </p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <span className="hh-hero-tag">当前页面：{currentSection}</span>
+                    {currentProject?.theme && <span className="hh-hero-tag">主题：{currentProject.theme}</span>}
+                    {(projectTags.length > 0) && projectTags.map((tag) => (
+                      <span key={tag} className="hh-hero-tag">{tag.trim()}</span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="w-full lg:max-w-[420px]">
+                  <div className="hh-hero-sidecard">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-white">创作进度</p>
+                        <p className="mt-1 text-xs text-white/72">围绕设定、角色、章节持续推进当前项目</p>
+                      </div>
+                      <span className={`inline-flex rounded-pill px-3 py-1 text-xs font-medium ${projectStatus.className} bg-white/90`}>
+                        {projectStatus.label}
+                      </span>
+                    </div>
+                    <div className="mt-4 grid grid-cols-2 gap-3">
+                      <div className="hh-hero-metric">
+                        <p className="text-xs text-white/70">大纲</p>
+                        <p className="mt-2 text-2xl font-semibold">{stats.outlines}</p>
+                      </div>
+                      <div className="hh-hero-metric">
+                        <p className="text-xs text-white/70">角色</p>
+                        <p className="mt-2 text-2xl font-semibold">{stats.characters}</p>
+                      </div>
+                      <div className="hh-hero-metric">
+                        <p className="text-xs text-white/70">章节</p>
+                        <p className="mt-2 text-2xl font-semibold">{stats.chapters}</p>
+                      </div>
+                      <div className="hh-hero-metric">
+                        <p className="text-xs text-white/70">字数</p>
+                        <p className="mt-2 text-2xl font-semibold">{formatCount(stats.words)}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="fanqie-card min-h-[calc(100vh-320px)] p-4 md:p-6">
               <Outlet />
+            </section>
+          </div>
+        </main>
+      </div>
+
+      {showRepairPanel && projectId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#2d130d]/45 px-4 backdrop-blur-sm" onClick={() => setShowRepairPanel(false)}>
+          <div className="w-full max-w-md rounded-modal border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.97)_0%,rgba(255,247,240,0.98)_100%)] shadow-xl animate-scale-in" onClick={(e) => e.stopPropagation()}>
+            <div className="border-b border-surface-border px-6 pb-4 pt-5">
+              <div className="mb-2 inline-flex items-center gap-2 rounded-pill bg-brand/10 px-3 py-1 text-xs font-medium text-brand">
+                <Wrench className="h-3.5 w-3.5" />
+                数据修复
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-bold text-content">数据一致性修复</h2>
+                  <p className="mt-1 text-sm text-content-secondary">检查并修复项目数据中的不一致问题。</p>
+                </div>
+                <button onClick={() => setShowRepairPanel(false)} className="fanqie-toolbar-btn h-10 w-10 p-0"><X className="h-4 w-4" /></button>
+              </div>
             </div>
-          </Content>
-        </Layout>
-      </Layout>
-    </Layout>
-  );
+            <div className="space-y-3 px-6 py-5">
+              <button
+                onClick={async () => {
+                  setRepairLoading(true)
+                  try {
+                    const res = await projectApi.checkConsistency(projectId)
+                    setRepairReport(res)
+                    toast.success('一致性检查完成')
+                  } catch {
+                    toast.error('检查失败')
+                  } finally {
+                    setRepairLoading(false)
+                  }
+                }}
+                disabled={repairLoading}
+                className="fanqie-primary-btn w-full disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {repairLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wrench className="h-4 w-4" />}
+                检查并自动修复
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    const res = await projectApi.fixOrganizations(projectId)
+                    toast.success(`组织修复: ${res.fixed_count}/${res.total_count}`)
+                  } catch {
+                    toast.error('修复失败')
+                  }
+                }}
+                className="fanqie-secondary-btn w-full"
+              >
+                修复组织记录
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    const res = await projectApi.fixMemberCounts(projectId)
+                    toast.success(`计数修复: ${res.fixed_count}/${res.total_count}`)
+                  } catch {
+                    toast.error('修复失败')
+                  }
+                }}
+                className="fanqie-secondary-btn w-full"
+              >
+                修复成员计数
+              </button>
+              {repairReport && (
+                <div className="max-h-44 overflow-y-auto rounded-[20px] bg-white/80 p-3 text-xs text-content-secondary whitespace-pre-wrap">
+                  {JSON.stringify(repairReport, null, 2)}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }

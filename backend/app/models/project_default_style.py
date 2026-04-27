@@ -1,7 +1,7 @@
 """项目默认风格关联表"""
 from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.sql import func
-from app.database import Base
+from app.db_base import Base
 
 
 class ProjectDefaultStyle(Base):

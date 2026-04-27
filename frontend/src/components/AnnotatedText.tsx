@@ -180,7 +180,7 @@ const AnnotatedText: React.FC<AnnotatedTextProps> = ({
                   display: 'inline-block',
                   background: 'rgba(255,255,255,0.2)',
                   padding: '2px 6px',
-                  borderRadius: 3,
+                  borderRadius: 0,
                   marginRight: 4,
                 }}
               >

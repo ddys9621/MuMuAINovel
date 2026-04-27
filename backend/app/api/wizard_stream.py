@@ -1,7 +1,7 @@
 """项目创建向导流式API - 使用SSE避免超时"""
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import delete, or_, select
 from typing import Dict, Any, AsyncGenerator
 import json
 import re
@@ -11,7 +11,12 @@ from app.models.project import Project
 from app.models.character import Character
 from app.models.story_outline import StoryOutline
 from app.models.chapter import Chapter
+from app.models.chapter_outline import ChapterOutline
+from app.models.plot_card import PlotCard
+from app.models.plot_line import PlotLine
 from app.models.relationship import CharacterRelationship, Organization, OrganizationMember, RelationshipType
+from app.services.relationship_matcher import match_relationship_type
+from app.models.world_rule import WorldRule
 from app.models.writing_style import WritingStyle
 from app.models.project_default_style import ProjectDefaultStyle
 from app.services.ai_service import AIService
@@ -19,10 +24,9 @@ from app.services.mcp_tool_service import MCPToolService
 from app.services.prompt_service import prompt_service
 from app.services.world_rule_service import WorldRuleService
 from app.logger import get_logger
+from app.utils.role_type import normalize_role_type, is_protagonist_role
 from app.utils.sse_response import SSEResponse, create_sse_response
 from app.api.settings import get_user_ai_service
-from sqlalchemy import delete
-
 router = APIRouter(prefix="/wizard-stream", tags=["项目创建向导(流式)"])
 logger = get_logger(__name__)
 
@@ -36,25 +40,110 @@ async def world_building_generator(
     # 标记数据库会话是否已提交
     db_committed = False
     try:
+        mode = data.get("mode", "create")
+        project_id = data.get("project_id")
+        project = None
+
+        if mode == "update":
+            user_id = data.get("user_id")
+            if not user_id:
+                yield await SSEResponse.send_error("用户未登录", 401)
+                return
+
+            if not project_id:
+                yield await SSEResponse.send_error("project_id 是必需的参数", 400)
+                return
+
+            result = await db.execute(
+                select(Project).where(
+                    Project.id == project_id,
+                    Project.user_id == user_id
+                )
+            )
+            project = result.scalar_one_or_none()
+            if not project:
+                yield await SSEResponse.send_error("项目不存在或无权访问", 404)
+                return
+
+            yield await SSEResponse.send_progress("更新世界设定...", 20)
+
+            field_mapping = {
+                "time_period": "world_time_period",
+                "location": "world_location",
+                "atmosphere": "world_atmosphere",
+                "rules": "world_rules",
+            }
+            for payload_key, project_field in field_mapping.items():
+                if payload_key in data:
+                    setattr(project, project_field, data.get(payload_key))
+
+            await db.commit()
+            await db.refresh(project)
+            db_committed = True
+
+            yield await SSEResponse.send_result({
+                "project_id": project.id,
+                "time_period": project.world_time_period or "",
+                "location": project.world_location or "",
+                "atmosphere": project.world_atmosphere or "",
+                "rules": project.world_rules or "",
+            })
+            yield await SSEResponse.send_progress("完成!", 100, "success")
+            yield await SSEResponse.send_done()
+            return
+
+        if mode == "regenerate":
+            user_id = data.get("user_id")
+            if not user_id:
+                yield await SSEResponse.send_error("用户未登录", 401)
+                return
+
+            if not project_id:
+                yield await SSEResponse.send_error("project_id 是必需的参数", 400)
+                return
+
+            yield await SSEResponse.send_progress("加载项目资料...", 5)
+            result = await db.execute(
+                select(Project).where(
+                    Project.id == project_id,
+                    Project.user_id == user_id
+                )
+            )
+            project = result.scalar_one_or_none()
+            if not project:
+                yield await SSEResponse.send_error("项目不存在或无权访问", 404)
+                return
+
         # 发送开始消息
-        yield await SSEResponse.send_progress("开始生成世界观...", 10)
+        start_message = "开始重新生成世界观..." if mode == "regenerate" else "开始生成世界观..."
+        yield await SSEResponse.send_progress(start_message, 10)
         
         # 提取参数
-        title = data.get("title")
-        description = data.get("description")
-        theme = data.get("theme")
-        genre = data.get("genre")
-        narrative_perspective = data.get("narrative_perspective")
-        target_words = data.get("target_words")
-        chapter_count = data.get("chapter_count")
-        character_count = data.get("character_count")
+        if mode == "regenerate" and project is not None:
+            title = project.title or "未命名项目"
+            description = project.description or ""
+            theme = project.theme or title
+            genre = project.genre or "通用"
+            narrative_perspective = project.narrative_perspective
+            target_words = project.target_words
+            chapter_count = project.chapter_count
+            character_count = project.character_count
+        else:
+            title = data.get("title")
+            description = data.get("description")
+            theme = data.get("theme")
+            genre = data.get("genre")
+            narrative_perspective = data.get("narrative_perspective")
+            target_words = data.get("target_words")
+            chapter_count = data.get("chapter_count")
+            character_count = data.get("character_count")
         provider = data.get("provider")
         model = data.get("model")
         enable_mcp = data.get("enable_mcp", False)  # 默认禁用MCP，需要用户明确选择
         selected_plugins = data.get("selected_plugins", [])  # 选择的插件列表
         user_id = data.get("user_id")  # 从中间件注入
         
-        if not title or not description or not theme or not genre:
+        if mode == "create" and (not title or not description or not theme or not genre):
             yield await SSEResponse.send_error("title、description、theme 和 genre 是必需的参数", 400)
             return
         
@@ -213,87 +302,144 @@ async def world_building_generator(
             yield await SSEResponse.send_error("用户ID缺失，无法创建项目", 401)
             return
         
-        project = Project(
-            user_id=user_id,  # 添加user_id字段
-            title=title,
-            description=description,
-            theme=theme,
-            genre=genre,
-            world_time_period=world_data.get("time_period"),
-            world_location=world_data.get("location"),
-            world_atmosphere=world_data.get("atmosphere"),
-            world_rules=world_data.get("rules"),
-            narrative_perspective=narrative_perspective,
-            target_words=target_words,
-            chapter_count=chapter_count,
-            character_count=character_count,
-            wizard_status="incomplete",
-            wizard_step=1,
-            status="planning"
-        )
-        db.add(project)
-        await db.commit()
-        await db.refresh(project)
-        
-        # 自动设置默认写作风格为第一个全局预设风格
-        try:
-            result = await db.execute(
-                select(WritingStyle).where(
-                    WritingStyle.project_id.is_(None),
-                    WritingStyle.order_index == 1
-                ).limit(1)
-            )
-            first_style = result.scalar_one_or_none()
-            
-            if first_style:
-                default_style = ProjectDefaultStyle(
-                    project_id=project.id,
-                    style_id=first_style.id
-                )
-                db.add(default_style)
-                await db.commit()
-                logger.info(f"为项目 {project.id} 自动设置默认风格: {first_style.name}")
-            else:
-                logger.warning(f"未找到order_index=1的全局预设风格，项目 {project.id} 未设置默认风格")
-        except Exception as e:
-            logger.warning(f"设置默认写作风格失败: {e}，不影响项目创建")
-        
-        db_committed = True
-
-        # 【新增】世界观生成后,立即生成详细世界规则
-        from app.services.world_rule_service import world_rule_service
         generated_rules = []
-        try:
-            yield await SSEResponse.send_progress("🎨 正在生成详细世界规则系统...", 85)
-            generated_rules = await world_rule_service.generate_initial_rules_for_project(
-                db, project, user_ai_service
+        if mode == "create":
+            project = Project(
+                user_id=user_id,  # 添加user_id字段
+                title=title,
+                description=description,
+                theme=theme,
+                genre=genre,
+                world_time_period=world_data.get("time_period"),
+                world_location=world_data.get("location"),
+                world_atmosphere=world_data.get("atmosphere"),
+                world_rules=world_data.get("rules"),
+                narrative_perspective=narrative_perspective,
+                target_words=target_words,
+                chapter_count=chapter_count,
+                character_count=character_count,
+                wizard_status="incomplete",
+                wizard_step=1,
+                status="planning"
             )
+            db.add(project)
+            await db.commit()
+            await db.refresh(project)
+            
+            # 自动设置默认写作风格为第一个全局预设风格
+            try:
+                result = await db.execute(
+                    select(WritingStyle).where(
+                        WritingStyle.project_id.is_(None),
+                        WritingStyle.order_index == 1
+                    ).limit(1)
+                )
+                first_style = result.scalar_one_or_none()
+                
+                if first_style:
+                    default_style = ProjectDefaultStyle(
+                        project_id=project.id,
+                        style_id=first_style.id
+                    )
+                    db.add(default_style)
+                    await db.commit()
+                    logger.info(f"为项目 {project.id} 自动设置默认风格: {first_style.name}")
+                else:
+                    logger.warning(f"未找到order_index=1的全局预设风格，项目 {project.id} 未设置默认风格")
+            except Exception as e:
+                logger.warning(f"设置默认写作风格失败: {e}，不影响项目创建")
+            
+            db_committed = True
 
-            if generated_rules:
-                # 先提交世界规则到数据库，确保规则持久化
-                yield await SSEResponse.send_progress("💾 正在保存世界规则...", 88)
-                await db.commit()
-                logger.info(f"✅ 成功保存 {len(generated_rules)} 条世界规则到数据库")
+            # 【新增】世界观生成后,立即生成详细世界规则
+            from app.services.world_rule_service import world_rule_service
+            try:
+                yield await SSEResponse.send_progress("🎨 正在生成详细世界规则系统...", 85)
+                generated_rules = await world_rule_service.generate_initial_rules_for_project(
+                    db, project, user_ai_service
+                )
 
-                # 向量化生成的规则
-                yield await SSEResponse.send_progress("🔄 正在向量化世界规则...", 90)
-                vectorized_count = 0
-                for rule in generated_rules:
+                if generated_rules:
+                    # 先提交世界规则到数据库，确保规则持久化
+                    yield await SSEResponse.send_progress("💾 正在保存世界规则...", 88)
+                    await db.commit()
+                    logger.info(f"✅ 成功保存 {len(generated_rules)} 条世界规则到数据库")
+
+                    # 向量化生成的规则
+                    yield await SSEResponse.send_progress("🔄 正在向量化世界规则...", 90)
+                    vectorized_count = 0
+                    for rule in generated_rules:
+                        try:
+                            await db.refresh(rule)
+                            await world_rule_service.upsert_rule_to_vector_db(rule)
+                            vectorized_count += 1
+                        except Exception as vec_error:
+                            logger.warning(f"⚠️ 规则向量化失败: {rule.name} - {str(vec_error)}")
+
+                    logger.info(f"✅ 世界观生成完成,成功创建并向量化 {vectorized_count}/{len(generated_rules)} 条世界规则")
+                    yield await SSEResponse.send_progress(f"✅ 已生成 {len(generated_rules)} 条世界规则", 95)
+                else:
+                    logger.info("📋 世界观生成完成,使用基础规则设定")
+                    yield await SSEResponse.send_progress("📋 使用基础世界规则", 95)
+            except Exception as rule_error:
+                logger.warning(f"⚠️ 世界规则生成失败（不影响世界观创建）: {str(rule_error)}")
+                yield await SSEResponse.send_progress("⚠️ 世界规则生成失败,已保存基础设定", 95)
+        else:
+            if project is None:
+                yield await SSEResponse.send_error("项目不存在", 404)
+                return
+
+            project.world_time_period = world_data.get("time_period")
+            project.world_location = world_data.get("location")
+            project.world_atmosphere = world_data.get("atmosphere")
+            project.world_rules = world_data.get("rules")
+            await db.flush()
+
+            from app.services.world_rule_service import world_rule_service
+            try:
+                yield await SSEResponse.send_progress("♻️ 正在刷新世界规则系统...", 85)
+
+                existing_rules_result = await db.execute(
+                    select(WorldRule).where(WorldRule.project_id == project.id)
+                )
+                existing_rules = existing_rules_result.scalars().all()
+
+                for rule in existing_rules:
                     try:
-                        await db.refresh(rule)
-                        await world_rule_service.upsert_rule_to_vector_db(rule)
-                        vectorized_count += 1
+                        await world_rule_service.delete_rule_from_vector_db(project.id, rule.id)
                     except Exception as vec_error:
-                        logger.warning(f"⚠️ 规则向量化失败: {rule.name} - {str(vec_error)}")
+                        logger.warning(f"⚠️ 删除旧规则向量失败: {rule.id} - {str(vec_error)}")
+                    await db.delete(rule)
 
-                logger.info(f"✅ 世界观生成完成,成功创建并向量化 {vectorized_count}/{len(generated_rules)} 条世界规则")
-                yield await SSEResponse.send_progress(f"✅ 已生成 {len(generated_rules)} 条世界规则", 95)
-            else:
-                logger.info("📋 世界观生成完成,使用基础规则设定")
-                yield await SSEResponse.send_progress("📋 使用基础世界规则", 95)
-        except Exception as rule_error:
-            logger.warning(f"⚠️ 世界规则生成失败（不影响世界观创建）: {str(rule_error)}")
-            yield await SSEResponse.send_progress("⚠️ 世界规则生成失败,已保存基础设定", 95)
+                generated_rules = await world_rule_service.generate_initial_rules_for_project(
+                    db, project, user_ai_service
+                )
+
+                await db.commit()
+                await db.refresh(project)
+                db_committed = True
+
+                if generated_rules:
+                    yield await SSEResponse.send_progress("🔄 正在向量化世界规则...", 90)
+                    vectorized_count = 0
+                    for rule in generated_rules:
+                        try:
+                            await db.refresh(rule)
+                            await world_rule_service.upsert_rule_to_vector_db(rule)
+                            vectorized_count += 1
+                        except Exception as vec_error:
+                            logger.warning(f"⚠️ 规则向量化失败: {rule.name} - {str(vec_error)}")
+
+                    logger.info(f"✅ 世界观重生成完成,成功重建并向量化 {vectorized_count}/{len(generated_rules)} 条世界规则")
+                    yield await SSEResponse.send_progress(f"✅ 已重建 {len(generated_rules)} 条世界规则", 95)
+                else:
+                    yield await SSEResponse.send_progress("📋 已更新基础世界规则", 95)
+            except Exception as rule_error:
+                logger.warning(f"⚠️ 世界规则刷新失败（保留基础设定）: {str(rule_error)}")
+                await db.commit()
+                await db.refresh(project)
+                db_committed = True
+                yield await SSEResponse.send_progress("⚠️ 世界规则刷新失败,已保存基础设定", 95)
 
         # 发送最终结果
         yield await SSEResponse.send_result({
@@ -309,17 +455,9 @@ async def world_building_generator(
         yield await SSEResponse.send_done()
         
     except GeneratorExit:
-        # SSE连接断开，回滚未提交的事务
         logger.warning("世界构建生成器被提前关闭")
-        if not db_committed and db.in_transaction():
-            await db.rollback()
-            logger.info("世界构建事务已回滚（GeneratorExit）")
     except Exception as e:
         logger.error(f"世界构建流式生成失败: {str(e)}")
-        # 异常时回滚事务
-        if not db_committed and db.in_transaction():
-            await db.rollback()
-            logger.info("世界构建事务已回滚（异常）")
         yield await SSEResponse.send_error(f"生成失败: {str(e)}")
 
 
@@ -741,7 +879,7 @@ async def characters_generator(
                 age=str(char_data.get("age", "")) if not is_organization else None,
                 gender=char_data.get("gender") if not is_organization else None,
                 is_organization=is_organization,
-                role_type=char_data.get("role_type", "supporting"),
+                role_type=normalize_role_type(char_data.get("role_type"), "supporting"),
                 personality=char_data.get("personality", ""),
                 background=char_data.get("background", ""),
                 appearance=char_data.get("appearance", ""),
@@ -848,15 +986,10 @@ async def characters_generator(
                                 source="ai"
                             )
                             
-                            # 匹配预定义关系类型
-                            rel_type_result = await db.execute(
-                                select(RelationshipType).where(
-                                    RelationshipType.name == rel.get("relationship_type")
-                                )
-                            )
-                            rel_type = rel_type_result.scalar_one_or_none()
-                            if rel_type:
-                                relationship.relationship_type_id = rel_type.id
+                            # 模糊匹配预定义关系类型（三级回退）
+                            matched_type_id = await match_relationship_type(db, rel.get("relationship_type"))
+                            if matched_type_id:
+                                relationship.relationship_type_id = matched_type_id
                             
                             db.add(relationship)
                             relationships_created += 1
@@ -975,14 +1108,8 @@ async def characters_generator(
         
     except GeneratorExit:
         logger.warning("角色生成器被提前关闭")
-        if not db_committed and db.in_transaction():
-            await db.rollback()
-            logger.info("角色生成事务已回滚（GeneratorExit）")
     except Exception as e:
         logger.error(f"角色生成失败: {str(e)}")
-        if not db_committed and db.in_transaction():
-            await db.rollback()
-            logger.info("角色生成事务已回滚（异常）")
         yield await SSEResponse.send_error(f"生成失败: {str(e)}")
 
 
@@ -1134,7 +1261,7 @@ async def outline_generator(
         characters = result.scalars().all()
 
         # 筛选主角（role_type 包含"主角"）
-        protagonists = [char for char in characters if char.role_type and "主角" in char.role_type]
+        protagonists = [char for char in characters if is_protagonist_role(char.role_type)]
 
         # 构建主角详细信息（完整信息，用于强制约束）
         protagonists_info_parts = []
@@ -1144,16 +1271,18 @@ async def outline_generator(
                 parts.append(f"  - 性格：{char.personality[:200]}")
             if char.background:
                 parts.append(f"  - 背景：{char.background[:300]}")
-            if char.motivation:
-                parts.append(f"  - 动机：{char.motivation[:200]}")
-            if char.initial_status:
-                parts.append(f"  - 开局处境：{char.initial_status[:200]}")
+            motivation = getattr(char, "motivation", None)
+            initial_status = getattr(char, "initial_status", None)
+            if motivation:
+                parts.append(f"  - 动机：{str(motivation)[:200]}")
+            if initial_status:
+                parts.append(f"  - 开局处境：{str(initial_status)[:200]}")
             protagonists_info_parts.append("\n".join(parts))
 
         protagonists_info = "\n\n".join(protagonists_info_parts) if protagonists_info_parts else ""
 
         # 其他角色信息（非主角）
-        other_characters = [char for char in characters if not char.role_type or "主角" not in char.role_type]
+        other_characters = [char for char in characters if not is_protagonist_role(char.role_type)]
         characters_info = "\n".join([
             f"- {char.name} ({'组织' if char.is_organization else '角色'}, {char.role_type}): {char.personality[:100] if char.personality else '暂无描述'}"
             for char in other_characters
@@ -1355,14 +1484,8 @@ async def outline_generator(
         
     except GeneratorExit:
         logger.warning("大纲生成器被提前关闭")
-        if not db_committed and db.in_transaction():
-            await db.rollback()
-            logger.info("大纲生成事务已回滚（GeneratorExit）")
     except Exception as e:
         logger.error(f"大纲生成失败: {str(e)}")
-        if not db_committed and db.in_transaction():
-            await db.rollback()
-            logger.info("大纲生成事务已回滚（异常）")
         yield await SSEResponse.send_error(f"生成失败: {str(e)}")
 
 
@@ -1428,6 +1551,27 @@ async def cleanup_wizard_generator(
         )
         outlines = outlines_result.scalars().all()
         outlines_count = len(outlines)
+
+        # 统计剧情线
+        plot_lines_result = await db.execute(
+            select(PlotLine).where(PlotLine.project_id == project_id)
+        )
+        plot_lines = plot_lines_result.scalars().all()
+        plot_lines_count = len(plot_lines)
+
+        # 统计剧情卡片
+        plot_cards_result = await db.execute(
+            select(PlotCard).where(PlotCard.project_id == project_id)
+        )
+        plot_cards = plot_cards_result.scalars().all()
+        plot_cards_count = len(plot_cards)
+
+        # 统计章纲
+        chapter_outlines_result = await db.execute(
+            select(ChapterOutline).where(ChapterOutline.project_id == project_id)
+        )
+        chapter_outlines = chapter_outlines_result.scalars().all()
+        chapter_outlines_count = len(chapter_outlines)
         
         # 统计章节
         chapters_result = await db.execute(
@@ -1444,7 +1588,7 @@ async def cleanup_wizard_generator(
         memories_count = len(memories)
         
         yield await SSEResponse.send_progress(
-            f"找到 {characters_count} 个角色，{outlines_count} 个大纲，{chapters_count} 个章节，{memories_count} 条记忆", 
+            f"找到 {characters_count} 个角色，{outlines_count} 个大纲，{plot_lines_count} 条剧情线，{plot_cards_count} 张剧情卡片，{chapter_outlines_count} 个章纲，{chapters_count} 个章节，{memories_count} 条记忆",
             30
         )
         
@@ -1469,21 +1613,42 @@ async def cleanup_wizard_generator(
             yield await SSEResponse.send_progress("删除章节...", 60)
             for chapter in chapters:
                 await db.delete(chapter)
-        
-        # 3. 删除大纲
+
+        # 3. 删除章纲
+        if chapter_outlines_count > 0:
+            yield await SSEResponse.send_progress("删除章纲...", 66)
+            for chapter_outline in chapter_outlines:
+                await db.delete(chapter_outline)
+
+        # 4. 删除剧情卡片
+        if plot_cards_count > 0:
+            yield await SSEResponse.send_progress("删除剧情卡片...", 70)
+            for plot_card in plot_cards:
+                await db.delete(plot_card)
+
+        # 5. 删除剧情线
+        if plot_lines_count > 0:
+            yield await SSEResponse.send_progress("删除剧情线...", 74)
+            for plot_line in plot_lines:
+                await db.delete(plot_line)
+
+        # 6. 删除大纲
         if outlines_count > 0:
-            yield await SSEResponse.send_progress("删除大纲...", 70)
+            yield await SSEResponse.send_progress("删除大纲...", 78)
             for outline in outlines:
                 await db.delete(outline)
-        
-        # 4. 删除角色和关系
+
+        # 7. 删除角色和关系
         if characters_count > 0:
-            yield await SSEResponse.send_progress("删除角色和关系...", 80)
+            yield await SSEResponse.send_progress("删除角色和关系...", 82)
             
             # 删除角色关系
             await db.execute(
                 delete(CharacterRelationship).where(
-                    CharacterRelationship.character_id.in_([c.id for c in characters])
+                    or_(
+                        CharacterRelationship.character_from_id.in_([c.id for c in characters]),
+                        CharacterRelationship.character_to_id.in_([c.id for c in characters]),
+                    )
                 )
             )
             
@@ -1505,7 +1670,7 @@ async def cleanup_wizard_generator(
             for character in characters:
                 await db.delete(character)
         
-        # 5. 重置项目统计
+        # 8. 重置项目统计
         yield await SSEResponse.send_progress("重置项目统计...", 90)
         project.character_count = 0
         project.current_words = 0
@@ -1521,6 +1686,9 @@ async def cleanup_wizard_generator(
             "deleted": {
                 "characters": characters_count,
                 "outlines": outlines_count,
+                "plot_lines": plot_lines_count,
+                "plot_cards": plot_cards_count,
+                "chapter_outlines": chapter_outlines_count,
                 "chapters": chapters_count,
                 "memories": memories_count
             }
@@ -1530,8 +1698,6 @@ async def cleanup_wizard_generator(
         
     except Exception as e:
         logger.error(f"清理向导数据失败: {str(e)}")
-        if not db_committed and db.in_transaction():
-            await db.rollback()
         yield await SSEResponse.send_error(f"清理失败: {str(e)}")
 
 

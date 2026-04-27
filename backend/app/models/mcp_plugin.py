@@ -1,7 +1,7 @@
 """MCP插件配置数据模型"""
 from sqlalchemy import Column, String, Text, Boolean, Integer, DateTime, Index, JSON
 from sqlalchemy.sql import func
-from app.database import Base
+from app.db_base import Base
 import uuid
 
 

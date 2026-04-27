@@ -1,703 +1,506 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
-import { Card, Table, Tag, Button, Space, message, Modal, Form, Select, InputNumber, Input, Descriptions } from 'antd';
-import { PlusOutlined, TeamOutlined, UserOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
-import { useStore } from '../store';
-import axios from 'axios';
+import { useEffect, useState, useCallback } from 'react'
+import { Plus, Pencil, Trash2, Building, Loader2, Users, UserPlus, X, ChevronDown, ChevronUp } from 'lucide-react'
+import { toast } from 'sonner'
+import { useStore } from '@/store/index'
+import { organizationApi, characterApi } from '@/services/api'
+import type { Character } from '@/types'
 
+/* ------------------------------------------------------------------ */
+/*  类型定义（对齐后端 schema）                                          */
+/* ------------------------------------------------------------------ */
+
+/** 对应后端 OrganizationDetailResponse */
 interface Organization {
-  id: string;
-  character_id: string;
-  name: string;
-  type: string;
-  purpose: string;
-  member_count: number;
-  power_level: number;
-  location?: string;
-  motto?: string;
-  color?: string;
+  id: string
+  character_id: string
+  name: string
+  type?: string           // 来自 Character.organization_type
+  purpose?: string        // 来自 Character.organization_purpose
+  member_count: number
+  power_level: number     // 0-100
+  location?: string
+  motto?: string
+  color?: string
 }
 
-interface OrganizationMember {
-  id: string;
-  character_id: string;
-  character_name: string;
-  position: string;
-  rank: number;
-  loyalty: number;
-  contribution: number;
-  status: string;
-  joined_at?: string;
-  left_at?: string;
-  notes?: string;
+/** 对应后端 OrganizationMemberDetailResponse */
+interface OrgMember {
+  id: string
+  character_id: string
+  character_name: string
+  position: string
+  rank: number
+  loyalty: number         // 0-100
+  contribution: number    // 0-100
+  status: string
+  joined_at?: string
+  left_at?: string
+  notes?: string
 }
 
-interface Character {
-  id: string;
-  name: string;
-  is_organization: boolean;
+/** 创建/编辑组织表单 — Character 字段 + Organization 字段 */
+interface OrgForm {
+  // Character 字段
+  name: string
+  organization_type: string
+  description: string       // 存入 Character.personality
+  purpose: string           // 存入 Character.organization_purpose
+  // Organization 字段
+  power_level: number
+  location: string
+  motto: string
+  color: string
 }
 
+/** 添加/编辑成员表单 */
+interface MemberForm {
+  character_id: string
+  position: string
+  rank: number
+  loyalty: number
+}
+
+const EMPTY_ORG_FORM: OrgForm = {
+  name: '', organization_type: '', description: '', purpose: '',
+  power_level: 50, location: '', motto: '', color: '',
+}
+const EMPTY_MEMBER_FORM: MemberForm = { character_id: '', position: '', rank: 0, loyalty: 50 }
+
+const ORG_TYPES = ['门派', '帮会', '家族', '王朝', '商会', '军队', '宗教', '学院', '其他'] as const
+
+const TYPE_COLORS: Record<string, string> = {
+  门派: 'bg-purple-50 text-purple-600',
+  帮会: 'bg-red-50 text-red-600',
+  家族: 'bg-amber-50 text-amber-700',
+  王朝: 'bg-yellow-50 text-yellow-700',
+  商会: 'bg-emerald-50 text-emerald-600',
+  军队: 'bg-slate-100 text-slate-600',
+  宗教: 'bg-indigo-50 text-indigo-600',
+  学院: 'bg-blue-50 text-blue-600',
+  其他: 'bg-gray-100 text-gray-500',
+}
+
+/* ------------------------------------------------------------------ */
+/*  主组件                                                              */
+/* ------------------------------------------------------------------ */
 export default function Organizations() {
-  const { projectId } = useParams<{ projectId: string }>();
-  const { currentProject } = useStore();
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [selectedOrg, setSelectedOrg] = useState<Organization | null>(null);
-  const [members, setMembers] = useState<OrganizationMember[]>([]);
-  const [characters, setCharacters] = useState<Character[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [isAddMemberModalOpen, setIsAddMemberModalOpen] = useState(false);
-  const [isEditMemberModalOpen, setIsEditMemberModalOpen] = useState(false);
-  const [isEditOrgModalOpen, setIsEditOrgModalOpen] = useState(false);
-  const [editingMember, setEditingMember] = useState<OrganizationMember | null>(null);
-  const [form] = Form.useForm();
-  const [editMemberForm] = Form.useForm();
-  const [editOrgForm] = Form.useForm();
-  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  const { currentProject } = useStore()
 
-  useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(window.innerWidth <= 768);
-    };
+  /* ---- 状态 ---- */
+  const [orgs, setOrgs] = useState<Organization[]>([])
+  const [loading, setLoading] = useState(false)
+  const [showOrgModal, setShowOrgModal] = useState(false)
+  const [editingOrg, setEditingOrg] = useState<Organization | null>(null)
+  const [orgForm, setOrgForm] = useState<OrgForm>(EMPTY_ORG_FORM)
 
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
+  // 成员管理
+  const [expandedOrgId, setExpandedOrgId] = useState<string | null>(null)
+  const [members, setMembers] = useState<OrgMember[]>([])
+  const [membersLoading, setMembersLoading] = useState(false)
+  const [showMemberModal, setShowMemberModal] = useState(false)
+  const [editingMember, setEditingMember] = useState<OrgMember | null>(null)
+  const [memberForm, setMemberForm] = useState<MemberForm>(EMPTY_MEMBER_FORM)
+  const [characters, setCharacters] = useState<Character[]>([])
 
-  const loadOrganizations = useCallback(async () => {
-    setLoading(true);
+  /* ---- 数据获取 ---- */
+  const fetchOrgs = useCallback(async () => {
+    if (!currentProject?.id) return
     try {
-      const res = await axios.get(`/api/organizations/project/${projectId}`);
-      setOrganizations(res.data);
-      if (res.data.length > 0 && !selectedOrg) {
-        setSelectedOrg(res.data[0]);
-        loadMembers(res.data[0].id);
+      setLoading(true)
+      const data = await organizationApi.getProjectOrganizations(currentProject.id)
+      setOrgs((Array.isArray(data) ? data : []) as unknown as Organization[])
+    } catch { /* api 层已 toast */ } finally { setLoading(false) }
+  }, [currentProject?.id])
+
+  const fetchMembers = useCallback(async (orgId: string) => {
+    try {
+      setMembersLoading(true)
+      const data = await organizationApi.getMembers(orgId)
+      setMembers((Array.isArray(data) ? data : []) as unknown as OrgMember[])
+    } catch { /* api 层已 toast */ } finally { setMembersLoading(false) }
+  }, [])
+
+  const fetchCharacters = useCallback(async () => {
+    if (!currentProject?.id) return
+    try {
+      const data = await characterApi.getCharacters(currentProject.id)
+      setCharacters((Array.isArray(data) ? data : []).filter(c => !c.is_organization))
+    } catch { /* ignore */ }
+  }, [currentProject?.id])
+
+  useEffect(() => { fetchOrgs() }, [fetchOrgs])
+
+  /* ---- 组织 CRUD ---- */
+  const openCreateOrg = () => {
+    setEditingOrg(null)
+    setOrgForm(EMPTY_ORG_FORM)
+    setShowOrgModal(true)
+  }
+
+  const openEditOrg = (org: Organization) => {
+    setEditingOrg(org)
+    setOrgForm({
+      name: org.name,
+      organization_type: org.type || '',
+      description: '',  // Character.personality 不在列表响应中，留空
+      purpose: org.purpose || '',
+      power_level: org.power_level ?? 50,
+      location: org.location || '',
+      motto: org.motto || '',
+      color: org.color || '',
+    })
+    setShowOrgModal(true)
+  }
+
+  const handleOrgSubmit = async () => {
+    if (!currentProject?.id) return
+    if (!orgForm.name.trim()) { toast.error('请填写组织名称'); return }
+    try {
+      if (editingOrg) {
+        // 编辑模式：分别更新 Character 和 Organization
+        // 1. 更新 Character 基本信息
+        await characterApi.updateCharacter(editingOrg.character_id, {
+          name: orgForm.name,
+          organization_type: orgForm.organization_type || undefined,
+          organization_purpose: orgForm.purpose || undefined,
+          personality: orgForm.description || undefined,
+        })
+        // 2. 更新 Organization 额外属性
+        await organizationApi.updateOrganization(editingOrg.id, {
+          power_level: orgForm.power_level,
+          location: orgForm.location || undefined,
+          motto: orgForm.motto || undefined,
+          color: orgForm.color || undefined,
+        })
+        toast.success('组织已更新')
+        await fetchOrgs()
+      } else {
+        // 创建模式：两步操作
+        // 第一步：创建 is_organization=true 的 Character
+        const char = await characterApi.createCharacter({
+          project_id: currentProject.id,
+          name: orgForm.name,
+          role_type: '组织',
+          personality: orgForm.description || undefined,
+          is_organization: true,
+          organization_type: orgForm.organization_type || undefined,
+          organization_purpose: orgForm.purpose || undefined,
+        })
+        // 第二步：用 character_id 创建 Organization 记录
+        await organizationApi.createOrganization({
+          character_id: char.id,
+          project_id: currentProject.id,
+          power_level: orgForm.power_level,
+          location: orgForm.location || undefined,
+          motto: orgForm.motto || undefined,
+          color: orgForm.color || undefined,
+        })
+        toast.success('组织已创建')
+        await fetchOrgs()
       }
-    } catch (error) {
-      message.error('加载组织列表失败');
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId, selectedOrg]);
+      setShowOrgModal(false)
+    } catch { /* api 层已 toast */ }
+  }
 
-  const loadCharacters = useCallback(async () => {
+  const handleDeleteOrg = async (org: Organization) => {
+    if (!confirm(`确定删除「${org.name}」？此操作不可撤销。`)) return
     try {
-      const res = await axios.get(`/api/characters?project_id=${projectId}`);
-      setCharacters(res.data.items || []);
-    } catch (error) {
-      console.error('加载角色列表失败', error);
-    }
-  }, [projectId]);
+      await organizationApi.deleteOrganization(org.id)
+      setOrgs(prev => prev.filter(o => o.id !== org.id))
+      if (expandedOrgId === org.id) { setExpandedOrgId(null); setMembers([]) }
+      toast.success('组织已删除')
+    } catch { /* api 层已 toast */ }
+  }
 
-  useEffect(() => {
-    if (projectId) {
-      loadOrganizations();
-      loadCharacters();
+  /* ---- 成员管理 ---- */
+  const toggleMembers = async (orgId: string) => {
+    if (expandedOrgId === orgId) {
+      setExpandedOrgId(null)
+      setMembers([])
+      return
     }
-  }, [projectId, loadOrganizations, loadCharacters]);
+    setExpandedOrgId(orgId)
+    await fetchMembers(orgId)
+  }
 
-  const loadMembers = async (orgId: string) => {
+  const openAddMember = async () => {
+    setEditingMember(null)
+    setMemberForm(EMPTY_MEMBER_FORM)
+    await fetchCharacters()
+    setShowMemberModal(true)
+  }
+
+  const openEditMember = (m: OrgMember) => {
+    setEditingMember(m)
+    setMemberForm({
+      character_id: m.character_id,
+      position: m.position || '',
+      rank: m.rank ?? 0,
+      loyalty: m.loyalty ?? 50,
+    })
+    setShowMemberModal(true)
+  }
+
+  const handleMemberSubmit = async () => {
+    if (!expandedOrgId) return
     try {
-      const res = await axios.get(`/api/organizations/${orgId}/members`);
-      setMembers(res.data);
-    } catch (error) {
-      message.error('加载成员列表失败');
-      console.error(error);
-    }
-  };
-
-  const handleSelectOrganization = (org: Organization) => {
-    setSelectedOrg(org);
-    loadMembers(org.id);
-  };
-
-  const handleAddMember = async (values: Record<string, unknown>) => {
-    if (!selectedOrg) return;
-
-    try {
-      await axios.post(`/api/organizations/${selectedOrg.id}/members`, values);
-      message.success('成员添加成功');
-      setIsAddMemberModalOpen(false);
-      form.resetFields();
-      loadMembers(selectedOrg.id);
-      loadOrganizations(); // 刷新成员计数
-    } catch (error) {
-      message.error('添加成员失败');
-      console.error(error);
-    }
-  };
-
-  const handleRemoveMember = async (memberId: string) => {
-    Modal.confirm({
-      title: '确认移除',
-      content: '确定要移除该成员吗？',
-      centered: true,
-      okText: '移除',
-      okType: 'danger',
-      cancelText: '取消',
-      onOk: async () => {
-        try {
-          await axios.delete(`/api/organizations/members/${memberId}`);
-          message.success('成员移除成功');
-          if (selectedOrg) {
-            loadMembers(selectedOrg.id);
-            loadOrganizations(); // 刷新成员计数
-          }
-        } catch (error) {
-          message.error('移除失败');
-          console.error(error);
-        }
+      if (editingMember) {
+        // 编辑成员：不传 character_id
+        const updated = await organizationApi.updateMember(editingMember.id, {
+          position: memberForm.position || undefined,
+          rank: memberForm.rank,
+          loyalty: memberForm.loyalty,
+        }) as unknown as OrgMember
+        setMembers(prev => prev.map(m => m.id === updated.id ? updated : m))
+        toast.success('成员信息已更新')
+      } else {
+        if (!memberForm.character_id) { toast.error('请选择角色'); return }
+        if (!memberForm.position.trim()) { toast.error('请填写职位'); return }
+        const created = await organizationApi.addMember(expandedOrgId, {
+          character_id: memberForm.character_id,
+          position: memberForm.position,
+          rank: memberForm.rank,
+          loyalty: memberForm.loyalty,
+        }) as unknown as OrgMember
+        setMembers(prev => [...prev, created])
+        toast.success('成员已添加')
       }
-    });
-  };
+      setShowMemberModal(false)
+    } catch { /* api 层已 toast */ }
+  }
 
-  const handleEditMember = (member: OrganizationMember) => {
-    setEditingMember(member);
-    editMemberForm.setFieldsValue({
-      position: member.position,
-      rank: member.rank,
-      loyalty: member.loyalty,
-      contribution: member.contribution,
-      status: member.status,
-      notes: member.notes,
-      joined_at: member.joined_at
-    });
-    setIsEditMemberModalOpen(true);
-  };
-
-  const handleUpdateMember = async (values: Record<string, unknown>) => {
-    if (!editingMember) return;
-
+  const handleRemoveMember = async (m: OrgMember) => {
+    const name = m.character_name || '该成员'
+    if (!confirm(`确定移除「${name}」？`)) return
     try {
-      await axios.put(`/api/organizations/members/${editingMember.id}`, values);
-      message.success('成员信息更新成功');
-      setIsEditMemberModalOpen(false);
-      editMemberForm.resetFields();
-      setEditingMember(null);
-      if (selectedOrg) {
-        loadMembers(selectedOrg.id);
-      }
-    } catch (error) {
-      message.error('更新失败');
-      console.error(error);
-    }
-  };
+      await organizationApi.removeMember(m.id)
+      setMembers(prev => prev.filter(x => x.id !== m.id))
+      toast.success('成员已移除')
+    } catch { /* api 层已 toast */ }
+  }
 
-  const getStatusColor = (status: string) => {
-    const colors: Record<string, string> = {
-      active: 'green',
-      retired: 'default',
-      expelled: 'red',
-      deceased: 'black'
-    };
-    return colors[status] || 'default';
-  };
-
-  const getStatusText = (status: string) => {
-    const texts: Record<string, string> = {
-      active: '在职',
-      retired: '退休',
-      expelled: '除名',
-      deceased: '已故'
-    };
-    return texts[status] || status;
-  };
-
-  const memberColumns = [
-    {
-      title: '姓名',
-      dataIndex: 'character_name',
-      key: 'name',
-      render: (name: string) => (
-        <Space>
-          <UserOutlined />
-          <span>{name}</span>
-        </Space>
-      ),
-      width: isMobile ? 80 : undefined,
-    },
-    {
-      title: '职位',
-      dataIndex: 'position',
-      key: 'position',
-      render: (position: string, record: OrganizationMember) => (
-        <Tag color="blue">{position} {!isMobile && `(级别 ${record.rank})`}</Tag>
-      ),
-      width: isMobile ? 80 : undefined,
-    },
-    ...(!isMobile ? [
-      {
-        title: '忠诚度',
-        dataIndex: 'loyalty',
-        key: 'loyalty',
-        render: (loyalty: number) => (
-          <span style={{ color: loyalty >= 70 ? 'green' : loyalty >= 40 ? 'orange' : 'red' }}>
-            {loyalty}%
-          </span>
-        ),
-      },
-      {
-        title: '贡献度',
-        dataIndex: 'contribution',
-        key: 'contribution',
-        render: (contribution: number) => `${contribution}%`,
-      },
-      {
-        title: '状态',
-        dataIndex: 'status',
-        key: 'status',
-        render: (status: string) => (
-          <Tag color={getStatusColor(status)}>{getStatusText(status)}</Tag>
-        ),
-      },
-      {
-        title: '加入时间',
-        dataIndex: 'joined_at',
-        key: 'joined_at',
-        render: (time: string) => time || '-',
-      }
-    ] : []),
-    {
-      title: '操作',
-      key: 'action',
-      render: (_: unknown, record: OrganizationMember) => (
-        <Space>
-          <Button
-            type="link"
-            size="small"
-            icon={<EditOutlined />}
-            onClick={() => handleEditMember(record)}
-          >
-            {isMobile ? '' : '编辑'}
-          </Button>
-          <Button
-            type="link"
-            danger
-            size="small"
-            icon={<DeleteOutlined />}
-            onClick={() => handleRemoveMember(record.id)}
-          >
-            {isMobile ? '删除' : '移除'}
-          </Button>
-        </Space>
-      ),
-      width: isMobile ? 60 : undefined,
-      fixed: isMobile ? 'right' as const : undefined,
-    },
-  ];
-
-  // 过滤掉已是成员的角色
-  const availableCharacters = characters.filter(
-    c => !c.is_organization && !members.some(m => m.character_id === c.id)
-  );
-
+  /* ---- 渲染：标题区 + 卡片网格 ---- */
   return (
-    <div>
-      <Card
-        title={
-          <Space wrap>
-            <TeamOutlined />
-            <span style={{ fontSize: isMobile ? 14 : 16 }}>组织管理</span>
-            {!isMobile && <Tag color="blue">{currentProject?.title}</Tag>}
-          </Space>
-        }
-      >
-        <div style={{
-          display: isMobile ? 'flex' : 'grid',
-          flexDirection: isMobile ? 'column' : undefined,
-          gridTemplateColumns: isMobile ? undefined : '300px 1fr',
-          gap: isMobile ? '16px' : '24px',
-          maxHeight: isMobile ? 'calc(100vh - 200px)' : undefined,
-          overflowY: isMobile ? 'auto' : undefined
-        }}>
-          {/* 左侧：组织列表 */}
-          <div>
-            <Card
-              size="small"
-              title={`组织列表 (${organizations.length})`}
-              loading={loading}
-            >
-              <Space direction="vertical" style={{ width: '100%' }}>
-                {organizations.map(org => (
-                  <Card
-                    key={org.id}
-                    size="small"
-                    hoverable
-                    style={{
-                      cursor: 'pointer',
-                      border: selectedOrg?.id === org.id ? '2px solid #1890ff' : '1px solid #d9d9d9'
-                    }}
-                    onClick={() => handleSelectOrganization(org)}
-                  >
-                    <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                      <strong>{org.name}</strong>
-                      <Tag>{org.type}</Tag>
-                      <div style={{ fontSize: '12px', color: '#666' }}>
-                        成员: {org.member_count} | 势力: {org.power_level}
-                      </div>
-                    </Space>
-                  </Card>
-                ))}
-              </Space>
-            </Card>
-          </div>
+    <div className="space-y-6">
+      {/* 标题区 */}
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-bold text-content">组织管理</h1>
+        <button onClick={openCreateOrg} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5">
+          <Plus className="w-4 h-4" />
+          创建组织
+        </button>
+      </div>
 
-          {/* 右侧：组织详情和成员 */}
-          <div style={{ minHeight: isMobile ? 'auto' : undefined }}>
-            {selectedOrg ? (
-              <Space direction="vertical" style={{ width: '100%' }} size="large">
-                <Card
-                  title="组织详情"
-                  size="small"
-                  extra={
-                    <Button
-                      type="link"
-                      size="small"
-                      icon={<EditOutlined />}
-                      onClick={() => {
-                        editOrgForm.setFieldsValue({
-                          power_level: selectedOrg.power_level,
-                          location: selectedOrg.location,
-                          motto: selectedOrg.motto,
-                          color: selectedOrg.color
-                        });
-                        setIsEditOrgModalOpen(true);
-                      }}
-                    >
-                      编辑
-                    </Button>
-                  }
-                >
-                  <Descriptions column={isMobile ? 1 : 2} size="small">
-                    <Descriptions.Item label="组织名称">{selectedOrg.name}</Descriptions.Item>
-                    <Descriptions.Item label="类型">{selectedOrg.type}</Descriptions.Item>
-                    <Descriptions.Item label="成员数量">{selectedOrg.member_count}</Descriptions.Item>
-                    <Descriptions.Item label="势力等级">
-                      <Tag color={selectedOrg.power_level >= 70 ? 'red' : selectedOrg.power_level >= 50 ? 'orange' : 'default'}>
-                        {selectedOrg.power_level}
-                      </Tag>
-                    </Descriptions.Item>
-                    {selectedOrg.location && (
-                      <Descriptions.Item label="所在地" span={isMobile ? 1 : 2}>
-                        {selectedOrg.location}
-                      </Descriptions.Item>
+      {/* 主体 */}
+      {loading ? (
+        <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-content-secondary" /></div>
+      ) : orgs.length === 0 ? (
+        <div className="text-center py-12 text-content-secondary text-sm">
+          <Building className="w-8 h-8 mx-auto mb-2 opacity-40" />
+          暂无组织，点击上方按钮创建
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {orgs.map(org => (
+            <div key={org.id} className="bg-white border border-surface-border rounded-card p-4 space-y-3">
+              {/* 卡片头部 */}
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <h3 className="text-sm font-semibold text-content truncate">{org.name}</h3>
+                  <div className="flex items-center gap-2 mt-1 flex-wrap">
+                    {org.type && (
+                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${TYPE_COLORS[org.type] || TYPE_COLORS['其他']}`}>
+                        {org.type}
+                      </span>
                     )}
-                    {selectedOrg.color && (
-                      <Descriptions.Item label="代表颜色">
-                        {selectedOrg.color}
-                      </Descriptions.Item>
+                    <span className="text-xs text-content-secondary">
+                      {org.member_count ?? 0} 名成员
+                    </span>
+                    {org.power_level != null && (
+                      <span className="text-xs text-content-secondary">
+                        势力 {org.power_level}
+                      </span>
                     )}
-                    {selectedOrg.motto && (
-                      <Descriptions.Item label="格言/口号" span={2}>
-                        {selectedOrg.motto}
-                      </Descriptions.Item>
-                    )}
-                    <Descriptions.Item label="组织目的" span={2}>
-                      {selectedOrg.purpose}
-                    </Descriptions.Item>
-                  </Descriptions>
-                </Card>
-
-                <Card
-                  title={`组织成员 (${members.length})`}
-                  extra={
-                    <Button
-                      type="primary"
-                      size="small"
-                      icon={<PlusOutlined />}
-                      onClick={() => setIsAddMemberModalOpen(true)}
-                      disabled={availableCharacters.length === 0}
-                    >
-                      添加成员
-                    </Button>
-                  }
-                >
-                  <Table
-                    columns={memberColumns}
-                    dataSource={members}
-                    rowKey="id"
-                    pagination={isMobile ? { simple: true, pageSize: 10 } : false}
-                    size="small"
-                    scroll={isMobile ? { x: 'max-content', y: 400 } : undefined}
-                  />
-                </Card>
-              </Space>
-            ) : (
-              <Card>
-                <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
-                  请从左侧选择一个组织查看详情
+                  </div>
                 </div>
-              </Card>
-            )}
+                <div className="flex gap-1 shrink-0">
+                  <button onClick={() => toggleMembers(org.id)} className="p-1.5 rounded hover:bg-surface-hover text-content-secondary transition-colors" title="查看成员">
+                    <Users className="w-3.5 h-3.5" />
+                  </button>
+                  <button onClick={() => openEditOrg(org)} className="p-1.5 rounded hover:bg-surface-hover text-content-secondary transition-colors" title="编辑">
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  <button onClick={() => handleDeleteOrg(org)} className="p-1.5 rounded hover:bg-red-50 text-content-secondary hover:text-red-500 transition-colors" title="删除">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* 额外信息 */}
+              {org.purpose && <p className="text-xs text-content-secondary/80">目标：{org.purpose}</p>}
+              {org.location && <p className="text-xs text-content-secondary/80">所在地：{org.location}</p>}
+              {org.motto && <p className="text-xs text-content-secondary/80 italic">「{org.motto}」</p>}
+
+              {/* 展开/收起成员面板 */}
+              <button
+                onClick={() => toggleMembers(org.id)}
+                className="flex items-center gap-1 text-xs text-brand hover:text-brand-600 transition-colors"
+              >
+                {expandedOrgId === org.id ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                {expandedOrgId === org.id ? '收起成员' : '查看成员'}
+              </button>
+
+              {/* 成员面板 */}
+              {expandedOrgId === org.id && (
+                <div className="border-t border-surface-border pt-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-content-secondary">成员列表</span>
+                    <button onClick={openAddMember} className="inline-flex items-center gap-1 text-xs text-brand hover:text-brand-600 transition-colors">
+                      <UserPlus className="w-3 h-3" /> 添加成员
+                    </button>
+                  </div>
+
+                  {membersLoading ? (
+                    <div className="flex justify-center py-4"><Loader2 className="w-4 h-4 animate-spin text-content-secondary" /></div>
+                  ) : members.length === 0 ? (
+                    <p className="text-xs text-content-secondary/60 py-2 text-center">暂无成员</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {members.map(m => (
+                        <div key={m.id} className="flex items-center justify-between bg-surface-hover/50 rounded px-3 py-2">
+                          <div className="min-w-0">
+                            <span className="text-sm text-content font-medium">{m.character_name || '未知角色'}</span>
+                            {(m.position || m.rank) && (
+                              <span className="ml-2 text-xs text-content-secondary">
+                                {[m.position, m.rank ? `等级${m.rank}` : ''].filter(Boolean).join(' · ')}
+                              </span>
+                            )}
+                            {m.loyalty != null && (
+                              <span className="ml-2 text-xs text-content-secondary/70">
+                                忠诚 {m.loyalty}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex gap-1 shrink-0">
+                            <button onClick={() => openEditMember(m)} className="p-1 rounded hover:bg-white text-content-secondary transition-colors" title="编辑">
+                              <Pencil className="w-3 h-3" />
+                            </button>
+                            <button onClick={() => handleRemoveMember(m)} className="p-1 rounded hover:bg-red-50 text-content-secondary hover:text-red-500 transition-colors" title="移除">
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 创建/编辑组织弹窗 */}
+      {showOrgModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowOrgModal(false)}>
+          <div className="bg-white rounded-modal shadow-xl p-6 w-full max-w-md mx-4 space-y-4 max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold text-content">{editingOrg ? '编辑组织' : '创建组织'}</h2>
+              <button onClick={() => setShowOrgModal(false)} className="p-1 rounded hover:bg-surface-hover text-content-secondary"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">名称 <span className="text-red-500">*</span></label>
+                <input value={orgForm.name} onChange={e => setOrgForm(f => ({ ...f, name: e.target.value }))} placeholder="组织名称" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+              </div>
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">类型</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {ORG_TYPES.map(t => (
+                    <button key={t} onClick={() => setOrgForm(f => ({ ...f, organization_type: f.organization_type === t ? '' : t }))}
+                      className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${orgForm.organization_type === t ? 'bg-brand text-white' : 'bg-gray-100 text-content-secondary hover:bg-gray-200'}`}
+                    >{t}</button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">描述</label>
+                <textarea value={orgForm.description} onChange={e => setOrgForm(f => ({ ...f, description: e.target.value }))} rows={3} placeholder="组织的背景描述…" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors resize-none" />
+              </div>
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">目标/宗旨</label>
+                <textarea value={orgForm.purpose} onChange={e => setOrgForm(f => ({ ...f, purpose: e.target.value }))} rows={2} placeholder="组织的核心目标…" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors resize-none" />
+              </div>
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">势力等级 ({orgForm.power_level})</label>
+                <input type="range" min={0} max={100} value={orgForm.power_level} onChange={e => setOrgForm(f => ({ ...f, power_level: Number(e.target.value) }))} className="w-full" />
+              </div>
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">所在地</label>
+                <input value={orgForm.location} onChange={e => setOrgForm(f => ({ ...f, location: e.target.value }))} placeholder="如：昆仑山、中原…" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+              </div>
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">座右铭</label>
+                <input value={orgForm.motto} onChange={e => setOrgForm(f => ({ ...f, motto: e.target.value }))} placeholder="组织的座右铭…" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+              </div>
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">代表颜色</label>
+                <input type="color" value={orgForm.color || '#6366f1'} onChange={e => setOrgForm(f => ({ ...f, color: e.target.value }))} className="w-10 h-8 rounded border border-surface-border cursor-pointer" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => setShowOrgModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm transition-colors">取消</button>
+              <button onClick={handleOrgSubmit} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">确定</button>
+            </div>
           </div>
         </div>
-      </Card>
+      )}
 
-      {/* 添加成员模态框 */}
-      <Modal
-        title="添加组织成员"
-        open={isAddMemberModalOpen}
-        onCancel={() => {
-          setIsAddMemberModalOpen(false);
-          form.resetFields();
-        }}
-        footer={null}
-        centered={!isMobile}
-        width={isMobile ? '100%' : 500}
-        style={isMobile ? { top: 0, paddingBottom: 0, maxWidth: '100vw' } : undefined}
-        styles={isMobile ? { body: { maxHeight: 'calc(100vh - 110px)', overflowY: 'auto' } } : undefined}
-      >
-        <Form
-          form={form}
-          layout="vertical"
-          onFinish={handleAddMember}
-        >
-          <Form.Item
-            name="character_id"
-            label="选择角色"
-            rules={[{ required: true, message: '请选择角色' }]}
-          >
-            <Select
-              placeholder="选择要加入的角色"
-              showSearch
-              filterOption={(input, option) =>
-                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-              }
-              options={availableCharacters.map(c => ({
-                label: c.name,
-                value: c.id
-              }))}
-            />
-          </Form.Item>
-
-          <Form.Item
-            name="position"
-            label="职位"
-            rules={[{ required: true, message: '请输入职位' }]}
-          >
-            <Input placeholder="如：掌门、长老、弟子" />
-          </Form.Item>
-
-          <Form.Item
-            name="rank"
-            label="职位等级"
-            initialValue={5}
-            tooltip="数字越大等级越高"
-          >
-            <InputNumber min={0} max={10} style={{ width: '100%' }} />
-          </Form.Item>
-
-          <Form.Item
-            name="loyalty"
-            label="初始忠诚度"
-            initialValue={50}
-          >
-            <InputNumber min={0} max={100} style={{ width: '100%' }} addonAfter="%" />
-          </Form.Item>
-
-          <Form.Item
-            name="status"
-            label="状态"
-            initialValue="active"
-          >
-            <Select>
-              <Select.Option value="active">在职</Select.Option>
-              <Select.Option value="retired">退休</Select.Option>
-              <Select.Option value="expelled">除名</Select.Option>
-            </Select>
-          </Form.Item>
-
-          <Form.Item
-            name="joined_at"
-            label="加入时间"
-          >
-            <Input placeholder="如：开山大典时、三年前、建立之初等" />
-          </Form.Item>
-
-          <Form.Item>
-            <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-              <Button onClick={() => setIsAddMemberModalOpen(false)}>取消</Button>
-              <Button type="primary" htmlType="submit">
-                添加
-              </Button>
-            </Space>
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      {/* 编辑成员模态框 */}
-      <Modal
-        title="编辑成员信息"
-        open={isEditMemberModalOpen}
-        onCancel={() => {
-          setIsEditMemberModalOpen(false);
-          editMemberForm.resetFields();
-          setEditingMember(null);
-        }}
-        footer={null}
-        centered={true}
-        width={isMobile ? '90%' : 500}
-        style={isMobile ? {
-          maxWidth: '90vw',
-          margin: '0 auto'
-        } : undefined}
-        styles={isMobile ? {
-          body: {
-            maxHeight: 'calc(80vh - 110px)',
-            overflowY: 'auto',
-            padding: '20px 16px'
-          }
-        } : undefined}
-      >
-        <Form
-          form={editMemberForm}
-          layout="vertical"
-          onFinish={handleUpdateMember}
-        >
-          <Form.Item
-            name="position"
-            label="职位"
-            rules={[{ required: true, message: '请输入职位' }]}
-          >
-            <Input placeholder="如：掌门、长老、弟子" />
-          </Form.Item>
-
-          <Form.Item
-            name="rank"
-            label="职位等级"
-            tooltip="数字越大等级越高"
-          >
-            <InputNumber min={0} max={10} style={{ width: '100%' }} />
-          </Form.Item>
-
-          <Form.Item
-            name="loyalty"
-            label="忠诚度"
-          >
-            <InputNumber min={0} max={100} style={{ width: '100%' }} addonAfter="%" />
-          </Form.Item>
-
-          <Form.Item
-            name="contribution"
-            label="贡献度"
-          >
-            <InputNumber min={0} max={100} style={{ width: '100%' }} addonAfter="%" />
-          </Form.Item>
-
-          <Form.Item
-            name="status"
-            label="状态"
-          >
-            <Select>
-              <Select.Option value="active">在职</Select.Option>
-              <Select.Option value="retired">退休</Select.Option>
-              <Select.Option value="expelled">除名</Select.Option>
-              <Select.Option value="deceased">已故</Select.Option>
-            </Select>
-          </Form.Item>
-
-          <Form.Item
-            name="joined_at"
-            label="加入时间"
-          >
-            <Input placeholder="如：开山大典时、三年前、建立之初等" />
-          </Form.Item>
-
-          <Form.Item
-            name="notes"
-            label="备注"
-          >
-            <Input.TextArea rows={3} placeholder="成员相关的备注信息" />
-          </Form.Item>
-
-          <Form.Item>
-            <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-              <Button onClick={() => {
-                setIsEditMemberModalOpen(false);
-                editMemberForm.resetFields();
-                setEditingMember(null);
-              }}>
-                取消
-              </Button>
-              <Button type="primary" htmlType="submit">
-                保存
-              </Button>
-            </Space>
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      {/* 编辑组织模态框 */}
-      <Modal
-        title="编辑组织信息"
-        open={isEditOrgModalOpen}
-        onCancel={() => {
-          setIsEditOrgModalOpen(false);
-          editOrgForm.resetFields();
-        }}
-        footer={null}
-        centered={!isMobile}
-        width={isMobile ? '100%' : 500}
-        style={isMobile ? { top: 0, paddingBottom: 0, maxWidth: '100vw' } : undefined}
-        styles={isMobile ? { body: { maxHeight: 'calc(100vh - 110px)', overflowY: 'auto' } } : undefined}
-      >
-        <Form
-          form={editOrgForm}
-          layout="vertical"
-          onFinish={async (values) => {
-            if (!selectedOrg) return;
-            try {
-              await axios.put(`/api/organizations/${selectedOrg.id}`, values);
-              message.success('组织信息更新成功');
-              setIsEditOrgModalOpen(false);
-              loadOrganizations();
-            } catch (error) {
-              message.error('更新失败');
-              console.error(error);
-            }
-          }}
-        >
-          <Form.Item
-            name="power_level"
-            label="势力等级"
-            rules={[{ required: true, message: '请输入势力等级' }]}
-            tooltip="0-100的数值，表示组织的影响力"
-          >
-            <InputNumber min={0} max={100} style={{ width: '100%' }} />
-          </Form.Item>
-
-          <Form.Item
-            name="location"
-            label="所在地"
-          >
-            <Input placeholder="组织的主要活动区域或总部位置" />
-          </Form.Item>
-
-          <Form.Item
-            name="motto"
-            label="格言/口号"
-          >
-            <Input placeholder="组织的宗旨、格言或口号" />
-          </Form.Item>
-
-          <Form.Item
-            name="color"
-            label="代表颜色"
-          >
-            <Input placeholder="如：深红色、金色、黑色等" />
-          </Form.Item>
-
-          <Form.Item>
-            <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-              <Button onClick={() => setIsEditOrgModalOpen(false)}>取消</Button>
-              <Button type="primary" htmlType="submit">
-                保存
-              </Button>
-            </Space>
-          </Form.Item>
-        </Form>
-      </Modal>
+      {/* 添加/编辑成员弹窗 */}
+      {showMemberModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowMemberModal(false)}>
+          <div className="bg-white rounded-modal shadow-xl p-6 w-full max-w-md mx-4 space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold text-content">{editingMember ? '编辑成员' : '添加成员'}</h2>
+              <button onClick={() => setShowMemberModal(false)} className="p-1 rounded hover:bg-surface-hover text-content-secondary"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="space-y-3">
+              {!editingMember && (
+                <div>
+                  <label className="block text-sm text-content-secondary mb-1">选择角色 <span className="text-red-500">*</span></label>
+                  <select
+                    value={memberForm.character_id}
+                    onChange={e => setMemberForm(f => ({ ...f, character_id: e.target.value }))}
+                    className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors"
+                  >
+                    <option value="">请选择角色…</option>
+                    {characters
+                      .filter(c => !members.some(m => m.character_id === c.id))
+                      .map(c => <option key={c.id} value={c.id}>{c.name}{c.role_type ? ` (${c.role_type})` : ''}</option>)
+                    }
+                  </select>
+                </div>
+              )}
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">职位 <span className="text-red-500">*</span></label>
+                <input value={memberForm.position} onChange={e => setMemberForm(f => ({ ...f, position: e.target.value }))} placeholder="如：掌门、长老、弟子…" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+              </div>
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">等级</label>
+                <input type="number" min={0} value={memberForm.rank} onChange={e => setMemberForm(f => ({ ...f, rank: Number(e.target.value) }))} placeholder="职位等级（数字）" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+              </div>
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">忠诚度 ({memberForm.loyalty})</label>
+                <input type="range" min={0} max={100} value={memberForm.loyalty} onChange={e => setMemberForm(f => ({ ...f, loyalty: Number(e.target.value) }))} className="w-full" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => setShowMemberModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm transition-colors">取消</button>
+              <button onClick={handleMemberSubmit} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">确定</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
-  );
+  )
 }

@@ -25,6 +25,7 @@ from app.services.plot_link_service import PlotLinkService
 from app.services.plot_generation_service import PlotGenerationService
 from app.api.settings import get_user_ai_service
 from app.logger import get_logger
+from app.utils.plot_line_types import normalize_plot_line_type
 
 router = APIRouter(prefix="/plot-lines", tags=["剧情线"])
 logger = get_logger(__name__)
@@ -95,7 +96,7 @@ async def get_plot_lines(
     query = select(PlotLine).where(PlotLine.project_id == project_id)
     
     if line_type:
-        query = query.where(PlotLine.line_type == line_type)
+        query = query.where(PlotLine.line_type == normalize_plot_line_type(line_type))
     
     # 按排序序号排序
     query = query.order_by(PlotLine.order_index.asc(), PlotLine.created_at.asc())
@@ -158,7 +159,7 @@ async def create_plot_line(line_data: PlotLineCreate, db: AsyncSession = Depends
         story_outline_id=line_data.story_outline_id,
         title=line_data.title,
         description=line_data.description,
-        line_type=line_data.line_type,
+        line_type=normalize_plot_line_type(line_data.line_type),
         order_index=line_data.order_index,
         timeline_data=timeline_data_json,
         estimated_chapters=line_data.estimated_chapters
@@ -206,6 +207,12 @@ async def update_plot_line(
     # 处理 JSON 字段
     if "timeline_data" in update_data and update_data["timeline_data"] is not None:
         update_data["timeline_data"] = json.dumps(update_data["timeline_data"], ensure_ascii=False)
+
+    if "line_type" in update_data:
+        update_data["line_type"] = normalize_plot_line_type(
+            update_data["line_type"],
+            default=line.line_type or "main"
+        )
     
     # 更新基本字段
     if update_data:
@@ -295,7 +302,8 @@ async def generate_plot_lines(
     if generate_data.enable_mcp and generate_data.selected_plugins:
         logger.info(f"  - 选择的插件：{generate_data.selected_plugins}")
     logger.info(f"  - 大纲ID：{generate_data.story_outline_id or '无'}")
-    logger.info(f"  - 剧情线类型：{generate_data.line_type}")
+    normalized_line_type = normalize_plot_line_type(generate_data.line_type)
+    logger.info(f"  - line_type={normalized_line_type}")
     logger.info(f"  - 生成数量：{generate_data.count}条")
     
     try:
@@ -307,7 +315,7 @@ async def generate_plot_lines(
             db=db,
             project_id=generate_data.project_id,
             outline_id=generate_data.story_outline_id,
-            line_type=generate_data.line_type,
+            line_type=normalized_line_type,
             based_on_cards=generate_data.based_on_cards,
             based_on_lines=generate_data.based_on_lines,
             custom_prompt=generate_data.prompt,
@@ -368,8 +376,16 @@ async def get_line_types(project_id: str, db: AsyncSession = Depends(get_db)):
     
     types = result.all()
     
+    normalized_counts: Dict[str, int] = {}
+    for item in types:
+        normalized_type = normalize_plot_line_type(item.line_type)
+        normalized_counts[normalized_type] = normalized_counts.get(normalized_type, 0) + item.count
+
     return {
-        "types": [{"type": t.line_type, "count": t.count} for t in types]
+        "types": [
+            {"type": line_type, "count": count}
+            for line_type, count in normalized_counts.items()
+        ]
     }
 
 

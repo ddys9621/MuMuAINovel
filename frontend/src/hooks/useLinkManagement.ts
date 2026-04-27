@@ -3,7 +3,7 @@
  * 提供统一的关联操作接口和状态管理
  */
 import { useState, useCallback, useEffect } from 'react';
-import { message } from 'antd';
+import { toast } from 'sonner';
 import {
   plotLineLinkApi,
   chapterOutlineLinkApi,
@@ -36,7 +36,7 @@ export function usePlotLineLinks(lineId: string, options?: UseLinkManagementOpti
       const data = await plotLineLinkApi.getChapterOutlines(lineId);
       setChapterOutlines(data);
     } catch (error) {
-      message.error('加载关联章纲失败');
+      toast.error('加载关联章纲失败');
       options?.onError?.(error as Error);
     } finally {
       setLoading(false);
@@ -51,7 +51,7 @@ export function usePlotLineLinks(lineId: string, options?: UseLinkManagementOpti
       const data = await plotLineLinkApi.getPlotCards(lineId);
       setPlotCards(data);
     } catch (error) {
-      message.error('加载关联剧情卡片失败');
+      toast.error('加载关联剧情卡片失败');
       options?.onError?.(error as Error);
     } finally {
       setLoading(false);
@@ -74,11 +74,11 @@ export function usePlotLineLinks(lineId: string, options?: UseLinkManagementOpti
     setLoading(true);
     try {
       await plotLineLinkApi.linkChapterOutlines(lineId, { chapter_outline_ids: chapterOutlineIds, role });
-      message.success('关联章纲成功');
+      toast.success('关联章纲成功');
       await loadChapterOutlines();
       options?.onSuccess?.();
     } catch (error) {
-      message.error('关联章纲失败');
+      toast.error('关联章纲失败');
       options?.onError?.(error as Error);
     } finally {
       setLoading(false);
@@ -90,11 +90,11 @@ export function usePlotLineLinks(lineId: string, options?: UseLinkManagementOpti
     setLoading(true);
     try {
       await plotLineLinkApi.unlinkChapterOutlines(lineId, chapterOutlineIds);
-      message.success('取消关联成功');
+      toast.success('取消关联成功');
       await loadChapterOutlines();
       options?.onSuccess?.();
     } catch (error) {
-      message.error('取消关联失败');
+      toast.error('取消关联失败');
       options?.onError?.(error as Error);
     } finally {
       setLoading(false);
@@ -106,11 +106,11 @@ export function usePlotLineLinks(lineId: string, options?: UseLinkManagementOpti
     setLoading(true);
     try {
       await plotLineLinkApi.linkPlotCards(lineId, plotCardIds);
-      message.success('关联剧情卡片成功');
+      toast.success('关联剧情卡片成功');
       await loadPlotCards();
       options?.onSuccess?.();
     } catch (error) {
-      message.error('关联剧情卡片失败');
+      toast.error('关联剧情卡片失败');
       options?.onError?.(error as Error);
     } finally {
       setLoading(false);
@@ -122,11 +122,11 @@ export function usePlotLineLinks(lineId: string, options?: UseLinkManagementOpti
     setLoading(true);
     try {
       await plotLineLinkApi.unlinkPlotCards(lineId, plotCardIds);
-      message.success('取消关联成功');
+      toast.success('取消关联成功');
       await loadPlotCards();
       options?.onSuccess?.();
     } catch (error) {
-      message.error('取消关联失败');
+      toast.error('取消关联失败');
       options?.onError?.(error as Error);
     } finally {
       setLoading(false);
@@ -162,7 +162,7 @@ export function useChapterOutlineLinks(outlineId: string, options?: UseLinkManag
       const data = await chapterOutlineLinkApi.getPlotLines(outlineId);
       setPlotLines(data);
     } catch (error) {
-      message.error('加载关联剧情线失败');
+      toast.error('加载关联剧情线失败');
       options?.onError?.(error as Error);
     } finally {
       setLoading(false);
@@ -177,7 +177,7 @@ export function useChapterOutlineLinks(outlineId: string, options?: UseLinkManag
       const data = await chapterOutlineLinkApi.getPlotCards(outlineId);
       setPlotCards(data);
     } catch (error) {
-      message.error('加载关联剧情卡片失败');
+      toast.error('加载关联剧情卡片失败');
       options?.onError?.(error as Error);
     } finally {
       setLoading(false);
@@ -204,16 +204,12 @@ export function useChapterOutlineLinks(outlineId: string, options?: UseLinkManag
         plot_line_ids: plotLineIds,
         role,
       });
-      message.success('关联剧情线成功');
+      toast.success('关联剧情线成功');
       await loadPlotLines();
-      
-      // 触发全局数据刷新事件
-      const { globalRefreshEvents } = await import('./useGlobalRefresh');
-      globalRefreshEvents.emit();
       
       options?.onSuccess?.();
     } catch (error) {
-      message.error('关联剧情线失败');
+      toast.error('关联剧情线失败');
       options?.onError?.(error as Error);
     } finally {
       setLoading(false);
@@ -225,11 +221,11 @@ export function useChapterOutlineLinks(outlineId: string, options?: UseLinkManag
     setLoading(true);
     try {
       await chapterOutlineLinkApi.unlinkPlotLines(outlineId, plotLineIds);
-      message.success('取消关联成功');
+      toast.success('取消关联成功');
       await loadPlotLines();
       options?.onSuccess?.();
     } catch (error) {
-      message.error('取消关联失败');
+      toast.error('取消关联失败');
       options?.onError?.(error as Error);
     } finally {
       setLoading(false);
@@ -244,11 +240,11 @@ export function useChapterOutlineLinks(outlineId: string, options?: UseLinkManag
     setLoading(true);
     try {
       await chapterOutlineLinkApi.linkPlotCards(outlineId, { plot_card_ids: plotCardIds, usage_type: usageType });
-      message.success('关联剧情卡片成功');
+      toast.success('关联剧情卡片成功');
       await loadPlotCards();
       options?.onSuccess?.();
     } catch (error) {
-      message.error('关联剧情卡片失败');
+      toast.error('关联剧情卡片失败');
       options?.onError?.(error as Error);
     } finally {
       setLoading(false);
@@ -260,11 +256,11 @@ export function useChapterOutlineLinks(outlineId: string, options?: UseLinkManag
     setLoading(true);
     try {
       await chapterOutlineLinkApi.unlinkPlotCards(outlineId, plotCardIds);
-      message.success('取消关联成功');
+      toast.success('取消关联成功');
       await loadPlotCards();
       options?.onSuccess?.();
     } catch (error) {
-      message.error('取消关联失败');
+      toast.error('取消关联失败');
       options?.onError?.(error as Error);
     } finally {
       setLoading(false);
@@ -280,11 +276,11 @@ export function useChapterOutlineLinks(outlineId: string, options?: UseLinkManag
     setLoading(true);
     try {
       await chapterOutlineLinkApi.updatePlotCardUsage(outlineId, cardId, { usage_type: usageType, usage_notes: usageNotes });
-      message.success('更新使用状态成功');
+      toast.success('更新使用状态成功');
       await loadPlotCards();
       options?.onSuccess?.();
     } catch (error) {
-      message.error('更新使用状态失败');
+      toast.error('更新使用状态失败');
       options?.onError?.(error as Error);
     } finally {
       setLoading(false);
@@ -321,7 +317,7 @@ export function usePlotCardLinks(cardId: string, options?: UseLinkManagementOpti
       const data = await plotCardLinkApi.getPlotLines(cardId);
       setPlotLines(data);
     } catch (error) {
-      message.error('加载关联剧情线失败');
+      toast.error('加载关联剧情线失败');
       options?.onError?.(error as Error);
     } finally {
       setLoading(false);
@@ -336,7 +332,7 @@ export function usePlotCardLinks(cardId: string, options?: UseLinkManagementOpti
       const data = await plotCardLinkApi.getChapterOutlines(cardId);
       setChapterOutlines(data);
     } catch (error) {
-      message.error('加载关联章纲失败');
+      toast.error('加载关联章纲失败');
       options?.onError?.(error as Error);
     } finally {
       setLoading(false);
@@ -356,11 +352,11 @@ export function usePlotCardLinks(cardId: string, options?: UseLinkManagementOpti
     setLoading(true);
     try {
       await plotCardLinkApi.linkPlotLines(cardId, plotLineIds);
-      message.success('关联剧情线成功');
+      toast.success('关联剧情线成功');
       await loadPlotLines();
       options?.onSuccess?.();
     } catch (error) {
-      message.error('关联剧情线失败');
+      toast.error('关联剧情线失败');
       options?.onError?.(error as Error);
     } finally {
       setLoading(false);
@@ -372,11 +368,11 @@ export function usePlotCardLinks(cardId: string, options?: UseLinkManagementOpti
     setLoading(true);
     try {
       await plotCardLinkApi.unlinkPlotLines(cardId, plotLineIds);
-      message.success('取消关联成功');
+      toast.success('取消关联成功');
       await loadPlotLines();
       options?.onSuccess?.();
     } catch (error) {
-      message.error('取消关联失败');
+      toast.error('取消关联失败');
       options?.onError?.(error as Error);
     } finally {
       setLoading(false);
@@ -390,11 +386,11 @@ export function usePlotCardLinks(cardId: string, options?: UseLinkManagementOpti
     setLoading(true);
     try {
       await plotCardLinkApi.linkChapterOutlines(cardId, links);
-      message.success('关联章纲成功');
+      toast.success('关联章纲成功');
       await loadChapterOutlines();
       options?.onSuccess?.();
     } catch (error) {
-      message.error('关联章纲失败');
+      toast.error('关联章纲失败');
       options?.onError?.(error as Error);
     } finally {
       setLoading(false);
@@ -406,11 +402,11 @@ export function usePlotCardLinks(cardId: string, options?: UseLinkManagementOpti
     setLoading(true);
     try {
       await plotCardLinkApi.unlinkChapterOutlines(cardId, chapterOutlineIds);
-      message.success('取消关联成功');
+      toast.success('取消关联成功');
       await loadChapterOutlines();
       options?.onSuccess?.();
     } catch (error) {
-      message.error('取消关联失败');
+      toast.error('取消关联失败');
       options?.onError?.(error as Error);
     } finally {
       setLoading(false);

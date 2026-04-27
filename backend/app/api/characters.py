@@ -11,6 +11,7 @@ from app.models.character import Character
 from app.models.project import Project
 from app.models.generation_history import GenerationHistory
 from app.models.relationship import CharacterRelationship, Organization, OrganizationMember, RelationshipType
+from app.services.relationship_matcher import match_relationship_type
 from app.schemas.character import (
     CharacterCreate,
     CharacterUpdate,
@@ -22,6 +23,7 @@ from app.services.ai_service import AIService
 from app.services.prompt_service import prompt_service
 from app.logger import get_logger
 from app.api.settings import get_user_ai_service
+from app.utils.role_type import normalize_role_type
 
 router = APIRouter(prefix="/characters", tags=["角色管理"])
 logger = get_logger(__name__)
@@ -246,6 +248,8 @@ async def update_character(
     
     # 更新字段
     update_data = character_update.model_dump(exclude_unset=True)
+    if "role_type" in update_data:
+        update_data["role_type"] = normalize_role_type(update_data["role_type"], character.role_type)
     for field, value in update_data.items():
         setattr(character, field, value)
     
@@ -304,7 +308,7 @@ async def create_character(
             age=character_data.age,
             gender=character_data.gender,
             is_organization=character_data.is_organization,
-            role_type=character_data.role_type or "supporting",
+            role_type=normalize_role_type(character_data.role_type, "supporting"),
             personality=character_data.personality,
             background=character_data.background,
             appearance=character_data.appearance,
@@ -586,7 +590,7 @@ async def generate_character(
             age=str(character_data.get("age", "")),
             gender=character_data.get("gender"),
             is_organization=is_organization,
-            role_type=request.role_type or "supporting",
+            role_type=normalize_role_type(request.role_type, "supporting"),
             personality=character_data.get("personality", ""),
             background=character_data.get("background", ""),
             appearance=character_data.get("appearance", ""),
@@ -670,15 +674,10 @@ async def generate_character(
                                 source="ai"
                             )
                             
-                            # 匹配预定义关系类型
-                            rel_type_result = await db.execute(
-                                select(RelationshipType).where(
-                                    RelationshipType.name == rel.get("relationship_type")
-                                )
-                            )
-                            rel_type = rel_type_result.scalar_one_or_none()
-                            if rel_type:
-                                relationship.relationship_type_id = rel_type.id
+                            # 模糊匹配预定义关系类型（三级回退）
+                            matched_type_id = await match_relationship_type(db, rel.get("relationship_type"))
+                            if matched_type_id:
+                                relationship.relationship_type_id = matched_type_id
                             
                             db.add(relationship)
                             created_rels += 1
@@ -1010,7 +1009,7 @@ async def generate_character_stream(
                 age=str(character_data.get("age", "")),
                 gender=character_data.get("gender"),
                 is_organization=is_organization,
-                role_type=request.role_type or "supporting",
+                role_type=normalize_role_type(request.role_type, "supporting"),
                 personality=character_data.get("personality", ""),
                 background=character_data.get("background", ""),
                 appearance=character_data.get("appearance", ""),

@@ -14,6 +14,7 @@ from app.models.chapter_outline import ChapterOutline
 from app.models.project import Project
 from app.models.story_outline import StoryOutline
 from app.models.character import Character
+from app.models.relationship import Organization, OrganizationMember
 from app.models.generation_history import GenerationHistory
 from app.models.writing_style import WritingStyle
 from app.models.analysis_task import AnalysisTask
@@ -40,11 +41,15 @@ from app.schemas.regeneration import (
 from app.services.ai_service import AIService
 from app.services.prompt_service import prompt_service
 from app.services.plot_analyzer import PlotAnalyzer
+from app.services.chapter_consistency_service import chapter_consistency_service
 from app.services.memory_service import memory_service
+from app.services.narrative_state_service import narrative_state_service
 from app.services.chapter_regenerator import ChapterRegenerator
 from app.services.world_rule_service import WorldRuleService
 from app.logger import get_logger
 from app.api.settings import get_user_ai_service
+from app.config import settings as config_settings
+from app.utils.data_consistency import sync_organization_member_count
 from app.utils.sse_response import create_sse_response
 from app.utils.text_utils import count_words
 
@@ -94,6 +99,329 @@ async def get_db_write_lock(user_id: str) -> Lock:
         db_write_locks[user_id] = Lock()
         logger.debug(f"🔒 为用户 {user_id} 创建数据库写入锁")
     return db_write_locks[user_id]
+
+
+async def _auto_create_entities(
+    db: AsyncSession,
+    project_id: str,
+    chapter_number: int,
+    entity_result: dict,
+) -> int:
+    """Auto-create or incrementally enrich characters/organizations.
+
+    - New entity  → create with all available fields
+    - Existing entity with empty fields → fill in from new extraction (never overwrite non-empty)
+    Returns total number of created + enriched entities.
+    """
+    # --- 后置校验：自动纠正 AI 分类错误 ---
+    ORG_SUFFIXES = ("宗", "派", "门", "堂", "殿", "阁", "院", "府", "家", "帮", "盟", "会", "楼", "馆", "谷", "洞", "族", "庄", "寺", "观", "教", "营", "军", "城", "国")
+    characters_list = list(entity_result.get("characters", []) or [])
+    organizations_list = list(entity_result.get("organizations", []) or [])
+
+    corrected = []
+    kept_characters = []
+    for char in characters_list:
+        name = (char.get("name") or "").strip()
+        if name and name[-1] in ORG_SUFFIXES:
+            # 从 character 格式转为 organization 格式
+            org_entry = {
+                "name": name,
+                "organization_type": None,
+                "organization_purpose": None,
+                "personality": char.get("personality"),
+                "appearance": char.get("appearance"),
+                "location": None,
+                "known_members": [],
+                "traits": char.get("traits"),
+                "background": char.get("background"),
+            }
+            organizations_list.append(org_entry)
+            corrected.append(name)
+        else:
+            kept_characters.append(char)
+
+    if corrected:
+        logger.info(f"🔄 自动纠正分类: {corrected} 从人物移至组织")
+
+    entity_result = {
+        **entity_result,
+        "characters": kept_characters,
+        "organizations": organizations_list,
+    }
+
+    existing_result = await db.execute(
+        select(Character).where(Character.project_id == project_id)
+    )
+    existing_map: dict[str, Character] = {
+        (c.name or "").strip().lower(): c
+        for c in existing_result.scalars().all()
+        if c.name
+    }
+
+    created = 0
+    enriched = 0
+
+    def _val(raw: object) -> str | None:
+        """Return stripped non-empty string or None."""
+        if raw is None:
+            return None
+        s = str(raw).strip()
+        return s if s and s.lower() not in ("null", "none", "未知", "") else None
+
+    def _enrich(existing: Character, data: dict, is_org: bool = False) -> bool:
+        """Fill empty fields on *existing* from *data*. Returns True if anything changed."""
+        import json as _json
+        changed = False
+        field_map = {
+            "gender": "gender",
+            "age": "age",
+            "personality": "personality",
+            "appearance": "appearance",
+            "traits": "traits",
+        }
+        if is_org:
+            field_map.update({
+                "organization_type": "organization_type",
+                "organization_purpose": "organization_purpose",
+            })
+
+        for src_key, db_field in field_map.items():
+            new_val = _val(data.get(src_key))
+            if not new_val:
+                continue
+            cur_val = getattr(existing, db_field, None)
+            if cur_val and str(cur_val).strip():
+                continue
+            if db_field == "traits":
+                import json as _json
+                raw_traits = data.get("traits")
+                if isinstance(raw_traits, list) and raw_traits:
+                    setattr(existing, db_field, _json.dumps(raw_traits, ensure_ascii=False))
+                    changed = True
+                continue
+            setattr(existing, db_field, new_val)
+            changed = True
+
+        # background: append new info rather than overwrite
+        new_bg = _val(data.get("background"))
+        if new_bg:
+            cur_bg = (existing.background or "").strip()
+            if new_bg not in cur_bg:
+                sep = "\n" if cur_bg else ""
+                existing.background = f"{cur_bg}{sep}第{chapter_number}章：{new_bg}"
+                changed = True
+
+        # organization_members: merge new member names into existing list
+        if is_org:
+            new_members = data.get("known_members") or []
+            if isinstance(new_members, list) and new_members:
+                cur_members_raw = existing.organization_members or "[]"
+                try:
+                    cur_list = _json.loads(cur_members_raw) if isinstance(cur_members_raw, str) else (cur_members_raw or [])
+                except (ValueError, TypeError):
+                    cur_list = []
+                cur_set = {str(m).strip().lower() for m in cur_list if m}
+                added = [m for m in new_members if str(m).strip() and str(m).strip().lower() not in cur_set]
+                if added:
+                    merged = list(cur_list) + added
+                    existing.organization_members = _json.dumps(merged, ensure_ascii=False)
+                    changed = True
+
+        # upgrade role_type: minor → supporting → major → protagonist (never downgrade)
+        role_rank = {"minor": 0, "supporting": 1, "major": 2, "protagonist": 3}
+        new_role = _val(data.get("role_type"))
+        if new_role and new_role in role_rank:
+            cur_role = (existing.role_type or "minor").lower()
+            if role_rank.get(new_role, 0) > role_rank.get(cur_role, 0):
+                existing.role_type = new_role
+                changed = True
+
+        return changed
+
+    # --- Process characters ---
+    for char in entity_result.get("characters", []) or []:
+        name = _val(char.get("name"))
+        if not name:
+            continue
+        existing = existing_map.get(name.lower())
+        if existing:
+            if _enrich(existing, char, is_org=False):
+                enriched += 1
+        else:
+            import json as _json
+            traits_raw = char.get("traits")
+            traits_str = _json.dumps(traits_raw, ensure_ascii=False) if isinstance(traits_raw, list) and traits_raw else None
+            new_char = Character(
+                project_id=project_id,
+                name=name,
+                gender=_val(char.get("gender")),
+                age=_val(char.get("age")),
+                role_type=_val(char.get("role_type")) or "minor",
+                personality=_val(char.get("personality")),
+                appearance=_val(char.get("appearance")),
+                background=f"第{chapter_number}章首次出场。{_val(char.get('background')) or ''}",
+                traits=traits_str,
+            )
+            db.add(new_char)
+            existing_map[name.lower()] = new_char
+            created += 1
+
+    # --- Process organizations ---
+    for org in entity_result.get("organizations", []) or []:
+        name = _val(org.get("name"))
+        if not name:
+            continue
+        existing = existing_map.get(name.lower())
+        if existing:
+            if _enrich(existing, org, is_org=True):
+                enriched += 1
+        else:
+            import json as _json
+            traits_raw = org.get("traits")
+            traits_str = _json.dumps(traits_raw, ensure_ascii=False) if isinstance(traits_raw, list) and traits_raw else None
+            members_raw = org.get("known_members")
+            members_str = _json.dumps(members_raw, ensure_ascii=False) if isinstance(members_raw, list) and members_raw else None
+            location = _val(org.get("location"))
+            bg_parts = [f"第{chapter_number}章首次出场。"]
+            if location:
+                bg_parts.append(f"位于{location}。")
+            if _val(org.get("background")):
+                bg_parts.append(_val(org.get("background")))
+            new_org = Character(
+                project_id=project_id,
+                name=name,
+                is_organization=True,
+                role_type="supporting",
+                organization_type=_val(org.get("organization_type")),
+                organization_purpose=_val(org.get("organization_purpose")),
+                personality=_val(org.get("personality")),
+                appearance=_val(org.get("appearance")),
+                background="".join(bg_parts),
+                traits=traits_str,
+                organization_members=members_str,
+            )
+            db.add(new_org)
+            existing_map[name.lower()] = new_org
+            created += 1
+
+    # --- Process affiliations (character → organization membership) ---
+    await db.flush()  # ensure all new entities have IDs
+    affiliation_count = 0
+    dirty_organizations: dict[str, Organization] = {}
+    for char in entity_result.get("characters", []) or []:
+        char_name = _val(char.get("name"))
+        if not char_name:
+            continue
+        char_obj = existing_map.get(char_name.lower())
+        if not char_obj or not hasattr(char_obj, 'id') or not char_obj.id:
+            continue
+
+        for aff in char.get("affiliations", []) or []:
+            org_name = _val(aff.get("org_name"))
+            if not org_name:
+                continue
+            org_char = existing_map.get(org_name.lower())
+            if not org_char or not getattr(org_char, 'is_organization', False):
+                continue
+            if not org_char.id:
+                continue
+
+            # Find or create Organization detail record
+            org_result = await db.execute(
+                select(Organization).where(Organization.character_id == org_char.id)
+            )
+            org = org_result.scalar_one_or_none()
+            if not org:
+                org = Organization(
+                    character_id=org_char.id,
+                    project_id=project_id,
+                    member_count=0,
+                )
+                db.add(org)
+                await db.flush()
+
+            # Check existing membership
+            member_result = await db.execute(
+                select(OrganizationMember).where(
+                    OrganizationMember.organization_id == org.id,
+                    OrganizationMember.character_id == char_obj.id,
+                )
+            )
+            existing_member = member_result.scalar_one_or_none()
+
+            change = (aff.get("change") or "active").strip().lower()
+            position = _val(aff.get("position"))
+            reason = _val(aff.get("reason"))
+
+            def _append_note(member: OrganizationMember, action: str) -> None:
+                """Append a timestamped note to member.notes for history tracking."""
+                note = f"第{chapter_number}章 {action}"
+                if reason:
+                    note += f"（{reason}）"
+                cur = (member.notes or "").strip()
+                member.notes = f"{cur}\n{note}".strip() if cur else note
+
+            def _mark_org_count_dirty() -> None:
+                """Track organizations whose active-member count must be resynced."""
+                if org.id:
+                    dirty_organizations[org.id] = org
+
+            if existing_member:
+                if change in ("left", "expelled", "promoted", "joined", "active"):
+                    _mark_org_count_dirty()
+                if change in ("left", "expelled"):
+                    if existing_member.status != change:
+                        existing_member.status = change
+                        existing_member.left_at = f"第{chapter_number}章"
+                        _append_note(existing_member, "离开" if change == "left" else "被逐出")
+                        affiliation_count += 1
+                elif change == "promoted" and position:
+                    if existing_member.position != position or existing_member.status != "active":
+                        existing_member.position = position
+                        existing_member.status = "active"
+                        existing_member.left_at = None
+                        _append_note(existing_member, f"晋升为{position}")
+                        affiliation_count += 1
+                elif change in ("joined", "active"):
+                    if existing_member.status != "active":
+                        existing_member.status = "active"
+                        if change == "joined":
+                            existing_member.joined_at = f"第{chapter_number}章"
+                        existing_member.left_at = None
+                        if position:
+                            existing_member.position = position
+                        _append_note(existing_member, "重新加入" if change == "joined" else "恢复活跃状态")
+                        affiliation_count += 1
+            else:
+                if change not in ("left", "expelled"):
+                    note = f"第{chapter_number}章 加入"
+                    if reason:
+                        note += f"（{reason}）"
+                    new_member = OrganizationMember(
+                        organization_id=org.id,
+                        character_id=char_obj.id,
+                        position=position or "成员",
+                        rank=0,
+                        loyalty=50,
+                        status="active",
+                        joined_at=f"第{chapter_number}章",
+                        source="ai",
+                        notes=note,
+                    )
+                    db.add(new_member)
+                    _mark_org_count_dirty()
+                    affiliation_count += 1
+
+    if dirty_organizations:
+        # Recount touched organizations from active memberships so status flips never leave stale totals behind.
+        await db.flush()
+        for touched_org in dirty_organizations.values():
+            await sync_organization_member_count(touched_org, db)
+
+    if created > 0 or enriched > 0 or affiliation_count > 0:
+        logger.info(f"👥 第{chapter_number}章实体入库: 新建{created}个, 丰富{enriched}个, 归属变动{affiliation_count}条")
+
+    return created + enriched + affiliation_count
 
 
 async def get_or_create_chapter_from_outline(
@@ -214,6 +542,68 @@ async def get_or_create_chapter_endpoint(
     chapter = await get_or_create_chapter_from_outline(db, outline_id)
     
     return chapter
+
+
+@router.post("/project/{project_id}/sync-from-outlines", summary="从章纲批量同步章节")
+async def sync_chapters_from_outlines(
+    project_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    将项目中所有章纲同步为章节。
+    已有对应章节的章纲会跳过，仅为缺少章节的章纲创建新章节。
+    """
+    user_id = getattr(request.state, 'user_id', None)
+    await verify_project_access(project_id, user_id, db)
+
+    outlines_result = await db.execute(
+        select(ChapterOutline)
+        .where(ChapterOutline.project_id == project_id)
+        .order_by(ChapterOutline.chapter_number)
+    )
+    outlines = outlines_result.scalars().all()
+
+    if not outlines:
+        return {"created": 0, "skipped": 0, "total_outlines": 0, "message": "没有章纲可同步"}
+
+    existing_result = await db.execute(
+        select(Chapter.chapter_outline_id)
+        .where(
+            Chapter.project_id == project_id,
+            Chapter.chapter_outline_id.isnot(None)
+        )
+    )
+    existing_outline_ids = set(existing_result.scalars().all())
+
+    created = 0
+    skipped = 0
+    for outline in outlines:
+        if outline.id in existing_outline_ids:
+            skipped += 1
+            continue
+        chapter = Chapter(
+            project_id=project_id,
+            chapter_outline_id=outline.id,
+            chapter_number=outline.chapter_number,
+            title=outline.title,
+            summary=outline.summary,
+            status="draft",
+            word_count=0
+        )
+        db.add(chapter)
+        created += 1
+
+    if created > 0:
+        await db.commit()
+
+    logger.info(f"📚 章纲同步完成: 项目 {project_id}, 创建 {created}, 跳过 {skipped}")
+    return {
+        "created": created,
+        "skipped": skipped,
+        "total_outlines": len(outlines),
+        "message": f"同步完成：新建 {created} 章，跳过 {skipped} 章（已存在）"
+    }
 
 
 @router.get("/project/{project_id}", response_model=ChapterListResponse, summary="获取项目的所有章节")
@@ -816,14 +1206,29 @@ async def analyze_chapter_background(
             task.progress = 20
             await db_session.commit()
         
-        # 3. 使用PlotAnalyzer分析章节
+        # 3. 并行执行：章节分析 + 实体提取
         analyzer = PlotAnalyzer(ai_service)
-        analysis_result = await analyzer.analyze_chapter(
+        analysis_task_coro = analyzer.analyze_chapter(
             chapter_number=chapter.chapter_number,
             title=chapter.title,
             content=chapter.content,
             word_count=chapter.word_count or count_words(chapter.content)
         )
+        entity_task_coro = analyzer.extract_entities(
+            chapter_number=chapter.chapter_number,
+            title=chapter.title,
+            content=chapter.content,
+        )
+        analysis_result, entity_result = await asyncio.gather(
+            analysis_task_coro, entity_task_coro, return_exceptions=True
+        )
+        # 处理异常：gather 可能返回 Exception 对象
+        if isinstance(analysis_result, Exception):
+            logger.error(f"❌ 章节分析异常: {analysis_result}")
+            analysis_result = None
+        if isinstance(entity_result, Exception):
+            logger.error(f"⚠️ 实体提取异常(非致命): {entity_result}")
+            entity_result = None
         
         if not analysis_result:
             async with write_lock:
@@ -833,6 +1238,12 @@ async def analyze_chapter_background(
                 await db_session.commit()
             logger.error(f"❌ AI分析失败: {chapter_id}")
             return
+        
+        # 3.5 将提取到的人物/组织自动入库（去重）
+        if entity_result:
+            async with write_lock:
+                await _auto_create_entities(db_session, project_id, chapter.chapter_number, entity_result)
+                await db_session.commit()
         
         async with write_lock:
             task.progress = 60
@@ -968,6 +1379,22 @@ async def analyze_chapter_background(
                     logger.debug(f"  保存记忆 {memory_id}: position={text_position}, length={text_length}")
             
             await db_session.commit()
+            
+            settlement_stats = await narrative_state_service.settle_chapter_state(
+                db=db_session,
+                project_id=project_id,
+                chapter=chapter,
+                analysis=analysis_result,
+            )
+            consistency_stats = await chapter_consistency_service.settle_signals_and_audit(
+                db=db_session,
+                project_id=project_id,
+                chapter=chapter,
+                analysis=analysis_result,
+            )
+            task.progress = 90
+            await db_session.commit()
+            logger.info(f"✅ 章节状态结算完成: {settlement_stats}, 一致性审计: {consistency_stats}")
         
         # 批量添加到向量数据库
         if memory_records:
@@ -1062,31 +1489,28 @@ async def generate_chapter_content_stream(
     selected_plugins = generate_request.selected_plugins if hasattr(generate_request, 'selected_plugins') else None
     # 预先验证章节存在性（使用临时会话）
     async for temp_db in get_db(request):
-        try:
-            result = await temp_db.execute(
-                select(Chapter).where(Chapter.id == chapter_id)
-            )
-            chapter = result.scalar_one_or_none()
-            if not chapter:
-                raise HTTPException(status_code=404, detail="章节不存在")
-            
-            # 检查前置条件
-            can_generate, error_msg, previous_chapters = await check_prerequisites(temp_db, chapter)
-            if not can_generate:
-                raise HTTPException(status_code=400, detail=error_msg)
-            
-            # 保存前置章节数据供生成器使用
-            previous_chapters_data = [
-                {
-                    'id': ch.id,
-                    'chapter_number': ch.chapter_number,
-                    'title': ch.title,
-                    'content': ch.content
-                }
-                for ch in previous_chapters
-            ]
-        finally:
-            await temp_db.close()
+        result = await temp_db.execute(
+            select(Chapter).where(Chapter.id == chapter_id)
+        )
+        chapter = result.scalar_one_or_none()
+        if not chapter:
+            raise HTTPException(status_code=404, detail="章节不存在")
+        
+        # 检查前置条件
+        can_generate, error_msg, previous_chapters = await check_prerequisites(temp_db, chapter)
+        if not can_generate:
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        # 保存前置章节数据供生成器使用
+        previous_chapters_data = [
+            {
+                'id': ch.id,
+                'chapter_number': ch.chapter_number,
+                'title': ch.title,
+                'content': ch.content
+            }
+            for ch in previous_chapters
+        ]
         break
     
     async def event_generator():
@@ -1301,6 +1725,16 @@ async def generate_chapter_content_stream(
                     chapter_outline=current_outline_content,
                     character_names=[c.name for c in characters] if characters else None
                 )
+                state_context = await narrative_state_service.build_generation_context(
+                    db=db_session,
+                    project_id=project.id,
+                    current_chapter=current_chapter.chapter_number,
+                    pov_character_name=chapter_outline.pov if chapter_outline else None,
+                )
+                memory_context = {
+                    **memory_context,
+                    **state_context,
+                }
                 
                 # 计算各部分的字符长度
                 context_lengths = {
@@ -1328,7 +1762,20 @@ async def generate_chapter_content_stream(
                 
                 # 🔧 MCP工具增强：收集章节参考资料（使用剧情线标准模式）
                 mcp_reference_materials = ""
+                # 前置检查：用户是否有启用的 MCP 插件，没有则直接跳过（避免白等 1 分钟+）
+                _has_mcp_plugins = False
                 if enable_mcp and current_user_id:
+                    from app.services.mcp_tool_service import mcp_tool_service
+                    _available_tools = await mcp_tool_service.get_available_tools(
+                        user_id=current_user_id,
+                        db_session=db_session,
+                        selected_plugins=selected_plugins,
+                    )
+                    _has_mcp_plugins = len(_available_tools) > 0
+                    if not _has_mcp_plugins:
+                        logger.info("⏭️ 用户没有启用的MCP插件，跳过MCP工具收集")
+
+                if enable_mcp and current_user_id and _has_mcp_plugins:
                     yield f"data: {json.dumps({'type': 'progress', 'message': '🔍 尝试使用MCP工具收集参考资料...', 'progress': 28}, ensure_ascii=False)}\n\n"
 
                     # 使用 PlotGenerationService._plan_with_mcp 进行严格的 MCP 规划
@@ -1519,13 +1966,6 @@ async def generate_chapter_content_stream(
         except GeneratorExit:
             # SSE连接断开
             logger.warning("章节生成器被提前关闭（SSE断开）")
-            if db_session and not db_committed:
-                try:
-                    if db_session.in_transaction():
-                        await db_session.rollback()
-                        logger.info("章节生成事务已回滚（GeneratorExit）")
-                except Exception as e:
-                    logger.error(f"GeneratorExit回滚失败: {str(e)}")
         except Exception as e:
             # 特殊处理 MCP 异常（与剧情线保持一致）
             from app.exceptions import MCPToolNotTriggeredError, MCPPlanningFailedError
@@ -1552,32 +1992,6 @@ async def generate_chapter_content_stream(
                 logger.error(f"流式创作章节失败: {str(e)}")
                 yield f"data: {json.dumps({'type': 'error', 'error': str(e)}, ensure_ascii=False)}\n\n"
 
-            # 回滚事务
-            if db_session and not db_committed:
-                try:
-                    if db_session.in_transaction():
-                        await db_session.rollback()
-                        logger.info("章节生成事务已回滚（异常）")
-                except Exception as rollback_error:
-                    logger.error(f"回滚失败: {str(rollback_error)}")
-        finally:
-            # 确保数据库会话被正确关闭
-            if db_session:
-                try:
-                    # 最后检查：确保没有未提交的事务
-                    if not db_committed and db_session.in_transaction():
-                        await db_session.rollback()
-                        logger.warning("在finally中发现未提交事务，已回滚")
-                    
-                    await db_session.close()
-                    logger.info("数据库会话已关闭")
-                except Exception as close_error:
-                    logger.error(f"关闭数据库会话失败: {str(close_error)}")
-                    # 强制关闭
-                    try:
-                        await db_session.close()
-                    except:
-                        pass
     
     return create_sse_response(event_generator())
 
@@ -1592,8 +2006,8 @@ async def get_analysis_task_status(
     查询指定章节的最新分析任务状态
     
     自动恢复机制：
-    - 如果任务状态为running且超过1分钟未更新，自动标记为failed
-    - 如果任务状态为pending且超过2分钟未启动，自动标记为failed
+    - 如果任务状态为running且超过配置阈值未完成，自动标记为failed
+    - 如果任务状态为pending且超过配置阈值未启动，自动标记为failed
     
     返回:
     - has_task: 是否存在分析任务
@@ -1648,13 +2062,16 @@ async def get_analysis_task_status(
     
     auto_recovered = False
     current_time = datetime.now()
+    running_timeout = timedelta(seconds=max(config_settings.analysis_task_running_timeout_seconds, 60))
+    pending_timeout = timedelta(seconds=max(config_settings.analysis_task_pending_timeout_seconds, 30))
     
     # 自动恢复卡住的任务
     if task.status == 'running':
-        # 如果任务在running状态超过1分钟，标记为失败
-        if task.started_at and (current_time - task.started_at) > timedelta(minutes=1):
+        # 如果任务在running状态超过阈值，标记为失败
+        if task.started_at and (current_time - task.started_at) > running_timeout:
             task.status = 'failed'
-            task.error_message = '任务超时（超过1分钟未完成，已自动恢复）'
+            timeout_minutes = max(config_settings.analysis_task_running_timeout_seconds // 60, 1)
+            task.error_message = f'任务超时（超过{timeout_minutes}分钟未完成，已自动恢复）'
             task.completed_at = current_time
             task.progress = 0
             auto_recovered = True
@@ -1663,10 +2080,11 @@ async def get_analysis_task_status(
             logger.warning(f"🔄 自动恢复卡住的任务: {task.id}, 章节: {chapter_id}")
     
     elif task.status == 'pending':
-        # 如果任务在pending状态超过2分钟仍未开始，标记为失败
-        if task.created_at and (current_time - task.created_at) > timedelta(minutes=2):
+        # 如果任务在pending状态超过阈值仍未开始，标记为失败
+        if task.created_at and (current_time - task.created_at) > pending_timeout:
             task.status = 'failed'
-            task.error_message = '任务启动超时（超过2分钟未启动，已自动恢复）'
+            timeout_minutes = max(config_settings.analysis_task_pending_timeout_seconds // 60, 1)
+            task.error_message = f'任务启动超时（超过{timeout_minutes}分钟未启动，已自动恢复）'
             task.completed_at = current_time
             task.progress = 0
             auto_recovered = True
@@ -1708,10 +2126,12 @@ async def get_chapter_analysis(
         select(Chapter).where(Chapter.id == chapter_id)
     )
     chapter_check = chapter_result_check.scalar_one_or_none()
-    if chapter_check:
-        # 验证用户权限
-        user_id = getattr(request.state, 'user_id', None)
-        await verify_project_access(chapter_check.project_id, user_id, db)
+    if not chapter_check:
+        raise HTTPException(status_code=404, detail="章节不存在")
+
+    # 验证用户权限
+    user_id = getattr(request.state, 'user_id', None)
+    await verify_project_access(chapter_check.project_id, user_id, db)
     
     # 获取分析结果
     analysis_result = await db.execute(
@@ -1732,6 +2152,11 @@ async def get_chapter_analysis(
         .order_by(StoryMemory.importance_score.desc())
     )
     memories = memories_result.scalars().all()
+
+    visualization_payload = await chapter_consistency_service.build_chapter_visualization_payload(
+        db=db,
+        chapter=chapter_check,
+    )
     
     return {
         "chapter_id": chapter_id,
@@ -1750,6 +2175,13 @@ async def get_chapter_analysis(
             }
             for mem in memories
         ],
+        "narrative_state": {
+            "causal_links": visualization_payload["causal_links"],
+            "promises": visualization_payload["promises"],
+            "timeline_events": visualization_payload["timeline_events"],
+            "relationship_graph": visualization_payload["relationship_graph"],
+        },
+        "consistency_audit": visualization_payload["consistency_audit"],
         "created_at": analysis.created_at.isoformat() if analysis.created_at else None
     }
 
@@ -2441,12 +2873,24 @@ async def generate_single_chapter_for_batch(
         raise Exception("项目不存在")
 
     # 获取对应的大纲
-    outline_result = await db_session.execute(
-        select(ChapterOutline)
-        .where(ChapterOutline.project_id == chapter.project_id)
-        .where(ChapterOutline.order_index == chapter.chapter_number)
-    )
-    outline = outline_result.scalar_one_or_none()
+    outline = None
+    if chapter.chapter_outline_id:
+        outline_result = await db_session.execute(
+            select(ChapterOutline)
+            .where(ChapterOutline.id == chapter.chapter_outline_id)
+        )
+        outline = outline_result.scalar_one_or_none()
+
+    if not outline:
+        outline_result = await db_session.execute(
+            select(ChapterOutline)
+            .where(ChapterOutline.project_id == chapter.project_id)
+            .where(
+                (ChapterOutline.chapter_number == chapter.chapter_number)
+                | (ChapterOutline.order_index == chapter.chapter_number)
+            )
+        )
+        outline = outline_result.scalar_one_or_none()
 
     # 构建查询文本（用于智能检索世界规则）
     query_text = f"{project.theme or ''} {project.genre or ''}"
@@ -2468,11 +2912,13 @@ async def generate_single_chapter_for_batch(
     all_outlines_result = await db_session.execute(
         select(ChapterOutline)
         .where(ChapterOutline.project_id == chapter.project_id)
-        .order_by(ChapterOutline.order_index)
+        .order_by(func.coalesce(ChapterOutline.order_index, ChapterOutline.chapter_number))
     )
     all_outlines = all_outlines_result.scalars().all()
     outlines_context = "\n".join([
-        f"第{o.order_index}章 {o.title}: {o.content[:100]}..."
+        f"第{o.chapter_number or o.order_index or '?'}章 {o.title}:\n"
+        f"摘要: {o.summary or ''}\n"
+        f"剧情要点: {o.plot_points or ''}"
         for o in all_outlines
     ])
     
@@ -2521,9 +2967,19 @@ async def generate_single_chapter_for_batch(
         user_id=user_id,
         project_id=project.id,
         current_chapter=chapter.chapter_number,
-        chapter_outline=outline.summary if outline else chapter.summary or "",
+        chapter_outline=(outline.plot_points or outline.summary) if outline else chapter.summary or "",
         character_names=[c.name for c in characters] if characters else None
     )
+    state_context = await narrative_state_service.build_generation_context(
+        db=db,
+        project_id=project.id,
+        current_chapter=chapter.chapter_number,
+        pov_character_name=outline.pov if outline else None,
+    )
+    memory_context = {
+        **memory_context,
+        **state_context,
+    }
     
     # 生成提示词
     if previous_content:
@@ -2541,7 +2997,7 @@ async def generate_single_chapter_for_batch(
             previous_content=previous_content,
             chapter_number=chapter.chapter_number,
             chapter_title=chapter.title,
-            chapter_outline=outline.summary if outline else chapter.summary or '暂无大纲',
+            chapter_outline=(outline.plot_points or outline.summary) if outline else chapter.summary or '暂无大纲',
             style_content=style_content,
             target_word_count=target_word_count,
             memory_context=memory_context
@@ -2560,7 +3016,7 @@ async def generate_single_chapter_for_batch(
             outlines_context=outlines_context,
             chapter_number=chapter.chapter_number,
             chapter_title=chapter.title,
-            chapter_outline=outline.summary if outline else chapter.summary or '暂无大纲',
+            chapter_outline=(outline.plot_points or outline.summary) if outline else chapter.summary or '暂无大纲',
             style_content=style_content,
             target_word_count=target_word_count,
             memory_context=memory_context
@@ -2877,15 +3333,6 @@ async def regenerate_chapter_stream(
             }
             yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
         
-        finally:
-            if db_session:
-                try:
-                    if not db_committed and db_session.in_transaction():
-                        await db_session.rollback()
-                    await db_session.close()
-                except Exception as close_error:
-                    logger.error(f"关闭数据库会话失败: {str(close_error)}")
-    
     return create_sse_response(event_generator())
 
 
@@ -2935,4 +3382,3 @@ async def get_regeneration_tasks(
             for task in tasks
         ]
     }
-

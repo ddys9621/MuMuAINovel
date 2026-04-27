@@ -1,5 +1,5 @@
 import { authApi } from '../services/api';
-import { message } from 'antd';
+import { toast } from 'sonner';
 
 /**
  * 会话管理工具
@@ -22,10 +22,15 @@ class SessionManager {
    * 启动会话监控
    */
   start() {
+    if (this.checkInterval) {
+      return;
+    }
+
     // 先检查是否有有效的会话
     const expireAt = this.getSessionExpireTime();
     
     if (!expireAt) {
+      this.stop();
       return;
     }
     
@@ -38,6 +43,8 @@ class SessionManager {
       return;
     }
     
+    this.lastActivityTime = now;
+    this.warningShown = false;
     console.log(`✅ [会话] 启动监控，剩余 ${remainingMinutes} 分钟`);
     
     // 立即检查一次
@@ -98,9 +105,8 @@ class SessionManager {
       // 显示即将过期警告
       if (remaining <= this.WARNING_THRESHOLD && !this.warningShown) {
         this.warningShown = true;
-        message.warning({
-          content: `您的登录状态将在 ${remainingMinutes} 分钟后过期，请注意保存数据`,
-          duration: 10,
+        toast.warning(`您的登录状态将在 ${remainingMinutes} 分钟后过期，请注意保存数据`, {
+          duration: 10000,
         });
       }
       
@@ -128,9 +134,8 @@ class SessionManager {
       
       console.log(`🔄 [会话] 自动续期成功，延长 ${result.remaining_minutes} 分钟`);
       
-      message.success({
-        content: '登录状态已自动延长',
-        duration: 2,
+      toast.success('登录状态已自动延长', {
+        duration: 2000,
       });
     } catch {
       // 刷新失败可能是会话已过期
@@ -157,9 +162,8 @@ class SessionManager {
       // 即使登出失败也继续跳转
     }
     
-    message.error({
-      content: '登录已过期，请重新登录',
-      duration: 3,
+    toast.error('登录已过期，请重新登录', {
+      duration: 3000,
     });
     
     // 延迟跳转，让用户看到提示

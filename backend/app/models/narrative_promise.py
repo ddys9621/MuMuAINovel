@@ -1,0 +1,40 @@
+"""Narrative promise tracker for foreshadows, promises, mysteries and conflicts."""
+
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.sql import func
+
+from app.db_base import Base
+import uuid
+
+
+class NarrativePromise(Base):
+    __tablename__ = "narrative_promises"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    source_chapter_id = Column(String(36), ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_chapter_number = Column(Integer, nullable=False, index=True)
+
+    promise_type = Column(String(20), nullable=False, index=True)  # foreshadow/promise/mystery/conflict
+    title = Column(String(200), nullable=False)
+    content = Column(Text, nullable=False)
+
+    owner_character_id = Column(String(36), ForeignKey("characters.id", ondelete="SET NULL"), nullable=True, index=True)
+    target_character_id = Column(String(36), ForeignKey("characters.id", ondelete="SET NULL"), nullable=True, index=True)
+    plot_line_id = Column(String(36), ForeignKey("plot_lines.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    priority = Column(String(20), default="medium", index=True)
+    status = Column(String(20), default="open", index=True)  # open/progressing/resolved/broken
+    deadline_chapter = Column(Integer, nullable=True, index=True)
+    last_activated_chapter = Column(Integer, nullable=True, index=True)
+
+    resolved_chapter_id = Column(String(36), ForeignKey("chapters.id", ondelete="SET NULL"), nullable=True, index=True)
+    resolved_chapter_number = Column(Integer, nullable=True)
+    resolution_note = Column(Text, nullable=True)
+
+    evidence_text = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+

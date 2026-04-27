@@ -12,6 +12,8 @@ class ProjectBase(BaseModel):
     genre: Optional[str] = Field(None, description="小说类型")
     target_words: Optional[int] = Field(None, description="目标字数")
     narrative_perspective: Optional[str] = Field(None, description="叙事视角")
+    chapter_count: Optional[int] = Field(None, ge=1, description="chapter count")
+    character_count: Optional[int] = Field(None, ge=1, description="character count")
 
 
 class ProjectCreate(ProjectBase):

@@ -4,7 +4,7 @@
  */
 
 import { useCallback } from 'react';
-import { message } from 'antd';
+import { toast } from 'sonner';
 import { useStore } from './index';
 import { projectApi, outlineApi, characterApi, chapterApi } from '../services/api';
 import type {
@@ -19,6 +19,7 @@ import type {
   OutlineUpdate,
   ChapterCreate,
   ChapterUpdate,
+  ChapterGenerateRequest,
   // GenerateOutlineRequest,
   GenerateCharacterRequest
 } from '../types';
@@ -39,7 +40,7 @@ export function useProjectSync() {
       return projects;
     } catch (error) {
       console.error('刷新项目列表失败:', error);
-      message.error('刷新项目列表失败');
+      toast.error('刷新项目列表失败');
       return [];
     } finally {
       setLoading(false);
@@ -108,7 +109,7 @@ export function useCharacterSync() {
       return characters;
     } catch (error) {
       console.error('刷新角色列表失败:', error);
-      message.error('刷新角色列表失败');
+      toast.error('刷新角色列表失败');
       return [];
     }
   }, [currentProject?.id, setCharacters]);
@@ -161,7 +162,7 @@ export function useOutlineSync() {
       return outlines;
     } catch (error) {
       console.error('刷新大纲列表失败:', error);
-      message.error('刷新大纲列表失败');
+      toast.error('刷新大纲列表失败');
       return [];
     }
   }, [currentProject?.id, setOutlines]); // 添加 currentProject?.id 到依赖数组
@@ -187,16 +188,16 @@ export function useOutlineSync() {
     try {
       const updated = await outlineApi.updateOutline(id, data);
       updateOutline(id, updated);
-      message.success('大纲更新成功');
+      toast.success('大纲更新成功');
       return updated;
     } catch (error: any) {
       console.error('更新大纲失败:', error);
       
       // 处理版本冲突
       if (error?.response?.status === 409) {
-        message.error('版本冲突：大纲已被其他用户修改，请刷新后重试');
+        toast.error('版本冲突：大纲已被其他用户修改，请刷新后重试');
       } else {
-        message.error('更新大纲失败');
+        toast.error('更新大纲失败');
       }
       throw error;
     }
@@ -252,7 +253,7 @@ export function useChapterSync() {
       return chapters;
     } catch (error) {
       console.error('刷新章节列表失败:', error);
-      message.error('刷新章节列表失败');
+      toast.error('刷新章节列表失败');
       return [];
     }
   }, [currentProject?.id, setChapters]); // 添加 currentProject?.id 到依赖数组
@@ -310,18 +311,22 @@ export function useChapterSync() {
     }, 15 * 60 * 1000); // 15分钟
 
     try {
+      const requestBody: ChapterGenerateRequest = {
+        style_id: styleId,
+        target_word_count: targetWordCount,
+        enable_mcp: enableMcp,
+        selected_plugins: enableMcp && selectedPlugins && selectedPlugins.length > 0
+          ? selectedPlugins
+          : undefined,
+      };
+
       // 使用fetch处理流式响应
       const response = await fetch(`/api/chapters/${chapterId}/generate-stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          style_id: styleId,
-          target_word_count: targetWordCount,
-          enable_mcp: enableMcp && selectedPlugins && selectedPlugins.length > 0,
-          selected_plugins: enableMcp ? selectedPlugins : []
-        }),
+        body: JSON.stringify(requestBody),
         signal: abortController.signal, // 添加超时控制
         keepalive: true, // 保持连接活跃
       });

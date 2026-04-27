@@ -1,13 +1,15 @@
 """灵感模式API - 通过对话引导创建项目"""
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Dict, Any
+from typing import Dict, Any, List
 import json
+import re
 
 from app.database import get_db
 from app.services.ai_service import AIService
 from app.api.settings import get_user_ai_service
 from app.logger import get_logger
+from app.utils.json_cleaner import clean_and_parse_json
 
 router = APIRouter(prefix="/inspiration", tags=["灵感模式"])
 logger = get_logger(__name__)
@@ -135,6 +137,199 @@ def validate_options_response(result: Dict[str, Any], step: str, max_retries: in
     return True, ""
 
 
+def _strip_code_fence(content: str) -> str:
+    cleaned = (content or "").strip()
+    if cleaned.startswith("```json"):
+        cleaned = cleaned[7:].lstrip("\n\r")
+    elif cleaned.startswith("```"):
+        cleaned = cleaned[3:].lstrip("\n\r")
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3].rstrip("\n\r")
+    return cleaned.strip()
+
+
+def _extract_bracket_block(text: str, open_char: str, close_char: str, start_index: int) -> str:
+    depth = 0
+    in_string = False
+    quote_char = ""
+    escape = False
+    block_start = -1
+
+    for index in range(start_index, len(text)):
+        ch = text[index]
+        if in_string:
+            if escape:
+                escape = False
+                continue
+            if ch == "\\":
+                escape = True
+                continue
+            if ch == quote_char:
+                in_string = False
+            continue
+
+        if ch in ['"', "'"]:
+            in_string = True
+            quote_char = ch
+            continue
+
+        if ch == open_char:
+            if depth == 0:
+                block_start = index
+            depth += 1
+        elif ch == close_char and depth > 0:
+            depth -= 1
+            if depth == 0 and block_start != -1:
+                return text[block_start:index + 1]
+
+    return text[block_start:] if block_start != -1 else ""
+
+
+def _split_relaxed_string_array(array_text: str) -> List[str]:
+    text = array_text.strip()
+    if text.startswith("["):
+        text = text[1:]
+    if text.endswith("]"):
+        text = text[:-1]
+
+    items: List[str] = []
+    current: List[str] = []
+    in_string = False
+    quote_char = ""
+    escape = False
+
+    def flush():
+        item = "".join(current).strip().strip(",").strip()
+        item = item.strip('"').strip("'").strip()
+        item = re.sub(r"^[\-\*\d\.\)\s]+", "", item)
+        if item:
+            items.append(item)
+        current.clear()
+
+    i = 0
+    while i < len(text):
+        ch = text[i]
+
+        if in_string:
+            if escape:
+                current.append(ch)
+                escape = False
+                i += 1
+                continue
+
+            if ch == "\\":
+                escape = True
+                i += 1
+                continue
+
+            if ch == quote_char:
+                j = i + 1
+                while j < len(text) and text[j].isspace():
+                    j += 1
+                if j >= len(text) or text[j] in [",", "]"]:
+                    in_string = False
+                    i += 1
+                    continue
+
+            current.append(ch)
+            i += 1
+            continue
+
+        if ch in ['"', "'"]:
+            in_string = True
+            quote_char = ch
+            i += 1
+            continue
+
+        if ch == ",":
+            flush()
+            i += 1
+            continue
+
+        current.append(ch)
+        i += 1
+
+    flush()
+    return items
+
+
+def _normalize_options(options: List[Any], step: str) -> List[str]:
+    normalized: List[str] = []
+    seen = set()
+
+    for option in options:
+        value = str(option).strip()
+        value = re.sub(r"^[\-\*\d\.\)\s]+", "", value)
+        value = value.strip("，,;； ")
+        if not value:
+            continue
+        if step == "genre":
+            value = value.replace("类型：", "").replace("标签：", "").strip()
+        if value not in seen:
+            normalized.append(value)
+            seen.add(value)
+
+    return normalized[:10]
+
+
+def _salvage_options_response(content: str, step: str) -> Dict[str, Any]:
+    cleaned = _strip_code_fence(content)
+
+    # 先走统一 JSON 清理器
+    try:
+        result = clean_and_parse_json(
+            cleaned,
+            expected_type='object',
+            log_prefix=f"[灵感模式-{step}]"
+        )
+        if isinstance(result, dict):
+            result["options"] = _normalize_options(result.get("options", []), step)
+            return result
+    except Exception as exc:
+        logger.warning(f"[灵感模式-{step}] 严格 JSON 解析失败，尝试宽松修复: {exc}")
+        pass
+
+    prompt = ""
+    prompt_match = re.search(
+        r'["\']prompt["\']\s*:\s*(.+?)(?=,\s*["\']options["\']\s*:|\}\s*$)',
+        cleaned,
+        flags=re.DOTALL
+    )
+    if prompt_match:
+        prompt = prompt_match.group(1).strip().strip(",").strip()
+        prompt = prompt.strip('"').strip("'").strip()
+
+    options: List[str] = []
+    options_match = re.search(r'["\']options["\']\s*:\s*\[', cleaned)
+    if options_match:
+        array_start = cleaned.find("[", options_match.end() - 1)
+        if array_start != -1:
+            array_text = _extract_bracket_block(cleaned, "[", "]", array_start)
+            options = _split_relaxed_string_array(array_text)
+
+    if len(options) < 3:
+        lines = [
+            re.sub(r"^[\-\*\d\.\)\s]+", "", line).strip()
+            for line in cleaned.splitlines()
+        ]
+        fallback_lines = [
+            line for line in lines
+            if line
+            and "prompt" not in line.lower()
+            and "options" not in line.lower()
+            and line not in ["{", "}", "[", "]"]
+        ]
+        options = options or fallback_lines
+
+    normalized_options = _normalize_options(options, step)
+    if normalized_options:
+        logger.info(f"[灵感模式-{step}] 宽松修复成功，恢复 {len(normalized_options)} 个选项")
+    return {
+        "prompt": prompt or "请选择一个选项：",
+        "options": normalized_options
+    }
+
+
 @router.post("/generate-options")
 async def generate_options(
     data: Dict[str, Any],
@@ -161,13 +356,15 @@ async def generate_options(
     """
     max_retries = 3
     
+    hint = data.get("hint", "").strip()
+
     for attempt in range(max_retries):
         try:
             step = data.get("step", "title")
             context = data.get("context", {})
-            
+
             logger.info(f"灵感模式：生成{step}阶段的选项（第{attempt + 1}次尝试）")
-            
+
             # 获取对应的提示词模板
             if step not in INSPIRATION_PROMPTS:
                 return {
@@ -175,19 +372,23 @@ async def generate_options(
                     "prompt": "",
                     "options": []
                 }
-            
+
             prompt_template = INSPIRATION_PROMPTS[step]
-            
+
             # 准备格式化参数（提供默认值避免KeyError）
             format_params = {
                 "title": context.get("title", ""),
                 "description": context.get("description", ""),
                 "theme": context.get("theme", "")
             }
-            
+
             # 格式化系统提示词
             system_prompt = prompt_template["system"].format(**format_params)
             user_prompt = prompt_template["user"].format(**format_params)
+
+            # 注入用户的额外提示
+            if hint:
+                system_prompt += f"\n\n⚠️ 用户对本轮生成有额外要求：{hint}\n请重点参考此要求来生成选项，确保生成结果符合用户期望。"
             
             # 如果是重试，在提示词中强调格式要求
             if attempt > 0:
@@ -204,28 +405,9 @@ async def generate_options(
             content = response.get("content", "")
             logger.info(f"AI返回内容长度: {len(content)}")
             
-            # 解析JSON
+            # 解析JSON（优先严格解析，失败时尝试宽松修复）
             try:
-                # 清理可能的markdown标记
-                cleaned_content = content.strip()
-                if cleaned_content.startswith('```json'):
-                    cleaned_content = cleaned_content[7:].lstrip('\n\r')
-                elif cleaned_content.startswith('```'):
-                    cleaned_content = cleaned_content[3:].lstrip('\n\r')
-                if cleaned_content.endswith('```'):
-                    cleaned_content = cleaned_content[:-3].rstrip('\n\r')
-                cleaned_content = cleaned_content.strip()
-                
-                # 检查JSON是否完整
-                if not cleaned_content.endswith('}'):
-                    logger.warning(f"⚠️ JSON可能被截断，尝试补全...")
-                    if '"options"' in cleaned_content:
-                        if cleaned_content.count('[') > cleaned_content.count(']'):
-                            cleaned_content += '"]}'
-                        elif cleaned_content.count('{') > cleaned_content.count('}'):
-                            cleaned_content += '}'
-                
-                result = json.loads(cleaned_content)
+                result = _salvage_options_response(content, step)
                 
                 # 校验返回格式
                 is_valid, error_msg = validate_options_response(result, step)

@@ -1,157 +1,107 @@
-import React, { useState, useEffect } from 'react';
-import { Switch, Select, Card, Space, Typography, message, Spin } from 'antd';
-import { ThunderboltOutlined, InfoCircleOutlined } from '@ant-design/icons';
-import { mcpPluginApi } from '../services/api';
-import type { MCPPlugin } from '../types';
+/** MCP 插件选择器 - 用于向导/灵感模式选择 MCP 增强插件 */
 
-const { Text } = Typography;
+import { useState, useEffect } from 'react'
+import { Plug, Loader2, ChevronDown, ChevronUp } from 'lucide-react'
+import { mcpPluginApi } from '@/services/api'
+import type { MCPPlugin } from '@/types'
 
 export interface MCPSelectorValue {
-  enable: boolean;
-  selected: string[];
+  enable: boolean
+  selected: string[]
 }
 
-export interface MCPSelectorProps {
-  value?: MCPSelectorValue;
-  onChange?: (value: MCPSelectorValue) => void;
-  disabled?: boolean;
-  size?: 'small' | 'middle' | 'large';
-  style?: React.CSSProperties;
+interface MCPSelectorProps {
+  value: MCPSelectorValue
+  onChange: (value: MCPSelectorValue) => void
 }
 
-export const MCPSelector: React.FC<MCPSelectorProps> = ({
-  value = { enable: false, selected: [] },
-  onChange,
-  disabled = false,
-  size = 'middle',
-  style
-}) => {
-  const [plugins, setPlugins] = useState<MCPPlugin[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string>('');
-
-  // 加载已启用的插件列表
-  const loadPlugins = async () => {
-    setLoading(true);
-    setLoadError('');
-    try {
-      const data = await mcpPluginApi.getPlugins({ enabled_only: true });
-      setPlugins(data);
-    } catch (error: any) {
-      const errorMsg = error?.response?.data?.detail || '加载插件列表失败';
-      setLoadError(errorMsg);
-      message.error(errorMsg);
-    } finally {
-      setLoading(false);
-    }
-  };
+export function MCPSelector({ value, onChange }: MCPSelectorProps) {
+  const [plugins, setPlugins] = useState<MCPPlugin[]>([])
+  const [loading, setLoading] = useState(false)
+  const [expanded, setExpanded] = useState(false)
 
   useEffect(() => {
-    loadPlugins();
-  }, []);
+    if (expanded && plugins.length === 0) {
+      setLoading(true)
+      mcpPluginApi.getPlugins({ enabled_only: true })
+        .then(setPlugins)
+        .catch(() => {})
+        .finally(() => setLoading(false))
+    }
+  }, [expanded, plugins.length])
 
-  const handleEnableChange = (enable: boolean) => {
-    const newValue: MCPSelectorValue = {
-      enable,
-      selected: enable ? value.selected : []
-    };
-    onChange?.(newValue);
-  };
-
-  const handlePluginChange = (selected: string[]) => {
-    const newValue: MCPSelectorValue = {
-      enable: value.enable,
-      selected
-    };
-    onChange?.(newValue);
-  };
-
-  // 插件选项
-  const pluginOptions = plugins.map(plugin => ({
-    label: (
-      <div style={{ display: 'flex', flexDirection: 'column' }}>
-        <Text strong>{plugin.display_name || plugin.plugin_name}</Text>
-        {plugin.description && (
-          <Text type="secondary" style={{ fontSize: '12px' }}>
-            {plugin.description.length > 50 
-              ? `${plugin.description.substring(0, 50)}...` 
-              : plugin.description
-            }
-          </Text>
-        )}
-      </div>
-    ),
-    value: plugin.plugin_name
-  }));
+  const togglePlugin = (id: string) => {
+    const next = value.selected.includes(id)
+      ? value.selected.filter(s => s !== id)
+      : [...value.selected, id]
+    onChange({ ...value, selected: next })
+  }
 
   return (
-    <Card 
-      size="small" 
-      style={{ 
-        backgroundColor: '#f8f9ff', 
-        border: '1px solid #d6e4ff',
-        ...style 
-      }}
-    >
-      <Space direction="vertical" style={{ width: '100%' }}>
-        {/* 主开关 */}
-        <Space align="center">
-          <ThunderboltOutlined style={{ color: '#1890ff' }} />
-          <Switch
-            checked={value.enable}
-            onChange={handleEnableChange}
-            disabled={disabled}
-            style={{ margin: '4px 8px' }}
-          />
-          <Text strong>启用 MCP 插件增强</Text>
-          {loadError && (
-            <InfoCircleOutlined 
-              style={{ color: '#ff4d4f', cursor: 'pointer' }} 
-              title={`加载失败: ${loadError}`}
-              onClick={loadPlugins}
-            />
+    <div className="border border-surface-border rounded-card">
+      <button
+        type="button"
+        onClick={() => {
+          const nextExpanded = !expanded
+          setExpanded(nextExpanded)
+          if (!nextExpanded) {
+            onChange({ enable: false, selected: [] })
+          }
+        }}
+        className="w-full flex items-center justify-between px-3 py-2.5 text-sm hover:bg-surface-hover transition-colors rounded-card"
+      >
+        <div className="flex items-center gap-2">
+          <Plug className="w-4 h-4 text-content-secondary" />
+          <span className="text-content">MCP 工具增强</span>
+          {value.enable && value.selected.length > 0 && (
+            <span className="text-xs bg-brand/10 text-brand rounded px-1.5 py-0.5">
+              {value.selected.length} 个插件
+            </span>
           )}
-        </Space>
+        </div>
+        {expanded ? <ChevronUp className="w-4 h-4 text-content-secondary" /> : <ChevronDown className="w-4 h-4 text-content-secondary" />}
+      </button>
 
-        {/* 插件多选 */}
-        {value.enable && (
-          <div>
-            <Text type="secondary" style={{ fontSize: '12px', marginBottom: 8, display: 'block' }}>
-              选择本次生成要使用的插件（至少选择一个）：
-            </Text>
-            <Spin spinning={loading}>
-              <Select
-                mode="multiple"
-                placeholder={plugins.length === 0 ? "暂无可用插件" : "请选择插件"}
-                value={value.selected}
-                onChange={handlePluginChange}
-                disabled={disabled || plugins.length === 0}
-                style={{ width: '100%' }}
-                size={size}
-                options={pluginOptions}
-                maxTagCount={3}
-                maxTagPlaceholder={(omittedValues) => `+${omittedValues.length} 个插件`}
-                notFoundContent={loading ? "加载中..." : "暂无可用插件"}
-                optionLabelProp="label"
-              />
-            </Spin>
-            
-            {plugins.length === 0 && !loading && !loadError && (
-              <Text type="secondary" style={{ fontSize: '12px', marginTop: 4, display: 'block' }}>
-                请先在 MCP 插件管理页面启用插件
-              </Text>
-            )}
-            
-            {value.enable && value.selected.length === 0 && plugins.length > 0 && (
-              <Text type="warning" style={{ fontSize: '12px', marginTop: 4, display: 'block' }}>
-                ⚠️ 未选择任何插件，将不会启用 MCP 功能
-              </Text>
-            )}
-          </div>
-        )}
-      </Space>
-    </Card>
-  );
-};
+      {expanded && (
+        <div className="px-3 pb-3 space-y-2 border-t border-surface-border pt-2">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={value.enable}
+              onChange={e => onChange({ ...value, enable: e.target.checked })}
+              className="rounded"
+            />
+            <span className="text-content-secondary">启用 MCP 工具增强生成</span>
+          </label>
 
-export default MCPSelector;
+          {value.enable && (
+            <div className="space-y-1 ml-5">
+              {loading ? (
+                <div className="flex items-center gap-2 text-xs text-content-secondary py-1">
+                  <Loader2 className="w-3 h-3 animate-spin" />加载插件列表...
+                </div>
+              ) : plugins.length === 0 ? (
+                <p className="text-xs text-content-tertiary">暂无可用插件</p>
+              ) : (
+                plugins.map(p => (
+                  <label key={p.id} className="flex items-center gap-2 text-sm cursor-pointer py-0.5">
+                    <input
+                      type="checkbox"
+                      checked={value.selected.includes(p.id)}
+                      onChange={() => togglePlugin(p.id)}
+                      className="rounded"
+                    />
+                    <span className="text-content truncate">{p.display_name || p.plugin_name}</span>
+                    {p.description && (
+                      <span className="text-xs text-content-tertiary truncate">— {p.description}</span>
+                    )}
+                  </label>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}

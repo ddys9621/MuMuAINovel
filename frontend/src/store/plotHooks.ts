@@ -2,7 +2,7 @@
  * 剧情相关的状态管理 hooks
  */
 import { useCallback } from 'react';
-import { message } from 'antd';
+import { toast } from 'sonner';
 import { useStore } from './index';
 import { plotCardApi, plotLineApi, chapterOutlineApi } from '../services/api';
 import type {
@@ -47,7 +47,7 @@ export function usePlotCardSync() {
       return response;
     } catch (error) {
       console.error('获取剧情卡片失败:', error);
-      message.error('获取剧情卡片失败');
+      toast.error('获取剧情卡片失败');
       throw error;
     } finally {
       setPlotCardsLoading(false);
@@ -59,11 +59,11 @@ export function usePlotCardSync() {
     try {
       const newCard = await plotCardApi.createPlotCard(data);
       addPlotCard(newCard);
-      message.success('剧情卡片创建成功');
+      toast.success('剧情卡片创建成功');
       return newCard;
     } catch (error) {
       console.error('创建剧情卡片失败:', error);
-      message.error('创建剧情卡片失败');
+      toast.error('创建剧情卡片失败');
       throw error;
     }
   }, [addPlotCard]);
@@ -73,11 +73,11 @@ export function usePlotCardSync() {
     try {
       const updatedCard = await plotCardApi.updatePlotCard(cardId, data);
       updatePlotCard(updatedCard);
-      message.success('剧情卡片更新成功');
+      toast.success('剧情卡片更新成功');
       return updatedCard;
     } catch (error) {
       console.error('更新剧情卡片失败:', error);
-      message.error('更新剧情卡片失败');
+      toast.error('更新剧情卡片失败');
       throw error;
     }
   }, [updatePlotCard]);
@@ -87,10 +87,10 @@ export function usePlotCardSync() {
     try {
       await plotCardApi.deletePlotCard(cardId);
       removePlotCard(cardId);
-      message.success('剧情卡片删除成功');
+      toast.success('剧情卡片删除成功');
     } catch (error) {
       console.error('删除剧情卡片失败:', error);
-      message.error('删除剧情卡片失败');
+      toast.error('删除剧情卡片失败');
       throw error;
     }
   }, [removePlotCard]);
@@ -99,10 +99,10 @@ export function usePlotCardSync() {
   const reorderPlotCards = useCallback(async (data: PlotCardReorderRequest) => {
     try {
       await plotCardApi.reorderPlotCards(data);
-      message.success('剧情卡片排序更新成功');
+      toast.success('剧情卡片排序更新成功');
     } catch (error) {
       console.error('重排序剧情卡片失败:', error);
-      message.error('重排序剧情卡片失败');
+      toast.error('重排序剧情卡片失败');
       throw error;
     }
   }, []);
@@ -112,11 +112,11 @@ export function usePlotCardSync() {
     try {
       const newCards = await plotCardApi.generatePlotCards(data);
       newCards.forEach(card => addPlotCard(card));
-      message.success(`成功生成 ${newCards.length} 个剧情卡片`);
+      toast.success(`成功生成 ${newCards.length} 个剧情卡片`);
       return newCards;
     } catch (error) {
       console.error('AI生成剧情卡片失败:', error);
-      message.error('AI生成剧情卡片失败');
+      toast.error('AI生成剧情卡片失败');
       throw error;
     }
   }, [addPlotCard]);
@@ -168,7 +168,7 @@ export function usePlotLineSync() {
       return response;
     } catch (error) {
       console.error('获取剧情线失败:', error);
-      message.error('获取剧情线失败');
+      toast.error('获取剧情线失败');
       throw error;
     } finally {
       setPlotLinesLoading(false);
@@ -180,11 +180,11 @@ export function usePlotLineSync() {
     try {
       const newLine = await plotLineApi.createPlotLine(data);
       addPlotLine(newLine);
-      message.success('剧情线创建成功');
+      toast.success('剧情线创建成功');
       return newLine;
     } catch (error) {
       console.error('创建剧情线失败:', error);
-      message.error('创建剧情线失败');
+      toast.error('创建剧情线失败');
       throw error;
     }
   }, [addPlotLine]);
@@ -194,11 +194,11 @@ export function usePlotLineSync() {
     try {
       const updatedLine = await plotLineApi.updatePlotLine(lineId, data);
       updatePlotLine(updatedLine);
-      message.success('剧情线更新成功');
+      toast.success('剧情线更新成功');
       return updatedLine;
     } catch (error) {
       console.error('更新剧情线失败:', error);
-      message.error('更新剧情线失败');
+      toast.error('更新剧情线失败');
       throw error;
     }
   }, [updatePlotLine]);
@@ -208,10 +208,10 @@ export function usePlotLineSync() {
     try {
       await plotLineApi.deletePlotLine(lineId);
       removePlotLine(lineId);
-      message.success('剧情线删除成功');
+      toast.success('剧情线删除成功');
     } catch (error) {
       console.error('删除剧情线失败:', error);
-      message.error('删除剧情线失败');
+      toast.error('删除剧情线失败');
       throw error;
     }
   }, [removePlotLine]);
@@ -220,10 +220,10 @@ export function usePlotLineSync() {
   const reorderPlotLines = useCallback(async (data: PlotLineReorderRequest) => {
     try {
       await plotLineApi.reorderPlotLines(data);
-      message.success('剧情线排序更新成功');
+      toast.success('剧情线排序更新成功');
     } catch (error) {
       console.error('重排序剧情线失败:', error);
-      message.error('重排序剧情线失败');
+      toast.error('重排序剧情线失败');
       throw error;
     }
   }, []);
@@ -233,11 +233,11 @@ export function usePlotLineSync() {
     try {
       const newLines = await plotLineApi.generatePlotLines(data);
       newLines.forEach(line => addPlotLine(line));
-      message.success(`成功生成 ${newLines.length} 条剧情线`);
+      toast.success(`成功生成 ${newLines.length} 条剧情线`);
       return newLines;
     } catch (error) {
       console.error('AI生成剧情线失败:', error);
-      message.error('AI生成剧情线失败');
+      toast.error('AI生成剧情线失败');
       throw error;
     }
   }, [addPlotLine]);
@@ -257,10 +257,10 @@ export function usePlotLineSync() {
   const addCardsToLine = useCallback(async (lineId: string, cardIds: string[]) => {
     try {
       await plotLineApi.addCardsToLine(lineId, cardIds);
-      message.success('剧情卡片添加成功');
+      toast.success('剧情卡片添加成功');
     } catch (error) {
       console.error('添加剧情卡片失败:', error);
-      message.error('添加剧情卡片失败');
+      toast.error('添加剧情卡片失败');
       throw error;
     }
   }, []);
@@ -269,10 +269,10 @@ export function usePlotLineSync() {
   const removeCardsFromLine = useCallback(async (lineId: string, cardIds: string[]) => {
     try {
       await plotLineApi.removeCardsFromLine(lineId, cardIds);
-      message.success('剧情卡片移除成功');
+      toast.success('剧情卡片移除成功');
     } catch (error) {
       console.error('移除剧情卡片失败:', error);
-      message.error('移除剧情卡片失败');
+      toast.error('移除剧情卡片失败');
       throw error;
     }
   }, []);
@@ -315,7 +315,7 @@ export function useChapterOutlineSync() {
       return response;
     } catch (error) {
       console.error('获取章纲失败:', error);
-      message.error('获取章纲失败');
+      toast.error('获取章纲失败');
       throw error;
     } finally {
       setChapterOutlinesLoading(false);
@@ -327,11 +327,11 @@ export function useChapterOutlineSync() {
     try {
       const newOutline = await chapterOutlineApi.createChapterOutline(data);
       addChapterOutline(newOutline);
-      message.success('章纲创建成功');
+      toast.success('章纲创建成功');
       return newOutline;
     } catch (error) {
       console.error('创建章纲失败:', error);
-      message.error('创建章纲失败');
+      toast.error('创建章纲失败');
       throw error;
     }
   }, [addChapterOutline]);
@@ -341,11 +341,11 @@ export function useChapterOutlineSync() {
     try {
       const updatedOutline = await chapterOutlineApi.updateChapterOutline(outlineId, data);
       updateChapterOutline(updatedOutline);
-      message.success('章纲更新成功');
+      toast.success('章纲更新成功');
       return updatedOutline;
     } catch (error) {
       console.error('更新章纲失败:', error);
-      message.error('更新章纲失败');
+      toast.error('更新章纲失败');
       throw error;
     }
   }, [updateChapterOutline]);
@@ -355,10 +355,10 @@ export function useChapterOutlineSync() {
     try {
       await chapterOutlineApi.deleteChapterOutline(outlineId);
       removeChapterOutline(outlineId);
-      message.success('章纲删除成功');
+      toast.success('章纲删除成功');
     } catch (error) {
       console.error('删除章纲失败:', error);
-      message.error('删除章纲失败');
+      toast.error('删除章纲失败');
       throw error;
     }
   }, [removeChapterOutline]);
@@ -367,10 +367,10 @@ export function useChapterOutlineSync() {
   const reorderChapterOutlines = useCallback(async (data: ChapterOutlineReorderRequest) => {
     try {
       await chapterOutlineApi.reorderChapterOutlines(data);
-      message.success('章纲排序更新成功');
+      toast.success('章纲排序更新成功');
     } catch (error) {
       console.error('重排序章纲失败:', error);
-      message.error('重排序章纲失败');
+      toast.error('重排序章纲失败');
       throw error;
     }
   }, []);
@@ -380,11 +380,11 @@ export function useChapterOutlineSync() {
     try {
       const newOutlines = await chapterOutlineApi.batchCreateChapterOutlines(data);
       newOutlines.forEach(outline => addChapterOutline(outline));
-      message.success(`成功创建 ${newOutlines.length} 个章纲`);
+      toast.success(`成功创建 ${newOutlines.length} 个章纲`);
       return newOutlines;
     } catch (error) {
       console.error('批量创建章纲失败:', error);
-      message.error('批量创建章纲失败');
+      toast.error('批量创建章纲失败');
       throw error;
     }
   }, [addChapterOutline]);
@@ -394,11 +394,11 @@ export function useChapterOutlineSync() {
     try {
       const newOutlines = await chapterOutlineApi.generateChapterOutlines(data);
       newOutlines.forEach(outline => addChapterOutline(outline));
-      message.success(`成功生成 ${newOutlines.length} 个章纲`);
+      toast.success(`成功生成 ${newOutlines.length} 个章纲`);
       return newOutlines;
     } catch (error) {
       console.error('AI生成章纲失败:', error);
-      message.error('AI生成章纲失败');
+      toast.error('AI生成章纲失败');
       throw error;
     }
   }, [addChapterOutline]);

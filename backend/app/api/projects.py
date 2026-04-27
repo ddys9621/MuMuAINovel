@@ -489,9 +489,10 @@ async def fix_project_organizations(
         
         logger.info(f"组织记录修复完成: {project_id}, 修复{fixed_count}/{total_count}")
         return {
+            "success": True,
             "message": "组织记录修复完成",
-            "fixed": fixed_count,
-            "total": total_count
+            "fixed_count": fixed_count,
+            "total_count": total_count
         }
         
     except HTTPException:
@@ -538,9 +539,10 @@ async def fix_project_member_counts(
         
         logger.info(f"成员计数修复完成: {project_id}, 修复{fixed_count}/{total_count}")
         return {
+            "success": True,
             "message": "成员计数修复完成",
-            "fixed": fixed_count,
-            "total": total_count
+            "fixed_count": fixed_count,
+            "total_count": total_count
         }
         
     except HTTPException:

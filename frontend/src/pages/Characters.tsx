@@ -1,895 +1,743 @@
-import { useState, useEffect } from 'react';
-import { Button, Modal, Form, Input, Select, message, Row, Col, Empty, Tabs, Divider, Typography, Space, InputNumber } from 'antd';
-import { ThunderboltOutlined, UserOutlined, TeamOutlined, PlusOutlined } from '@ant-design/icons';
-import { useStore } from '../store';
-import { useCharacterSync } from '../store/hooks';
-import { characterGridConfig } from '../components/CardStyles';
-import { CharacterCard } from '../components/CharacterCard';
-import { SSELoadingOverlay } from '../components/SSELoadingOverlay';
-import MCPSelector, { type MCPSelectorValue } from '../components/MCPSelector';
-import type { Character, CharacterUpdate } from '../types';
-import { characterApi } from '../services/api';
-import { SSEPostClient } from '../utils/sseClient';
+import { useState, useEffect, useCallback } from 'react';
+import { Plus, Sparkles, Pencil, Trash2, X, Loader2, Building, Users, UserPlus, UserMinus } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
+import { useStore } from '@/store';
+import { useCharacterSync } from '@/store/hooks';
+import { characterApi, organizationApi } from '@/services/api';
+import { MCPSelector } from '@/components/MCPSelector';
+import type { Character } from '@/types';
+import { ROLE_OPTIONS, getRoleDisplayName, normalizeRoleType } from '@/utils/characterRole';
 
-const { Title } = Typography;
+const ROLE_COLORS: Record<string, string> = {
+  主角: 'bg-brand/10 text-brand-600',
+  配角: 'bg-blue-50 text-blue-600',
+  反派: 'bg-red-50 text-red-700',
+  导师: 'bg-purple-50 text-purple-600',
+  盟友: 'bg-emerald-50 text-emerald-600',
+  路人: 'bg-gray-100 text-gray-500',
+  组织: 'bg-amber-50 text-amber-700',
+};
 
-const { TextArea } = Input;
+const AVATAR_COLORS = [
+  'bg-brand-500', 'bg-blue-500', 'bg-emerald-500', 'bg-purple-500',
+  'bg-orange-500', 'bg-pink-500', 'bg-teal-500', 'bg-indigo-500',
+];
+
+function getAvatarColor(name: string) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
+interface FormData {
+  name: string;
+  role_type: string;
+  personality: string;
+  background: string;
+  is_organization: boolean;
+  organization_type: string;
+  organization_purpose: string;
+  reason: string;
+}
+
+const EMPTY_FORM: FormData = { name: '', role_type: 'protagonist', personality: '', background: '', is_organization: false, organization_type: '', organization_purpose: '', reason: '' };
 
 export default function Characters() {
   const { currentProject, characters } = useStore();
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [progressMessage, setProgressMessage] = useState('');
-  const [activeTab, setActiveTab] = useState<'all' | 'character' | 'organization'>('all');
-  const [generateForm] = Form.useForm();
-  const [generateOrgForm] = Form.useForm();
-  const [createForm] = Form.useForm();
-  const [editForm] = Form.useForm();
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [createType, setCreateType] = useState<'character' | 'organization'>('character');
-  const [editingCharacter, setEditingCharacter] = useState<Character | null>(null);
-  const [mcpSettings, setMcpSettings] = useState<MCPSelectorValue>({
-    enable: false,
-    selected: []
-  });
-  const [isGenerateModalOpen, setIsGenerateModalOpen] = useState(false);
-  const [isGenerateOrgModalOpen, setIsGenerateOrgModalOpen] = useState(false);
+  const { refreshCharacters, deleteCharacter, generateCharacter } = useCharacterSync();
 
-  const {
-    refreshCharacters,
-    deleteCharacter
-  } = useCharacterSync();
+  const [showModal, setShowModal] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState<FormData>(EMPTY_FORM);
+  const [submitting, setSubmitting] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [showGenModal, setShowGenModal] = useState(false);
+  const [genForm, setGenForm] = useState({ name: '', role_type: 'supporting', background: '', requirements: '' });
+  const [enableMcp, setEnableMcp] = useState(false);
+  const [selectedPlugins, setSelectedPlugins] = useState<string[]>([]);
+  const [filter, setFilter] = useState<'all' | 'character' | 'organization'>('all');
+  const [orgMembers, setOrgMembers] = useState<Array<Record<string, unknown>>>([]);
+  const [orgId, setOrgId] = useState<string | null>(null);
+  const [addMemberId, setAddMemberId] = useState('');
+  const [addMemberPos, setAddMemberPos] = useState('成员');
+  const [showGenOrgModal, setShowGenOrgModal] = useState(false);
+  const [genOrgForm, setGenOrgForm] = useState({ name: '', requirements: '' });
+  const [generatingOrg, setGeneratingOrg] = useState(false);
+
+  const filteredCharacters = characters.filter(c => {
+    if (filter === 'character') return !c.is_organization;
+    if (filter === 'organization') return c.is_organization;
+    return true;
+  });
+  const charCount = characters.filter(c => !c.is_organization).length;
+  const orgCount = characters.filter(c => c.is_organization).length;
 
   useEffect(() => {
-    if (currentProject?.id) {
-      refreshCharacters();
+    if (currentProject?.id) refreshCharacters();
+  }, [currentProject?.id, refreshCharacters]);
+
+  const openAdd = useCallback(() => {
+    setEditingId(null);
+    setForm(EMPTY_FORM);
+    setShowModal(true);
+  }, []);
+
+  const openAddOrg = useCallback(() => {
+    setEditingId(null);
+    setForm({ ...EMPTY_FORM, is_organization: true, role_type: 'supporting' });
+    setShowModal(true);
+  }, []);
+
+  const loadOrgMembers = useCallback(async (characterId: string) => {
+    try {
+      const orgs = currentProject?.id
+        ? await organizationApi.getProjectOrganizations(currentProject.id) as Array<Record<string, unknown>>
+        : [];
+      const org = orgs.find((o) => o.character_id === characterId);
+      if (org && org.id) {
+        setOrgId(org.id as string);
+        const members = await organizationApi.getMembers(org.id as string);
+        setOrgMembers(members);
+      } else {
+        setOrgId(null);
+        setOrgMembers([]);
+      }
+    } catch {
+      setOrgMembers([]);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProject?.id]);
 
-  if (!currentProject) return null;
-
-  const handleDeleteCharacter = async (id: string) => {
+  const handleAddMember = async () => {
+    if (!orgId || !addMemberId) return;
     try {
-      await deleteCharacter(id);
-      message.success('删除成功');
+      await organizationApi.addMember(orgId, { character_id: addMemberId, position: addMemberPos || '成员' });
+      toast.success('成员已添加');
+      setAddMemberId('');
+      setAddMemberPos('成员');
+      await loadOrgMembers(editingId!);
     } catch {
-      message.error('删除失败');
+      toast.error('添加成员失败');
     }
   };
 
-  const handleGenerate = async (values: { name?: string; role_type: string; background?: string }) => {
+  const handleRemoveMember = async (memberId: string) => {
     try {
-      setIsGenerating(true);
-      setProgress(0);
-      setProgressMessage('准备生成角色...');
-
-      const client = new SSEPostClient(
-        '/api/characters/generate-stream',
-        {
-          project_id: currentProject.id,
-          name: values.name,
-          role_type: values.role_type,
-          background: values.background,
-          enable_mcp: mcpSettings.enable && mcpSettings.selected.length > 0,
-          selected_plugins: mcpSettings.enable ? mcpSettings.selected : [],
-        },
-        {
-          onProgress: (msg, prog) => {
-            setProgress(prog);
-            setProgressMessage(msg);
-          },
-          onResult: (data) => {
-            console.log('角色生成完成:', data);
-          },
-          onError: (error) => {
-            message.error(`生成失败: ${error}`);
-          },
-          onComplete: () => {
-            setProgress(100);
-            setProgressMessage('生成完成！');
-          }
-        }
-      );
-
-      await client.connect();
-      message.success('AI生成角色成功');
-      setIsGenerateModalOpen(false);
-      generateForm.resetFields();
-      setMcpSettings({ enable: false, selected: [] });
-      await refreshCharacters();
-    } catch (error: any) {
-      message.error(error.message || 'AI生成失败');
-    } finally {
-      setTimeout(() => {
-        setIsGenerating(false);
-        setProgress(0);
-        setProgressMessage('');
-      }, 500);
+      await organizationApi.removeMember(memberId);
+      toast.success('成员已移除');
+      if (editingId) await loadOrgMembers(editingId);
+    } catch {
+      toast.error('移除失败');
     }
   };
 
-  const handleGenerateOrganization = async (values: {
-    name?: string;
-    organization_type?: string;
-    background?: string;
-    requirements?: string;
-  }) => {
-    try {
-      setIsGenerating(true);
-      setProgress(0);
-      setProgressMessage('准备生成组织...');
-
-      const client = new SSEPostClient(
-        '/api/organizations/generate-stream',
-        {
-          project_id: currentProject.id,
-          name: values.name,
-          organization_type: values.organization_type,
-          background: values.background,
-          requirements: values.requirements,
-          enable_mcp: mcpSettings.enable && mcpSettings.selected.length > 0,
-          selected_plugins: mcpSettings.enable ? mcpSettings.selected : [],
-        },
-        {
-          onProgress: (msg, prog) => {
-            setProgress(prog);
-            setProgressMessage(msg);
-          },
-          onResult: (data) => {
-            console.log('组织生成完成:', data);
-          },
-          onError: (error) => {
-            message.error(`生成失败: ${error}`);
-          },
-          onComplete: () => {
-            setProgress(100);
-            setProgressMessage('生成完成！');
-          }
-        }
-      );
-
-      await client.connect();
-      message.success('AI生成组织成功');
-      setIsGenerateOrgModalOpen(false);
-      generateOrgForm.resetFields();
-      setMcpSettings({ enable: false, selected: [] });
-      await refreshCharacters();
-    } catch (error: any) {
-      message.error(error.message || 'AI生成失败');
-    } finally {
-      setTimeout(() => {
-        setIsGenerating(false);
-        setProgress(0);
-        setProgressMessage('');
-      }, 500);
+  const openEdit = useCallback((c: Character) => {
+    setEditingId(c.id);
+    setForm({
+      name: c.name,
+      role_type: normalizeRoleType(c.role_type, c.is_organization ? 'supporting' : 'protagonist'),
+      personality: c.personality || '',
+      background: c.background || '',
+      is_organization: c.is_organization,
+      organization_type: c.organization_type || '',
+      organization_purpose: c.organization_purpose || '',
+      reason: '',
+    });
+    setOrgMembers([]);
+    setOrgId(null);
+    setAddMemberId('');
+    setAddMemberPos('成员');
+    if (c.is_organization) {
+      loadOrgMembers(c.id);
     }
-  };
+    setShowModal(true);
+  }, [loadOrgMembers]);
 
-  const handleCreateCharacter = async (values: any) => {
+  const handleSubmit = async () => {
+    if (!currentProject || !form.name.trim()) return;
+    setSubmitting(true);
     try {
-      const createData: any = {
-        project_id: currentProject.id,
-        name: values.name,
-        is_organization: createType === 'organization',
-      };
-
-      if (createType === 'character') {
-        // 角色字段
-        createData.age = values.age;
-        createData.gender = values.gender;
-        createData.role_type = values.role_type || 'supporting';
-        createData.personality = values.personality;
-        createData.appearance = values.appearance;
-        createData.relationships = values.relationships;
-        createData.background = values.background;
-      } else {
-        // 组织字段
-        createData.organization_type = values.organization_type;
-        createData.organization_purpose = values.organization_purpose;
-        createData.organization_members = values.organization_members;
-        createData.background = values.background;
-        createData.power_level = values.power_level;
-        createData.location = values.location;
-        createData.motto = values.motto;
-        createData.color = values.color;
-        createData.role_type = 'supporting'; // 组织默认为配角
+      let bg = form.background;
+      if (form.reason.trim()) {
+        const prefix = editingId ? '[手动编辑]' : '[手动添加]';
+        const reasonLine = `${prefix} ${form.reason.trim()}`;
+        bg = bg.trim() ? `${bg.trim()}\n${reasonLine}` : reasonLine;
       }
-
-      await characterApi.createCharacter(createData);
-      message.success(`${createType === 'character' ? '角色' : '组织'}创建成功`);
-      setIsCreateModalOpen(false);
-      createForm.resetFields();
+      const payload: Record<string, unknown> = {
+        name: form.name,
+        role_type: normalizeRoleType(form.role_type, 'supporting'),
+        personality: form.personality,
+        background: bg,
+      };
+      if (form.is_organization) {
+        payload.is_organization = true;
+        payload.organization_type = form.organization_type;
+        payload.organization_purpose = form.organization_purpose;
+      }
+      if (editingId) {
+        await characterApi.updateCharacter(editingId, payload);
+        toast.success(form.is_organization ? '组织已更新' : '角色已更新');
+      } else {
+        await characterApi.createCharacter({ project_id: currentProject.id, name: form.name, ...payload });
+        toast.success(form.is_organization ? '组织已创建' : '角色已创建');
+      }
       await refreshCharacters();
+      setShowModal(false);
     } catch {
-      message.error('创建失败');
+      toast.error(editingId ? '更新失败' : '创建失败');
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const handleEditCharacter = (character: Character) => {
-    setEditingCharacter(character);
-    editForm.setFieldsValue(character);
-    setIsEditModalOpen(true);
+  const handleDelete = async (id: string, name: string, isOrg: boolean) => {
+    const label = isOrg ? '组织' : '角色';
+    const reason = prompt(`确定删除${label}「${name}」吗？\n\n请填写删除原因（AI 后续会参考此信息）：`);
+    if (reason === null) return;
+    try {
+      if (reason.trim()) {
+        await characterApi.updateCharacter(id, {
+          background: `[已删除] ${reason.trim()}`,
+        });
+      }
+      await deleteCharacter(id);
+      toast.success(`${label}已删除`);
+    } catch {
+      toast.error('删除失败');
+    }
   };
 
-  const handleUpdateCharacter = async (values: CharacterUpdate) => {
-    if (!editingCharacter) return;
-    
+  const handleGenerateOrg = async () => {
+    if (!currentProject) return;
+    setGeneratingOrg(true);
     try {
-      await characterApi.updateCharacter(editingCharacter.id, values);
-      message.success('更新成功');
-      setIsEditModalOpen(false);
-      editForm.resetFields();
-      setEditingCharacter(null);
+      await organizationApi.generateOrganization({
+        project_id: currentProject.id,
+        requirements: genOrgForm.requirements.trim() || undefined,
+      });
+      toast.success('AI 组织已生成');
       await refreshCharacters();
+      setShowGenOrgModal(false);
+      setGenOrgForm({ name: '', requirements: '' });
     } catch {
-      message.error('更新失败');
+      toast.error('AI 生成组织失败');
+    } finally {
+      setGeneratingOrg(false);
     }
   };
 
-  const handleDeleteCharacterWrapper = (id: string) => {
-    handleDeleteCharacter(id);
-  };
-
-  const showGenerateModal = () => {
-    setIsGenerateModalOpen(true);
-  };
-
-  const handleGenerateModalOk = async () => {
+  const handleGenerate = async () => {
+    if (!currentProject) return;
+    setGenerating(true);
     try {
-      const values = await generateForm.validateFields();
-      await handleGenerate(values);
-    } catch (error) {
-      // 表单验证失败，不关闭Modal
+      await generateCharacter({
+        project_id: currentProject.id,
+        name: genForm.name.trim() || undefined,
+        role_type: genForm.role_type || undefined,
+        background: genForm.background.trim() || undefined,
+        requirements: genForm.requirements.trim() || undefined,
+        enable_mcp: enableMcp,
+        selected_plugins: selectedPlugins,
+      });
+      toast.success('AI 角色已生成');
+      await refreshCharacters();
+      setShowGenModal(false);
+      setGenForm({ name: '', role_type: 'supporting', background: '', requirements: '' });
+    } catch {
+      toast.error('AI 生成失败');
+    } finally {
+      setGenerating(false);
     }
   };
-
-  const handleGenerateModalCancel = () => {
-    setIsGenerateModalOpen(false);
-    generateForm.resetFields();
-    setMcpSettings({ enable: false, selected: [] });
-  };
-
-  const showGenerateOrgModal = () => {
-    setIsGenerateOrgModalOpen(true);
-  };
-
-  const handleGenerateOrgModalOk = async () => {
-    try {
-      const values = await generateOrgForm.validateFields();
-      await handleGenerateOrganization(values);
-    } catch (error) {
-      // 表单验证失败，不关闭Modal
-    }
-  };
-
-  const handleGenerateOrgModalCancel = () => {
-    setIsGenerateOrgModalOpen(false);
-    generateOrgForm.resetFields();
-    setMcpSettings({ enable: false, selected: [] });
-  };
-
-  const characterList = characters.filter(c => !c.is_organization);
-  const organizationList = characters.filter(c => c.is_organization);
-
-  const getDisplayList = () => {
-    if (activeTab === 'character') return characterList;
-    if (activeTab === 'organization') return organizationList;
-    return characters;
-  };
-
-  const displayList = getDisplayList();
-
-  const isMobile = window.innerWidth <= 768;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{
-        position: 'sticky',
-        top: 0,
-        zIndex: 10,
-        backgroundColor: '#fff',
-        padding: isMobile ? '12px 0' : '16px 0',
-        marginBottom: isMobile ? 12 : 16,
-        borderBottom: '1px solid #f0f0f0',
-        display: 'flex',
-        flexDirection: isMobile ? 'column' : 'row',
-        gap: isMobile ? 12 : 0,
-        justifyContent: 'space-between',
-        alignItems: isMobile ? 'stretch' : 'center'
-      }}>
-        <h2 style={{ margin: 0, fontSize: isMobile ? 18 : 24 }}>角色与组织管理</h2>
-        <Space wrap>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => {
-              setCreateType('character');
-              setIsCreateModalOpen(true);
-            }}
-            size={isMobile ? 'small' : 'middle'}
+    <div className="animate-fade-in space-y-6">
+      {/* 头部 */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-content">角色与组织</h1>
+          <p className="text-sm text-content-secondary mt-1">
+            {charCount} 个人物 · {orgCount} 个组织
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowGenModal(true)}
+            disabled={generating}
+            className="inline-flex items-center gap-1.5 border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm transition-colors disabled:opacity-50"
           >
-            创建角色
-          </Button>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => {
-              setCreateType('organization');
-              setIsCreateModalOpen(true);
-            }}
-            size={isMobile ? 'small' : 'middle'}
+            {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+            AI 生成
+          </button>
+          <button
+            onClick={openAdd}
+            className="inline-flex items-center gap-1.5 bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm transition-colors"
           >
-            创建组织
-          </Button>
-          <Button
-            type="dashed"
-            icon={<ThunderboltOutlined />}
-            onClick={showGenerateModal}
-            loading={isGenerating}
-            size={isMobile ? 'small' : 'middle'}
+            <Plus className="w-4 h-4" />
+            添加角色
+          </button>
+          <button
+            onClick={() => setShowGenOrgModal(true)}
+            disabled={generatingOrg}
+            className="inline-flex items-center gap-1.5 border border-amber-300 text-amber-700 hover:bg-amber-50 rounded-btn px-4 py-2 text-sm transition-colors disabled:opacity-50"
           >
-            AI生成角色
-          </Button>
-          <Button
-            type="dashed"
-            icon={<ThunderboltOutlined />}
-            onClick={showGenerateOrgModal}
-            loading={isGenerating}
-            size={isMobile ? 'small' : 'middle'}
+            {generatingOrg ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+            AI 生成组织
+          </button>
+          <button
+            onClick={openAddOrg}
+            className="inline-flex items-center gap-1.5 border border-amber-300 text-amber-700 hover:bg-amber-50 rounded-btn px-4 py-2 text-sm transition-colors"
           >
-            AI生成组织
-          </Button>
-        </Space>
+            <Building className="w-4 h-4" />
+            添加组织
+          </button>
+        </div>
       </div>
 
-      {characters.length > 0 && (
-        <div style={{
-          position: 'sticky',
-          top: isMobile ? 60 : 72,
-          zIndex: 9,
-          backgroundColor: '#fff',
-          paddingBottom: 8,
-          borderBottom: '1px solid #f0f0f0',
-        }}>
-          <Tabs
-            activeKey={activeTab}
-            onChange={(key) => setActiveTab(key as 'all' | 'character' | 'organization')}
-            items={[
-                {
-                  key: 'all',
-                  label: `全部 (${characters.length})`,
-                },
-                {
-                  key: 'character',
-                  label: (
-                    <span>
-                      <UserOutlined /> 角色 ({characterList.length})
-                    </span>
-                  ),
-                },
-                {
-                  key: 'organization',
-                  label: (
-                    <span>
-                      <TeamOutlined /> 组织 ({organizationList.length})
-                    </span>
-                  ),
-                },
-              ]}
-            />
-          </div>
-        )}
-  
-        <div style={{ flex: 1, overflowY: 'auto' }}>
-          {characters.length === 0 ? (
-            <Empty description="还没有角色或组织，开始创建吧！" />
-          ) : (
-            <>
-              <Row gutter={isMobile ? [8, 8] : characterGridConfig.gutter}>
-              {activeTab === 'all' && (
-                <>
-                  {characterList.length > 0 && (
-                    <>
-                      <Col span={24}>
-                        <Divider orientation="left">
-                          <Title level={5} style={{ margin: 0 }}>
-                            <UserOutlined style={{ marginRight: 8 }} />
-                            角色 ({characterList.length})
-                          </Title>
-                        </Divider>
-                      </Col>
-                      {characterList.map((character) => (
-                        <Col
-                          xs={24}
-                          sm={characterGridConfig.sm}
-                          md={characterGridConfig.md}
-                          lg={characterGridConfig.lg}
-                          xl={characterGridConfig.xl}
-                          key={character.id}
-                          style={{ padding: isMobile ? '4px' : '8px' }}
-                        >
-                          <CharacterCard
-                            character={character}
-                            onEdit={handleEditCharacter}
-                            onDelete={handleDeleteCharacterWrapper}
-                          />
-                        </Col>
-                      ))}
-                    </>
+      {/* 筛选 Tab */}
+      <div className="flex items-center gap-1 border-b border-surface-border">
+        {([
+          { key: 'all', label: '全部', count: characters.length, icon: null },
+          { key: 'character', label: '人物', count: charCount, icon: Users },
+          { key: 'organization', label: '组织', count: orgCount, icon: Building },
+        ] as const).map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => setFilter(tab.key)}
+            className={cn(
+              'inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors',
+              filter === tab.key
+                ? 'border-brand text-brand'
+                : 'border-transparent text-content-secondary hover:text-content'
+            )}
+          >
+            {tab.icon && <tab.icon className="w-4 h-4" />}
+            {tab.label}
+            <span className={cn(
+              'text-xs rounded-full px-1.5 py-0.5',
+              filter === tab.key ? 'bg-brand/10 text-brand' : 'bg-surface text-content-tertiary'
+            )}>{tab.count}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* 卡片网格 */}
+      {filteredCharacters.length > 0 ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredCharacters.map((c) => (
+            <div
+              key={c.id}
+              className={cn(
+                "bg-white border rounded-card p-4 hover:shadow-card transition-shadow",
+                c.is_organization ? "border-l-4 border-l-amber-400 border-surface-border" : "border-surface-border"
+              )}
+            >
+              {(() => {
+                const roleLabel = getRoleDisplayName(c.role_type, c.is_organization ? '组织' : '路人');
+                return (
+              <div className="flex items-start gap-3">
+                {/* 头像 */}
+                <div
+                  className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm ${getAvatarColor(c.name)}`}
+                >
+                  {c.name.charAt(0)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-content text-sm truncate">{c.name}</span>
+                    {c.role_type && (
+                      <span
+                        className={`flex-shrink-0 text-xs px-2 py-0.5 rounded-full ${ROLE_COLORS[roleLabel] || ROLE_COLORS['路人']}`}
+                      >
+                        {roleLabel}
+                      </span>
+                    )}
+                  </div>
+                  {c.is_organization ? (
+                    <div className="mt-1 space-y-0.5">
+                      {c.organization_type && <p className="text-xs text-amber-600">{c.organization_type}</p>}
+                      <p className="text-xs text-content-secondary line-clamp-2">
+                        {c.organization_purpose || c.background || '暂无描述'}
+                      </p>
+                      {c.organization_members && (() => {
+                        try {
+                          const members = JSON.parse(c.organization_members);
+                          if (Array.isArray(members) && members.length > 0) {
+                            return <p className="text-[11px] text-content-tertiary">成员: {members.slice(0, 5).join('、')}{members.length > 5 ? ` 等${members.length}人` : ''}</p>
+                          }
+                        } catch { /* ignore */ }
+                        return null;
+                      })()}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-content-secondary mt-1 line-clamp-2">
+                      {c.personality || c.background || '暂无简介'}
+                    </p>
                   )}
-                  
-                  {organizationList.length > 0 && (
-                    <>
-                      <Col span={24}>
-                        <Divider orientation="left">
-                          <Title level={5} style={{ margin: 0 }}>
-                            <TeamOutlined style={{ marginRight: 8 }} />
-                            组织 ({organizationList.length})
-                          </Title>
-                        </Divider>
-                      </Col>
-                      {organizationList.map((org) => (
-                        <Col
-                          xs={24}
-                          sm={characterGridConfig.sm}
-                          md={characterGridConfig.md}
-                          lg={characterGridConfig.lg}
-                          xl={characterGridConfig.xl}
-                          key={org.id}
-                          style={{ padding: isMobile ? '4px' : '8px' }}
-                        >
-                          <CharacterCard
-                            character={org}
-                            onEdit={handleEditCharacter}
-                            onDelete={handleDeleteCharacterWrapper}
+                </div>
+              </div>
+                )
+              })()}
+              {/* 操作 */}
+              <div className="flex items-center justify-end gap-1 mt-3 pt-3 border-t border-surface-border-light">
+                <button
+                  onClick={() => openEdit(c)}
+                  className="inline-flex items-center gap-1 text-xs text-content-secondary hover:text-brand px-2 py-1 rounded transition-colors"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  编辑
+                </button>
+                <button
+                  onClick={() => handleDelete(c.id, c.name, c.is_organization)}
+                  className="inline-flex items-center gap-1 text-xs text-content-secondary hover:text-red-600 px-2 py-1 rounded transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  删除
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-center py-16 text-content-secondary text-sm">
+          还没有角色，点击"添加角色"或"AI 生成"开始创建
+        </div>
+      )}
+
+      {/* AI 生成角色弹窗 */}
+      {showGenModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-modal shadow-xl w-full max-w-md mx-4 animate-scale-in">
+            <div className="flex items-center justify-between px-6 pt-5 pb-3">
+              <h2 className="text-lg font-bold text-content">AI 生成角色</h2>
+              <button onClick={() => setShowGenModal(false)} className="text-content-tertiary hover:text-content">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="px-6 pb-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-content mb-1">角色名称（可选）</label>
+                <input
+                  value={genForm.name}
+                  onChange={e => setGenForm(p => ({ ...p, name: e.target.value }))}
+                  placeholder="留空由 AI 自动取名"
+                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-content mb-1">角色定位</label>
+                <select
+                  value={genForm.role_type}
+                  onChange={e => setGenForm(p => ({ ...p, role_type: e.target.value }))}
+                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none"
+                >
+                  <option value="protagonist">主角</option>
+                  <option value="supporting">配角</option>
+                  <option value="antagonist">反派</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-content mb-1">背景设定（可选）</label>
+                <textarea
+                  value={genForm.background}
+                  onChange={e => setGenForm(p => ({ ...p, background: e.target.value }))}
+                  placeholder="对角色背景的描述或要求..."
+                  rows={2}
+                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none resize-none"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-content mb-1">额外要求（可选）</label>
+                <textarea
+                  value={genForm.requirements}
+                  onChange={e => setGenForm(p => ({ ...p, requirements: e.target.value }))}
+                  placeholder="如：需要有修仙背景、性格冷酷..."
+                  rows={2}
+                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none resize-none"
+                />
+              </div>
+              <MCPSelector
+                value={{ enable: enableMcp, selected: selectedPlugins }}
+                onChange={({ enable, selected }) => {
+                  setEnableMcp(enable);
+                  setSelectedPlugins(selected);
+                }}
+              />
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={() => setShowGenModal(false)}
+                  className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleGenerate}
+                  disabled={generating}
+                  className="inline-flex items-center gap-1.5 bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm transition-colors disabled:opacity-50"
+                >
+                  {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                  {generating ? '生成中...' : '开始生成'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI 生成组织弹窗 */}
+      {showGenOrgModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-modal shadow-xl w-full max-w-md mx-4 animate-scale-in">
+            <div className="flex items-center justify-between px-6 pt-5 pb-3">
+              <h2 className="text-lg font-bold text-content">AI 生成组织</h2>
+              <button onClick={() => setShowGenOrgModal(false)} className="text-content-tertiary hover:text-content">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="px-6 pb-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-content mb-1">组织名称（可选）</label>
+                <input
+                  value={genOrgForm.name}
+                  onChange={e => setGenOrgForm(p => ({ ...p, name: e.target.value }))}
+                  placeholder="留空由 AI 自动命名"
+                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-content mb-1">组织要求描述</label>
+                <textarea
+                  value={genOrgForm.requirements}
+                  onChange={e => setGenOrgForm(p => ({ ...p, requirements: e.target.value }))}
+                  placeholder="如：一个修仙宗门、纪律森严、位于北方雪山..."
+                  rows={4}
+                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none resize-none"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={() => setShowGenOrgModal(false)}
+                  className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleGenerateOrg}
+                  disabled={generatingOrg}
+                  className="inline-flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-btn px-4 py-2 text-sm transition-colors disabled:opacity-50"
+                >
+                  {generatingOrg ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                  {generatingOrg ? '生成中...' : '开始生成'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 手动添加/编辑弹窗 */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-modal shadow-xl w-full max-w-md mx-4 animate-scale-in max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 pt-5 pb-3 flex-shrink-0">
+              <h2 className="text-lg font-bold text-content">
+                {editingId ? (form.is_organization ? '编辑组织' : '编辑角色') : '添加角色'}
+              </h2>
+              <button onClick={() => setShowModal(false)} className="text-content-tertiary hover:text-content">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="px-6 pb-6 space-y-4 overflow-y-auto flex-1">
+              <div>
+                <label className="block text-sm font-medium text-content mb-1">名称</label>
+                <input
+                  value={form.name}
+                  onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+                  placeholder={form.is_organization ? '组织名称' : '角色名字'}
+                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none"
+                />
+              </div>
+
+              {form.is_organization ? (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-content mb-1">组织类型</label>
+                    <input
+                      value={form.organization_type}
+                      onChange={(e) => setForm((p) => ({ ...p, organization_type: e.target.value }))}
+                      placeholder="如：宗门、家族、商会、势力"
+                      className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-content mb-1">组织宗旨</label>
+                    <textarea
+                      value={form.organization_purpose}
+                      onChange={(e) => setForm((p) => ({ ...p, organization_purpose: e.target.value }))}
+                      placeholder="组织的宗旨或核心目标…"
+                      rows={2}
+                      className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none resize-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-content mb-1">组织风格/氛围</label>
+                    <textarea
+                      value={form.personality}
+                      onChange={(e) => setForm((p) => ({ ...p, personality: e.target.value }))}
+                      placeholder="如：纪律严明、唯利是图…"
+                      rows={2}
+                      className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none resize-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-content mb-1">背景描述</label>
+                    <textarea
+                      value={form.background}
+                      onChange={(e) => setForm((p) => ({ ...p, background: e.target.value }))}
+                      placeholder="组织的历史、势力范围等…"
+                      rows={3}
+                      className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none resize-none"
+                    />
+                  </div>
+
+                  {/* 成员管理区 */}
+                  {editingId && (
+                    <div className="border border-surface-border rounded-[14px] p-3 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <Users className="w-4 h-4 text-content-secondary" />
+                        <span className="text-sm font-medium text-content">组织成员</span>
+                        <span className="text-xs text-content-tertiary">({orgMembers.length}人)</span>
+                      </div>
+
+                      {orgMembers.length > 0 ? (
+                        <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                          {orgMembers.map((m) => (
+                            <div key={String(m.id)} className="flex items-center justify-between gap-2 bg-surface/50 rounded-btn px-2.5 py-1.5">
+                              <div className="flex-1 min-w-0">
+                                <span className="text-xs font-medium text-content">{String(m.character_name || '未知')}</span>
+                                <span className="text-[11px] text-content-tertiary ml-1.5">{String(m.position || '成员')}</span>
+                                {Boolean(m.status) && m.status !== 'active' && <span className="text-[10px] text-red-500 ml-1">({String(m.status)})</span>}
+                              </div>
+                              <button
+                                onClick={() => handleRemoveMember(String(m.id))}
+                                className="text-content-tertiary hover:text-red-500 transition-colors p-0.5"
+                                title="移除成员"
+                              >
+                                <UserMinus className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-content-tertiary text-center py-2">暂无成员</p>
+                      )}
+
+                      {/* 添加成员 */}
+                      <div className="flex items-end gap-2">
+                        <div className="flex-1">
+                          <label className="block text-[11px] text-content-tertiary mb-0.5">选择角色</label>
+                          <select
+                            value={addMemberId}
+                            onChange={(e) => setAddMemberId(e.target.value)}
+                            className="w-full border border-surface-border rounded-btn px-2 py-1.5 text-xs focus:border-brand outline-none bg-white"
+                          >
+                            <option value="">选择角色加入…</option>
+                            {characters
+                              .filter(c => !c.is_organization && !orgMembers.some(m => m.character_id === c.id))
+                              .map(c => <option key={c.id} value={c.id}>{c.name}</option>)
+                            }
+                          </select>
+                        </div>
+                        <div className="w-24">
+                          <label className="block text-[11px] text-content-tertiary mb-0.5">职位</label>
+                          <input
+                            value={addMemberPos}
+                            onChange={(e) => setAddMemberPos(e.target.value)}
+                            placeholder="成员"
+                            className="w-full border border-surface-border rounded-btn px-2 py-1.5 text-xs focus:border-brand outline-none"
                           />
-                        </Col>
-                      ))}
-                    </>
+                        </div>
+                        <button
+                          onClick={handleAddMember}
+                          disabled={!addMemberId}
+                          className="inline-flex items-center gap-1 border border-emerald-300 text-emerald-700 hover:bg-emerald-50 rounded-btn px-2 py-1.5 text-xs transition-colors disabled:opacity-40"
+                        >
+                          <UserPlus className="w-3.5 h-3.5" />
+                          添加
+                        </button>
+                      </div>
+                    </div>
                   )}
                 </>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-content mb-1">角色类型</label>
+                    <select
+                      value={form.role_type}
+                      onChange={(e) => setForm((p) => ({ ...p, role_type: e.target.value }))}
+                      className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none"
+                    >
+                      {ROLE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-content mb-1">性格特点</label>
+                    <textarea
+                      value={form.personality}
+                      onChange={(e) => setForm((p) => ({ ...p, personality: e.target.value }))}
+                      placeholder="描述角色的性格特点…"
+                      rows={3}
+                      className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none resize-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-content mb-1">背景故事</label>
+                    <textarea
+                      value={form.background}
+                      onChange={(e) => setForm((p) => ({ ...p, background: e.target.value }))}
+                      placeholder="描述角色的背景故事…"
+                      rows={3}
+                      className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none resize-none"
+                    />
+                  </div>
+                </>
               )}
-              
-              {activeTab === 'character' && characterList.map((character) => (
-                <Col
-                  xs={24}
-                  sm={characterGridConfig.sm}
-                  md={characterGridConfig.md}
-                  lg={characterGridConfig.lg}
-                  xl={characterGridConfig.xl}
-                  key={character.id}
-                  style={{ padding: isMobile ? '4px' : '8px' }}
+
+              <div className="rounded-[14px] border border-brand/20 bg-brand/5 p-3">
+                <label className="block text-sm font-medium text-brand-600 mb-1">
+                  {editingId ? '修改原因' : '添加原因'}
+                  <span className="text-xs font-normal text-content-tertiary ml-1">（AI 生成时会参考此信息）</span>
+                </label>
+                <input
+                  value={form.reason}
+                  onChange={(e) => setForm((p) => ({ ...p, reason: e.target.value }))}
+                  placeholder={editingId ? '如：修正角色设定、补充信息…' : '如：剧情需要新增此角色…'}
+                  className="w-full border border-brand/20 rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none bg-white"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={() => setShowModal(false)}
+                  className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm transition-colors"
                 >
-                  <CharacterCard
-                    character={character}
-                    onEdit={handleEditCharacter}
-                    onDelete={handleDeleteCharacterWrapper}
-                  />
-                </Col>
-              ))}
-              
-              {activeTab === 'organization' && organizationList.map((org) => (
-                <Col
-                  xs={24}
-                  sm={characterGridConfig.sm}
-                  md={characterGridConfig.md}
-                  lg={characterGridConfig.lg}
-                  xl={characterGridConfig.xl}
-                  key={org.id}
-                  style={{ padding: isMobile ? '4px' : '8px' }}
+                  取消
+                </button>
+                <button
+                  onClick={handleSubmit}
+                  disabled={submitting || !form.name.trim()}
+                  className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm transition-colors disabled:opacity-50"
                 >
-                  <CharacterCard
-                    character={org}
-                    onEdit={handleEditCharacter}
-                    onDelete={handleDeleteCharacterWrapper}
-                  />
-                </Col>
-              ))}
-            </Row>
-
-            {displayList.length === 0 && (
-              <Empty 
-                description={
-                  activeTab === 'character' 
-                    ? '暂无角色' 
-                    : activeTab === 'organization' 
-                    ? '暂无组织' 
-                    : '暂无数据'
-                } 
-              />
-            )}
-          </>
-        )}
-      </div>
-
-      <Modal
-        title={editingCharacter?.is_organization ? '编辑组织' : '编辑角色'}
-        open={isEditModalOpen}
-        onCancel={() => {
-          setIsEditModalOpen(false);
-          editForm.resetFields();
-          setEditingCharacter(null);
-        }}
-        footer={null}
-        centered={!isMobile}
-        width={isMobile ? '100%' : 600}
-        style={isMobile ? { top: 0, paddingBottom: 0, maxWidth: '100vw' } : undefined}
-        styles={isMobile ? { body: { maxHeight: 'calc(100vh - 110px)', overflowY: 'auto' } } : undefined}
-      >
-        <Form form={editForm} layout="vertical" onFinish={handleUpdateCharacter}>
-          <Row gutter={16}>
-            <Col span={editingCharacter?.is_organization ? 24 : 12}>
-              <Form.Item
-                label={editingCharacter?.is_organization ? '组织名称' : '角色名称'}
-                name="name"
-                rules={[{ required: true, message: `请输入${editingCharacter?.is_organization ? '组织' : '角色'}名称` }]}
-              >
-                <Input placeholder={`输入${editingCharacter?.is_organization ? '组织' : '角色'}名称`} />
-              </Form.Item>
-            </Col>
-            
-            {!editingCharacter?.is_organization && (
-              <Col span={12}>
-                <Form.Item label="角色定位" name="role_type">
-                  <Select>
-                    <Select.Option value="protagonist">主角</Select.Option>
-                    <Select.Option value="supporting">配角</Select.Option>
-                    <Select.Option value="antagonist">反派</Select.Option>
-                  </Select>
-                </Form.Item>
-              </Col>
-            )}
-          </Row>
-
-          {!editingCharacter?.is_organization && (
-            <>
-              <Row gutter={16}>
-                <Col span={12}>
-                  <Form.Item label="年龄" name="age">
-                    <Input placeholder="如：25、30岁" />
-                  </Form.Item>
-                </Col>
-                <Col span={12}>
-                  <Form.Item label="性别" name="gender">
-                    <Select placeholder="选择性别">
-                      <Select.Option value="男">男</Select.Option>
-                      <Select.Option value="女">女</Select.Option>
-                      <Select.Option value="其他">其他</Select.Option>
-                    </Select>
-                  </Form.Item>
-                </Col>
-              </Row>
-
-              <Form.Item label="性格特点" name="personality">
-                <TextArea rows={2} placeholder="描述角色的性格特点..." />
-              </Form.Item>
-
-              <Form.Item label="外貌描写" name="appearance">
-                <TextArea rows={2} placeholder="描述角色的外貌特征..." />
-              </Form.Item>
-
-              <Form.Item label="人际关系" name="relationships">
-                <TextArea rows={2} placeholder="描述角色与其他角色的关系..." />
-              </Form.Item>
-            </>
-          )}
-
-          {editingCharacter?.is_organization && (
-            <>
-              <Row gutter={16}>
-                <Col span={12}>
-                  <Form.Item
-                    label="组织类型"
-                    name="organization_type"
-                    rules={[{ required: true, message: '请输入组织类型' }]}
-                  >
-                    <Input placeholder="如：帮派、公司、门派、学院" />
-                  </Form.Item>
-                </Col>
-                <Col span={12}>
-                  <Form.Item label="主要成员" name="organization_members">
-                    <Input placeholder="如：张三、李四、王五" />
-                  </Form.Item>
-                </Col>
-              </Row>
-              
-              <Form.Item
-                label="组织目的"
-                name="organization_purpose"
-                rules={[{ required: true, message: '请输入组织目的' }]}
-              >
-                <TextArea rows={2} placeholder="描述组织的宗旨和目标..." />
-              </Form.Item>
-
-              <Row gutter={16}>
-                <Col span={12}>
-                  <Form.Item label="所在地" name="location">
-                    <Input placeholder="组织的主要活动区域或总部位置" />
-                  </Form.Item>
-                </Col>
-                <Col span={12}>
-                  <Form.Item label="代表颜色" name="color">
-                    <Input placeholder="如：深红色、金色、黑色等" />
-                  </Form.Item>
-                </Col>
-              </Row>
-
-              <Form.Item label="格言/口号" name="motto">
-                <Input placeholder="组织的宗旨、格言或口号" />
-              </Form.Item>
-            </>
-          )}
-
-          <Form.Item label={editingCharacter?.is_organization ? '组织背景' : '角色背景'} name="background">
-            <TextArea rows={3} placeholder={`描述${editingCharacter?.is_organization ? '组织' : '角色'}的背景故事...`} />
-          </Form.Item>
-
-          <Form.Item>
-            <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-              <Button onClick={() => {
-                setIsEditModalOpen(false);
-                editForm.resetFields();
-                setEditingCharacter(null);
-              }}>
-                取消
-              </Button>
-              <Button type="primary" htmlType="submit">
-                保存
-              </Button>
-            </Space>
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      {/* 手动创建角色/组织模态框 */}
-      <Modal
-        title={createType === 'character' ? '创建角色' : '创建组织'}
-        open={isCreateModalOpen}
-        onCancel={() => {
-          setIsCreateModalOpen(false);
-          createForm.resetFields();
-        }}
-        footer={null}
-        centered={!isMobile}
-        width={isMobile ? '100%' : 600}
-        style={isMobile ? { top: 0, paddingBottom: 0, maxWidth: '100vw' } : undefined}
-        styles={isMobile ? { body: { maxHeight: 'calc(100vh - 110px)', overflowY: 'auto' } } : undefined}
-      >
-        <Form form={createForm} layout="vertical" onFinish={handleCreateCharacter}>
-          <Row gutter={16}>
-            <Col span={createType === 'organization' ? 24 : 12}>
-              <Form.Item
-                label={createType === 'character' ? '角色名称' : '组织名称'}
-                name="name"
-                rules={[{ required: true, message: `请输入${createType === 'character' ? '角色' : '组织'}名称` }]}
-              >
-                <Input placeholder={`输入${createType === 'character' ? '角色' : '组织'}名称`} />
-              </Form.Item>
-            </Col>
-            
-            {createType === 'character' && (
-              <Col span={12}>
-                <Form.Item label="角色定位" name="role_type" initialValue="supporting">
-                  <Select>
-                    <Select.Option value="protagonist">主角</Select.Option>
-                    <Select.Option value="supporting">配角</Select.Option>
-                    <Select.Option value="antagonist">反派</Select.Option>
-                  </Select>
-                </Form.Item>
-              </Col>
-            )}
-          </Row>
-
-          {createType === 'character' ? (
-            <>
-              <Row gutter={16}>
-                <Col span={12}>
-                  <Form.Item label="年龄" name="age">
-                    <Input placeholder="如：25、30岁" />
-                  </Form.Item>
-                </Col>
-                <Col span={12}>
-                  <Form.Item label="性别" name="gender">
-                    <Select placeholder="选择性别">
-                      <Select.Option value="男">男</Select.Option>
-                      <Select.Option value="女">女</Select.Option>
-                      <Select.Option value="其他">其他</Select.Option>
-                    </Select>
-                  </Form.Item>
-                </Col>
-              </Row>
-
-              <Form.Item label="性格特点" name="personality">
-                <TextArea rows={2} placeholder="描述角色的性格特点..." />
-              </Form.Item>
-
-              <Form.Item label="外貌描写" name="appearance">
-                <TextArea rows={2} placeholder="描述角色的外貌特征..." />
-              </Form.Item>
-
-              <Form.Item label="人际关系" name="relationships">
-                <TextArea rows={2} placeholder="描述角色与其他角色的关系..." />
-              </Form.Item>
-
-              <Form.Item label="角色背景" name="background">
-                <TextArea rows={3} placeholder="描述角色的背景故事..." />
-              </Form.Item>
-            </>
-          ) : (
-            <>
-              <Row gutter={16}>
-                <Col span={12}>
-                  <Form.Item
-                    label="组织类型"
-                    name="organization_type"
-                    rules={[{ required: true, message: '请输入组织类型' }]}
-                  >
-                    <Input placeholder="如：帮派、公司、门派、学院" />
-                  </Form.Item>
-                </Col>
-                <Col span={12}>
-                  <Form.Item
-                    label="势力等级"
-                    name="power_level"
-                    initialValue={50}
-                    tooltip="0-100的数值，表示组织的影响力"
-                  >
-                    <InputNumber min={0} max={100} style={{ width: '100%' }} />
-                  </Form.Item>
-                </Col>
-              </Row>
-              
-              <Form.Item
-                label="组织目的"
-                name="organization_purpose"
-                rules={[{ required: true, message: '请输入组织目的' }]}
-              >
-                <TextArea rows={2} placeholder="描述组织的宗旨和目标..." />
-              </Form.Item>
-
-              <Form.Item label="主要成员" name="organization_members">
-                <Input placeholder="如：张三、李四、王五" />
-              </Form.Item>
-
-              <Row gutter={16}>
-                <Col span={12}>
-                  <Form.Item label="所在地" name="location">
-                    <Input placeholder="组织的主要活动区域或总部位置" />
-                  </Form.Item>
-                </Col>
-                <Col span={12}>
-                  <Form.Item label="代表颜色" name="color">
-                    <Input placeholder="如：深红色、金色、黑色等" />
-                  </Form.Item>
-                </Col>
-              </Row>
-
-              <Form.Item label="格言/口号" name="motto">
-                <Input placeholder="组织的宗旨、格言或口号" />
-              </Form.Item>
-
-              <Form.Item label="组织背景" name="background">
-                <TextArea rows={3} placeholder="描述组织的背景故事..." />
-              </Form.Item>
-            </>
-          )}
-
-          <Form.Item>
-            <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-              <Button onClick={() => {
-                setIsCreateModalOpen(false);
-                createForm.resetFields();
-              }}>
-                取消
-              </Button>
-              <Button type="primary" htmlType="submit">
-                创建
-              </Button>
-            </Space>
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      {/* AI生成角色Modal */}
-      <Modal
-        title="AI生成角色"
-        open={isGenerateModalOpen}
-        onOk={handleGenerateModalOk}
-        onCancel={handleGenerateModalCancel}
-        width={600}
-        centered
-        okText="生成"
-        cancelText="取消"
-      >
-        <Form form={generateForm} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item
-            label="角色名称"
-            name="name"
-          >
-            <Input placeholder="如：张三、李四（可选，AI会自动生成）" />
-          </Form.Item>
-          <Form.Item
-            label="角色定位"
-            name="role_type"
-            rules={[{ required: true, message: '请选择角色定位' }]}
-          >
-            <Select placeholder="选择角色定位">
-              <Select.Option value="protagonist">主角</Select.Option>
-              <Select.Option value="supporting">配角</Select.Option>
-              <Select.Option value="antagonist">反派</Select.Option>
-            </Select>
-          </Form.Item>
-          <Form.Item label="背景设定" name="background">
-            <TextArea rows={3} placeholder="简要描述角色背景和故事环境..." />
-          </Form.Item>
-          
-          {/* MCP 插件选择器 */}
-          <div style={{ marginTop: 16 }}>
-            <div style={{ marginBottom: 8, fontSize: '14px', fontWeight: 500 }}>
-              AI 增强插件
+                  {submitting ? '保存中…' : '保存'}
+                </button>
+              </div>
             </div>
-            <MCPSelector
-              value={mcpSettings}
-              onChange={setMcpSettings}
-              size="middle"
-            />
           </div>
-        </Form>
-      </Modal>
-
-      {/* AI生成组织Modal */}
-      <Modal
-        title="AI生成组织"
-        open={isGenerateOrgModalOpen}
-        onOk={handleGenerateOrgModalOk}
-        onCancel={handleGenerateOrgModalCancel}
-        width={600}
-        centered
-        okText="生成"
-        cancelText="取消"
-      >
-        <Form form={generateOrgForm} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item
-            label="组织名称"
-            name="name"
-          >
-            <Input placeholder="如：天剑门、黑龙会（可选，AI会自动生成）" />
-          </Form.Item>
-          <Form.Item
-            label="组织类型"
-            name="organization_type"
-          >
-            <Input placeholder="如：门派、帮派、公司、学院（可选，AI会根据世界观生成）" />
-          </Form.Item>
-          <Form.Item label="背景设定" name="background">
-            <TextArea rows={3} placeholder="简要描述组织的背景和环境..." />
-          </Form.Item>
-          <Form.Item label="其他要求" name="requirements">
-            <TextArea rows={2} placeholder="其他特殊要求..." />
-          </Form.Item>
-          
-          {/* MCP 插件选择器 */}
-          <div style={{ marginTop: 16 }}>
-            <div style={{ marginBottom: 8, fontSize: '14px', fontWeight: 500 }}>
-              AI 增强插件
-            </div>
-            <MCPSelector
-              value={mcpSettings}
-              onChange={setMcpSettings}
-              size="middle"
-            />
-          </div>
-        </Form>
-      </Modal>
-
-      {/* SSE进度显示 */}
-      <SSELoadingOverlay
-        loading={isGenerating}
-        progress={progress}
-        message={progressMessage}
-      />
+        </div>
+      )}
     </div>
   );
 }
