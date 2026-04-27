@@ -1,715 +1,435 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import {
-  Card,
-  Button,
-  Space,
-  Typography,
-  Modal,
-  Form,
-  Input,
-  Switch,
-  Select,
-  message,
-  Tag,
-  Tooltip,
-  Spin,
-  Empty,
-  Alert,
-  Descriptions,
-  Layout,
-} from 'antd';
-import {
-  PlusOutlined,
-  EditOutlined,
-  DeleteOutlined,
-  CheckCircleOutlined,
-  CloseCircleOutlined,
-  ThunderboltOutlined,
-  InfoCircleOutlined,
-  ToolOutlined,
-  ArrowLeftOutlined,
-} from '@ant-design/icons';
-import { mcpPluginApi } from '../services/api';
-import type { MCPPlugin, MCPTool } from '../types';
+import { useEffect, useState, useCallback } from 'react'
+import { Plus, Pencil, Trash2, Power, TestTube, Loader2, Plug, Wrench, ChevronDown, ChevronUp, X } from 'lucide-react'
+import { toast } from 'sonner'
+import { mcpPluginApi } from '@/services/api'
+import type { MCPPlugin, MCPPluginCreate, MCPPluginUpdate, MCPTool } from '@/types'
 
-const { Paragraph, Text, Title } = Typography;
-const { TextArea } = Input;
-const { Header, Content } = Layout;
+type ModalMode = 'simple' | 'full' | 'edit'
 
-export default function MCPPluginsPage() {
-  const navigate = useNavigate();
-  const isMobile = window.innerWidth <= 768;
-  const [form] = Form.useForm();
-  const [loading, setLoading] = useState(false);
-  const [plugins, setPlugins] = useState<MCPPlugin[]>([]);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [editingPlugin, setEditingPlugin] = useState<MCPPlugin | null>(null);
-  const [testingPluginId, setTestingPluginId] = useState<string | null>(null);
-  const [viewingTools, setViewingTools] = useState<{ pluginId: string; tools: MCPTool[] } | null>(null);
+export default function MCPPlugins() {
+  const [plugins, setPlugins] = useState<MCPPlugin[]>([])
+  const [loading, setLoading] = useState(false)
+  const [testingId, setTestingId] = useState<string | null>(null)
 
-  useEffect(() => {
-    loadPlugins();
-  }, []);
+  // 弹窗状态
+  const [showModal, setShowModal] = useState(false)
+  const [modalMode, setModalMode] = useState<ModalMode>('simple')
+  const [configJson, setConfigJson] = useState('')
+  const [editingPlugin, setEditingPlugin] = useState<MCPPlugin | null>(null)
 
-  const loadPlugins = async () => {
-    setLoading(true);
+  // 完整创建 / 编辑表单
+  const [form, setForm] = useState({
+    plugin_name: '',
+    display_name: '',
+    description: '',
+    server_type: 'stdio' as 'http' | 'stdio',
+    server_url: '',
+    command: '',
+    args: '',
+    env: '',
+    headers: '',
+    enabled: true,
+  })
+
+  // 展开详情
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+
+  // 工具列表
+  const [toolsMap, setToolsMap] = useState<Record<string, MCPTool[]>>({})
+  const [loadingToolsId, setLoadingToolsId] = useState<string | null>(null)
+
+  const fetchPlugins = useCallback(async () => {
     try {
-      const data = await mcpPluginApi.getPlugins();
-      setPlugins(data);
-    } catch (error) {
-      message.error('加载插件列表失败');
-    } finally {
-      setLoading(false);
-    }
-  };
+      setLoading(true)
+      const data = await mcpPluginApi.getPlugins()
+      setPlugins(data)
+    } catch { /* api 层已 toast */ } finally { setLoading(false) }
+  }, [])
 
-  const handleCreate = () => {
-    setEditingPlugin(null);
-    form.resetFields();
-    form.setFieldsValue({
-      enabled: true,
-      category: 'search',
-      config_json: `{
-  "mcpServers": {
-    "exa": {
-      "type": "http",
-      "url": "https://mcp.exa.ai/mcp?exaApiKey=YOUR_API_KEY",
-      "headers": {}
+  useEffect(() => { fetchPlugins() }, [fetchPlugins])
+
+  // ---- 操作 ----
+
+  const handleToggle = async (plugin: MCPPlugin) => {
+    try {
+      const updated = await mcpPluginApi.togglePlugin(plugin.id, !plugin.enabled)
+      setPlugins(prev => prev.map(p => p.id === updated.id ? updated : p))
+      toast.success(`${updated.enabled ? '已启用' : '已禁用'} ${updated.display_name}`)
+    } catch { /* api 层已 toast */ }
+  }
+
+  const handleTest = async (plugin: MCPPlugin) => {
+    try {
+      setTestingId(plugin.id)
+      const result = await mcpPluginApi.testPlugin(plugin.id)
+      if (result.success) {
+        toast.success(`连接成功，发现 ${result.tools_count || 0} 个工具`)
+      } else {
+        toast.error(result.message || '连接失败')
+      }
+    } catch { /* api 层已 toast */ } finally { setTestingId(null) }
+  }
+
+  const handleDelete = async (plugin: MCPPlugin) => {
+    if (!confirm(`确定删除「${plugin.display_name}」？`)) return
+    try {
+      await mcpPluginApi.deletePlugin(plugin.id)
+      setPlugins(prev => prev.filter(p => p.id !== plugin.id))
+      toast.success('插件已删除')
+    } catch { /* api 层已 toast */ }
+  }
+
+  // Simple 创建
+  const handleCreateSimple = async () => {
+    if (!configJson.trim()) { toast.error('请输入配置 JSON'); return }
+    try {
+      const created = await mcpPluginApi.createPluginSimple({ config_json: configJson, enabled: true })
+      setPlugins(prev => [...prev, created])
+      toast.success('插件已创建')
+      closeModal()
+    } catch { /* api 层已 toast */ }
+  }
+
+  // 完整创建
+  const handleCreateFull = async () => {
+    if (!form.plugin_name.trim()) { toast.error('请填写插件名称'); return }
+    try {
+      const data: MCPPluginCreate = {
+        plugin_name: form.plugin_name,
+        display_name: form.display_name || undefined,
+        description: form.description || undefined,
+        plugin_type: form.server_type,
+        enabled: form.enabled,
+      }
+      if (form.server_type === 'http') {
+        data.server_url = form.server_url || undefined
+        if (form.headers.trim()) {
+          try { data.headers = JSON.parse(form.headers) } catch { toast.error('Headers JSON 格式错误'); return }
+        }
+      } else {
+        data.command = form.command || undefined
+        if (form.args.trim()) data.args = form.args.split('\n').map(s => s.trim()).filter(Boolean)
+        if (form.env.trim()) {
+          try { data.env = JSON.parse(form.env) } catch { toast.error('环境变量 JSON 格式错误'); return }
+        }
+      }
+      const created = await mcpPluginApi.createPlugin(data)
+      setPlugins(prev => [...prev, created])
+      toast.success('插件已创建')
+      closeModal()
+    } catch { /* api 层已 toast */ }
+  }
+
+  // 编辑
+  const openEdit = (plugin: MCPPlugin) => {
+    setEditingPlugin(plugin)
+    setForm({
+      plugin_name: plugin.plugin_name,
+      display_name: plugin.display_name,
+      description: plugin.description || '',
+      server_type: plugin.plugin_type,
+      server_url: plugin.server_url || '',
+      command: plugin.command || '',
+      args: (plugin.args || []).join('\n'),
+      env: plugin.env ? JSON.stringify(plugin.env, null, 2) : '',
+      headers: plugin.headers ? JSON.stringify(plugin.headers, null, 2) : '',
+      enabled: plugin.enabled,
+    })
+    setModalMode('edit')
+    setShowModal(true)
+  }
+
+  const handleUpdate = async () => {
+    if (!editingPlugin) return
+    try {
+      const data: MCPPluginUpdate = {
+        display_name: form.display_name || undefined,
+        description: form.description || undefined,
+        enabled: form.enabled,
+      }
+      if (editingPlugin.plugin_type === 'http') {
+        data.server_url = form.server_url || undefined
+        if (form.headers.trim()) {
+          try { data.headers = JSON.parse(form.headers) } catch { toast.error('Headers JSON 格式错误'); return }
+        }
+      } else {
+        data.command = form.command || undefined
+        if (form.args.trim()) data.args = form.args.split('\n').map(s => s.trim()).filter(Boolean)
+        if (form.env.trim()) {
+          try { data.env = JSON.parse(form.env) } catch { toast.error('环境变量 JSON 格式错误'); return }
+        }
+      }
+      const updated = await mcpPluginApi.updatePlugin(editingPlugin.id, data)
+      setPlugins(prev => prev.map(p => p.id === updated.id ? updated : p))
+      toast.success('插件已更新')
+      closeModal()
+    } catch { /* api 层已 toast */ }
+  }
+
+  // 查看工具列表
+  const handleViewTools = async (plugin: MCPPlugin) => {
+    if (toolsMap[plugin.id]) {
+      // 已加载过，切换显示
+      setToolsMap(prev => { const n = { ...prev }; delete n[plugin.id]; return n })
+      return
+    }
+    try {
+      setLoadingToolsId(plugin.id)
+      const res = await mcpPluginApi.getPluginTools(plugin.id)
+      setToolsMap(prev => ({ ...prev, [plugin.id]: res.tools }))
+    } catch { /* api 层已 toast */ } finally { setLoadingToolsId(null) }
+  }
+
+  // 弹窗辅助
+  const closeModal = () => {
+    setShowModal(false)
+    setModalMode('simple')
+    setConfigJson('')
+    setEditingPlugin(null)
+    setForm({ plugin_name: '', display_name: '', description: '', server_type: 'stdio', server_url: '', command: '', args: '', env: '', headers: '', enabled: true })
+  }
+
+  const openCreate = (mode: 'simple' | 'full') => {
+    setModalMode(mode)
+    setShowModal(true)
+  }
+
+  const statusColor = (status: MCPPlugin['status']) => {
+    switch (status) {
+      case 'active': return 'bg-green-100 text-green-700'
+      case 'error': return 'bg-red-100 text-red-700'
+      default: return 'bg-gray-100 text-gray-600'
     }
   }
-}`
-    });
-    setModalVisible(true);
-  };
 
-  const handleEdit = (plugin: MCPPlugin) => {
-    setEditingPlugin(plugin);
-    
-    // 重构为标准MCP配置格式
-    const mcpConfig: any = {
-      mcpServers: {
-        [plugin.plugin_name]: {
-          type: plugin.plugin_type || 'http'
-        }
-      }
-    };
-    
-    if (plugin.plugin_type === 'http') {
-      mcpConfig.mcpServers[plugin.plugin_name].url = plugin.server_url;
-      mcpConfig.mcpServers[plugin.plugin_name].headers = plugin.headers || {};
-    } else {
-      mcpConfig.mcpServers[plugin.plugin_name].command = plugin.command;
-      mcpConfig.mcpServers[plugin.plugin_name].args = plugin.args || [];
-      mcpConfig.mcpServers[plugin.plugin_name].env = plugin.env || {};
-    }
-    
-    form.setFieldsValue({
-      config_json: JSON.stringify(mcpConfig, null, 2),
-      enabled: plugin.enabled,
-      category: plugin.category || 'general',
-    });
-    setModalVisible(true);
-  };
-
-  const handleDelete = (plugin: MCPPlugin) => {
-    Modal.confirm({
-      title: '删除插件',
-      content: `确定要删除插件 "${plugin.display_name || plugin.plugin_name}" 吗？`,
-      okText: '确定',
-      cancelText: '取消',
-      okType: 'danger',
-      onOk: async () => {
-        try {
-          await mcpPluginApi.deletePlugin(plugin.id);
-          message.success('插件已删除');
-          loadPlugins();
-        } catch (error) {
-          message.error('删除插件失败');
-        }
-      },
-    });
-  };
-
-  const handleToggle = async (plugin: MCPPlugin, enabled: boolean) => {
-    try {
-      await mcpPluginApi.togglePlugin(plugin.id, enabled);
-      message.success(enabled ? '插件已启用' : '插件已禁用');
-      loadPlugins();
-    } catch (error) {
-      message.error('切换插件状态失败');
-    }
-  };
-
-  const handleTest = async (pluginId: string) => {
-    setTestingPluginId(pluginId);
-    try {
-      const result = await mcpPluginApi.testPlugin(pluginId);
-      
-      // 测试完成后，无论成功失败都刷新插件列表以更新状态
-      await loadPlugins();
-      
-      if (result.success) {
-        Modal.success({
-          title: '✅ 测试成功',
-          width: 700,
-          content: (
-            <div>
-              <p style={{ marginBottom: 16, fontSize: '15px', fontWeight: 500 }}>{result.message}</p>
-              
-              {/* 显示详细的测试结果 */}
-              {result.suggestions && result.suggestions.length > 0 && (
-                <div style={{ marginTop: 16 }}>
-                  <Text strong style={{ fontSize: '14px' }}>测试详情:</Text>
-                  <div style={{
-                    marginTop: 8,
-                    padding: 12,
-                    background: '#f5f5f5',
-                    borderRadius: 4,
-                    fontSize: '13px',
-                    fontFamily: 'monospace',
-                    maxHeight: '400px',
-                    overflowY: 'auto'
-                  }}>
-                    {result.suggestions.map((suggestion: string, index: number) => (
-                      <div key={index} style={{
-                        marginBottom: index < (result.suggestions?.length || 0) - 1 ? 8 : 0,
-                        whiteSpace: 'pre-wrap',
-                        wordBreak: 'break-word',
-                        lineHeight: 1.6
-                      }}>
-                        {suggestion}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              
-              {/* 显示工具数量 */}
-              {result.tools_count !== undefined && (
-                <div style={{ marginTop: 12 }}>
-                  <Text type="secondary">🔧 可用工具数: <strong>{result.tools_count}</strong></Text>
-                </div>
-              )}
-              
-              {/* 显示响应时间 */}
-              {result.response_time_ms !== undefined && (
-                <div style={{ marginTop: 4 }}>
-                  <Text type="secondary">⏱️ 响应时间: <strong>{result.response_time_ms}ms</strong></Text>
-                </div>
-              )}
-              
-              <div style={{
-                marginTop: 16,
-                padding: 12,
-                background: '#f6ffed',
-                border: '1px solid #b7eb8f',
-                borderRadius: 4
-              }}>
-                <Text type="success" style={{ fontSize: '13px' }}>
-                  ✓ 插件状态已自动更新为"运行中"
-                </Text>
-              </div>
-            </div>
-          ),
-        });
-      } else {
-        Modal.error({
-          title: '❌ 测试失败',
-          width: 700,
-          content: (
-            <div>
-              <p style={{ marginBottom: 16, fontSize: '15px', fontWeight: 500 }}>{result.message}</p>
-              
-              {/* 显示错误信息 */}
-              {result.error && (
-                <div style={{ marginTop: 16 }}>
-                  <Text strong style={{ fontSize: '14px' }}>错误信息:</Text>
-                  <div style={{
-                    marginTop: 8,
-                    padding: 12,
-                    background: '#fff2f0',
-                    borderRadius: 4,
-                    color: '#cf1322',
-                    fontSize: '13px',
-                    fontFamily: 'monospace',
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                    maxHeight: '300px',
-                    overflowY: 'auto'
-                  }}>
-                    {result.error}
-                  </div>
-                </div>
-              )}
-              
-              {/* 显示建议 */}
-              {result.suggestions && result.suggestions.length > 0 && (
-                <div style={{ marginTop: 16 }}>
-                  <Text strong style={{ fontSize: '14px' }}>💡 建议:</Text>
-                  <ul style={{ marginTop: 8, marginBottom: 0, paddingLeft: 20 }}>
-                    {result.suggestions.map((suggestion: string, index: number) => (
-                      <li key={index} style={{ marginBottom: 6, fontSize: '13px' }}>
-                        {suggestion}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              
-              <div style={{
-                marginTop: 16,
-                padding: 12,
-                background: '#fff7e6',
-                border: '1px solid #ffd591',
-                borderRadius: 4
-              }}>
-                <Text style={{ fontSize: '13px', color: '#ad6800' }}>
-                  ⚠️ 插件状态已更新，请检查配置后重试
-                </Text>
-              </div>
-            </div>
-          ),
-        });
-      }
-    } catch (error: any) {
-      message.error('测试插件失败');
-    } finally {
-      setTestingPluginId(null);
-    }
-  };
-
-  const handleViewTools = async (pluginId: string) => {
-    try {
-      const result = await mcpPluginApi.getPluginTools(pluginId);
-      setViewingTools({ pluginId, tools: result.tools });
-    } catch (error) {
-      message.error('获取工具列表失败');
-    }
-  };
-
-  const handleSubmit = async (values: any) => {
-    setLoading(true);
-    try {
-      // 验证JSON格式
-      try {
-        JSON.parse(values.config_json);
-      } catch (e) {
-        message.error('配置JSON格式错误，请检查');
-        setLoading(false);
-        return;
-      }
-
-      const data = {
-        config_json: values.config_json,
-        enabled: values.enabled,
-        category: values.category || 'general',
-      };
-
-      // 统一使用简化API，后端会自动判断是创建还是更新
-      await mcpPluginApi.createPluginSimple(data);
-      message.success(editingPlugin ? '插件已更新' : '插件已创建');
-
-      setModalVisible(false);
-      form.resetFields();
-      loadPlugins();
-    } catch (error: any) {
-      const errorMsg = error?.response?.data?.detail || '操作失败';
-      message.error(errorMsg);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const getStatusTag = (plugin: MCPPlugin) => {
-    if (!plugin.enabled) {
-      return <Tag color="default">已禁用</Tag>;
-    }
-    switch (plugin.status) {
-      case 'active':
-        return <Tag color="success" icon={<CheckCircleOutlined />}>运行中</Tag>;
-      case 'error':
-        return (
-          <Tooltip title={plugin.last_error}>
-            <Tag color="error" icon={<CloseCircleOutlined />}>错误</Tag>
-          </Tooltip>
-        );
-      default:
-        return <Tag color="default">未激活</Tag>;
-    }
-  };
+  const inputCls = 'w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors'
 
   return (
-    <Layout style={{ minHeight: '100vh', background: '#f0f2f5' }}>
-      {/* 顶部导航栏 */}
-      <Header style={{
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-        padding: isMobile ? '0 16px' : '0 24px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        zIndex: 1000,
-        height: isMobile ? 56 : 64
-      }}>
-        <Space size={isMobile ? 12 : 16}>
-          <Button
-            type="text"
-            icon={<ArrowLeftOutlined />}
-            onClick={() => navigate('/')}
-            style={{
-              color: '#fff',
-              fontSize: isMobile ? 16 : 18,
-              display: 'flex',
-              alignItems: 'center'
-            }}
-          >
-            {!isMobile && '返回'}
-          </Button>
-          <Title level={isMobile ? 4 : 3} style={{
-            margin: 0,
-            color: '#fff',
-            fontSize: isMobile ? 18 : 24
-          }}>
-            MCP插件管理
-          </Title>
-        </Space>
-      </Header>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-bold text-content">MCP 插件管理</h1>
+        <div className="flex gap-2">
+          <button onClick={() => openCreate('simple')} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5">
+            <Plus className="w-4 h-4" />
+            快速添加
+          </button>
+          <button onClick={() => openCreate('full')} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm inline-flex items-center gap-1.5">
+            <Plus className="w-4 h-4" />
+            完整创建
+          </button>
+        </div>
+      </div>
 
-      {/* 主内容区 */}
-      <Content style={{
-        marginTop: isMobile ? 56 : 64,
-        padding: isMobile ? '16px' : '24px',
-        maxWidth: 1400,
-        width: '100%',
-        margin: `${isMobile ? 56 : 64}px auto 0`,
-      }}>
-        <Card
-          variant="borderless"
-          style={{
-            borderRadius: isMobile ? 8 : 12,
-            boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-            marginBottom: isMobile ? 16 : 24
-          }}
-        >
-          <div style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: isMobile ? 16 : 20
-          }}>
-            <Title level={isMobile ? 5 : 4} style={{ margin: 0 }}>
-              我的插件
-            </Title>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={handleCreate}
-              size={isMobile ? 'middle' : 'large'}
-              style={{
-                borderRadius: 8,
-                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                border: 'none'
-              }}
-            >
-              添加插件
-            </Button>
-          </div>
-
-          <Alert
-            message="什么是 MCP 插件？"
-            description={
-              <div style={{ fontSize: isMobile ? '12px' : '14px' }}>
-                <p style={{ margin: '8px 0' }}>
-                  MCP (Model Context Protocol) 是一个标准化的协议，允许 AI 调用外部工具获取数据。
-                </p>
-                <p style={{ margin: '8px 0 0 0' }}>
-                  通过添加 MCP 插件，AI 可以访问搜索引擎、数据库、API 等外部服务，增强创作能力。
-                </p>
-              </div>
-            }
-            type="info"
-            showIcon
-            icon={<InfoCircleOutlined />}
-            style={{ marginBottom: isMobile ? 16 : 20 }}
-          />
-        </Card>
-
-        {/* 插件列表 */}
-        <Spin spinning={loading}>
-          {plugins.length === 0 ? (
-            <Empty
-              description="还没有添加任何插件"
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              style={{ padding: isMobile ? '40px 0' : '60px 0' }}
-            >
-              <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
-                添加第一个插件
-              </Button>
-            </Empty>
-          ) : (
-            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-              {plugins.map((plugin) => (
-                <Card
-                  key={plugin.id}
-                  size="small"
-                  style={{
-                    borderRadius: 8,
-                    border: '1px solid #f0f0f0',
-                  }}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'flex-start',
-                      gap: '16px',
-                      flexWrap: isMobile ? 'wrap' : 'nowrap',
-                    }}
-                  >
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                          <Text strong style={{ fontSize: isMobile ? '14px' : '16px' }}>
-                            {plugin.display_name || plugin.plugin_name}
-                          </Text>
-                          {getStatusTag(plugin)}
-                          <Tag color={plugin.plugin_type === 'http' ? 'blue' : 'cyan'}>
-                            {plugin.plugin_type?.toUpperCase() || 'UNKNOWN'}
-                          </Tag>
-                          {plugin.category && plugin.category !== 'general' && (
-                            <Tag color="purple">{plugin.category}</Tag>
-                          )}
-                        </div>
-                        {plugin.description && (
-                          <Paragraph
-                            type="secondary"
-                            style={{
-                              margin: 0,
-                              fontSize: isMobile ? '12px' : '13px',
-                            }}
-                            ellipsis={{ rows: 2 }}
-                          >
-                            {plugin.description}
-                          </Paragraph>
-                        )}
-                        
-                        {/* 只显示有值的URL或命令，脱敏处理敏感信息 */}
-                        {plugin.plugin_type === 'http' && plugin.server_url && (
-                          <div style={{ fontSize: isMobile ? '11px' : '12px' }}>
-                            <Text type="secondary" code>
-                              {(() => {
-                                // 脱敏处理：隐藏URL中的API Key
-                                const url = plugin.server_url;
-                                try {
-                                  const urlObj = new URL(url);
-                                  // 替换查询参数中的敏感信息
-                                  const params = new URLSearchParams(urlObj.search);
-                                  let maskedUrl = `${urlObj.protocol}//${urlObj.host}${urlObj.pathname}`;
-                                  
-                                  const sensitiveKeys = ['apiKey', 'api_key', 'key', 'token', 'secret', 'password', 'auth'];
-                                  let hasParams = false;
-                                  
-                                  params.forEach((value, key) => {
-                                    const isSensitive = sensitiveKeys.some(k => key.toLowerCase().includes(k.toLowerCase()));
-                                    const maskedValue = isSensitive ? '***' : value;
-                                    maskedUrl += (hasParams ? '&' : '?') + `${key}=${maskedValue}`;
-                                    hasParams = true;
-                                  });
-                                  
-                                  return maskedUrl;
-                                } catch {
-                                  // 如果URL解析失败，尝试简单替换
-                                  return url.replace(/([?&])(apiKey|api_key|key|token|secret|password|auth)=([^&]+)/gi, '$1$2=***');
-                                }
-                              })()}
-                            </Text>
-                          </div>
-                        )}
-                        
-                        {plugin.plugin_type === 'stdio' && plugin.command && (
-                          <div style={{ fontSize: isMobile ? '11px' : '12px' }}>
-                            <Text type="secondary" code>
-                              {plugin.command} {plugin.args?.join(' ')}
-                            </Text>
-                          </div>
-                        )}
-                        
-                        {/* 显示最后错误信息 */}
-                        {plugin.last_error && (
-                          <Text type="danger" style={{ fontSize: isMobile ? '11px' : '12px' }}>
-                            错误: {plugin.last_error}
-                          </Text>
-                        )}
-                      </Space>
-                    </div>
-
-                    <Space size="small" wrap>
-                      <Tooltip title={plugin.enabled ? '禁用插件' : '启用插件'}>
-                        <Switch
-                          checked={plugin.enabled}
-                          onChange={(checked) => handleToggle(plugin, checked)}
-                          size={isMobile ? 'small' : 'default'}
-                          style={{
-                            flexShrink: 0,
-                            height: isMobile ? 16 : 22,
-                            minHeight: isMobile ? 16 : 22,
-                            lineHeight: isMobile ? '16px' : '22px'
-                          }}
-                        />
-                      </Tooltip>
-                      <Tooltip title="测试连接">
-                        <Button
-                          icon={<ThunderboltOutlined />}
-                          onClick={() => handleTest(plugin.id)}
-                          loading={testingPluginId === plugin.id}
-                          size={isMobile ? 'small' : 'middle'}
-                        />
-                      </Tooltip>
-                      <Tooltip title="查看工具">
-                        <Button
-                          icon={<ToolOutlined />}
-                          onClick={() => handleViewTools(plugin.id)}
-                          disabled={!plugin.enabled || plugin.status !== 'active'}
-                          size={isMobile ? 'small' : 'middle'}
-                        />
-                      </Tooltip>
-                      <Tooltip title="编辑">
-                        <Button
-                          icon={<EditOutlined />}
-                          onClick={() => handleEdit(plugin)}
-                          size={isMobile ? 'small' : 'middle'}
-                        />
-                      </Tooltip>
-                      <Tooltip title="删除">
-                        <Button
-                          danger
-                          icon={<DeleteOutlined />}
-                          onClick={() => handleDelete(plugin)}
-                          size={isMobile ? 'small' : 'middle'}
-                        />
-                      </Tooltip>
-                    </Space>
+      {loading ? (
+        <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-content-secondary" /></div>
+      ) : plugins.length === 0 ? (
+        <div className="text-center py-12 text-content-secondary text-sm">
+          <Plug className="w-8 h-8 mx-auto mb-2 opacity-40" />
+          暂无插件
+        </div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {plugins.map(p => (
+            <div key={p.id} className="bg-white border border-surface-border rounded-card p-4 space-y-3">
+              {/* 头部：点击展开详情 */}
+              <div className="flex items-start justify-between gap-2 cursor-pointer" onClick={() => setExpandedId(expandedId === p.id ? null : p.id)}>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <h3 className="text-sm font-semibold text-content truncate">{p.display_name}</h3>
+                    {expandedId === p.id ? <ChevronUp className="w-3.5 h-3.5 text-content-secondary shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 text-content-secondary shrink-0" />}
                   </div>
-                </Card>
-              ))}
-            </Space>
-          )}
-        </Spin>
-      </Content>
+                  <p className="text-xs text-content-secondary">{p.plugin_type.toUpperCase()} · {p.category}</p>
+                </div>
+                <span className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${statusColor(p.status)}`}>
+                  {p.status === 'active' ? '正常' : p.status === 'error' ? '异常' : '未激活'}
+                </span>
+              </div>
 
-      {/* 创建/编辑插件模态框 */}
-      <Modal
-        title={editingPlugin ? '编辑插件' : '添加插件'}
-        open={modalVisible}
-        centered
-        onCancel={() => {
-          setModalVisible(false);
-          form.resetFields();
-        }}
-        onOk={() => form.submit()}
-        width={isMobile ? '100%' : 600}
-        confirmLoading={loading}
-        okText="保存"
-        cancelText="取消"
-      >
-        <Form form={form} layout="vertical" onFinish={handleSubmit}>
-          <Form.Item
-            label="MCP配置JSON"
-            name="config_json"
-            rules={[{ required: true, message: '请输入配置JSON' }]}
-            extra="粘贴标准MCP配置，系统自动提取插件名称。支持HTTP和Stdio类型"
-          >
-            <TextArea
-              rows={16}
-              placeholder={`示例：
-{
-  "mcpServers": {
-    "exa": {
-      "type": "http",
-      "url": "https://mcp.exa.ai/mcp?exaApiKey=YOUR_API_KEY",
-      "headers": {}
-    }
-  }
-}`}
-              style={{ fontFamily: 'monospace', fontSize: '13px' }}
-            />
-          </Form.Item>
+              {p.description && <p className="text-xs text-content-secondary line-clamp-2">{p.description}</p>}
+              {p.last_error && <p className="text-xs text-red-500 line-clamp-1">{p.last_error}</p>}
 
-          <Form.Item
-            label="插件分类"
-            name="category"
-            rules={[{ required: true, message: '请选择插件分类' }]}
-            extra="选择插件的功能类别，用于AI智能匹配使用场景"
-          >
-            <Select placeholder="请选择分类">
-              <Select.Option value="search">搜索类 (Search) - 网络搜索、信息查询</Select.Option>
-              <Select.Option value="analysis">分析类 (Analysis) - 数据分析、文本处理</Select.Option>
-              <Select.Option value="filesystem">文件系统 (FileSystem) - 文件读写操作</Select.Option>
-              <Select.Option value="database">数据库 (Database) - 数据库查询</Select.Option>
-              <Select.Option value="api">API调用 (API) - 第三方服务接口</Select.Option>
-              <Select.Option value="generation">生成类 (Generation) - 内容生成工具</Select.Option>
-              <Select.Option value="general">通用 (General) - 其他功能</Select.Option>
-            </Select>
-          </Form.Item>
-        </Form>
-      </Modal>
+              {/* 展开详情 */}
+              {expandedId === p.id && (
+                <div className="text-xs space-y-1.5 bg-surface-hover/30 rounded-btn p-3 border border-surface-border">
+                  <div><span className="text-content-secondary">名称：</span><span className="text-content">{p.plugin_name}</span></div>
+                  {p.plugin_type === 'http' && p.server_url && (
+                    <div><span className="text-content-secondary">URL：</span><span className="text-content break-all">{p.server_url}</span></div>
+                  )}
+                  {p.plugin_type === 'stdio' && p.command && (
+                    <div><span className="text-content-secondary">命令：</span><span className="text-content font-mono">{p.command} {(p.args || []).join(' ')}</span></div>
+                  )}
+                  {p.last_test_at && (
+                    <div><span className="text-content-secondary">上次测试：</span><span className="text-content">{new Date(p.last_test_at).toLocaleString('zh-CN')}</span></div>
+                  )}
+                  <div><span className="text-content-secondary">创建时间：</span><span className="text-content">{new Date(p.created_at).toLocaleString('zh-CN')}</span></div>
+                </div>
+              )}
 
-      {/* 查看工具列表模态框 */}
-      <Modal
-        title="可用工具列表"
-        open={!!viewingTools}
-        onCancel={() => setViewingTools(null)}
-        footer={[
-          <Button key="close" onClick={() => setViewingTools(null)}>
-            关闭
-          </Button>,
-        ]}
-        width={isMobile ? '100%' : 700}
-      >
-        {viewingTools && (
-          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-            {viewingTools.tools.length === 0 ? (
-              <Empty description="该插件没有提供任何工具" />
+              {/* 工具列表 */}
+              {toolsMap[p.id] && (
+                <div className="text-xs space-y-1 bg-blue-50/50 rounded-btn p-3 border border-blue-100">
+                  <div className="font-medium text-content mb-1">工具列表 ({toolsMap[p.id].length})</div>
+                  {toolsMap[p.id].length === 0 ? (
+                    <p className="text-content-secondary">暂无工具</p>
+                  ) : (
+                    <div className="space-y-1 max-h-40 overflow-y-auto">
+                      {toolsMap[p.id].map(tool => (
+                        <div key={tool.name} className="flex items-start gap-1.5">
+                          <Wrench className="w-3 h-3 text-blue-500 mt-0.5 shrink-0" />
+                          <div>
+                            <span className="font-medium text-content">{tool.name}</span>
+                            {tool.description && <p className="text-content-secondary">{tool.description}</p>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 操作栏 */}
+              <div className="flex items-center justify-between pt-1 border-t border-surface-border">
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => handleToggle(p)}
+                    className={`p-1.5 rounded transition-colors ${p.enabled ? 'text-green-600 hover:bg-green-50' : 'text-content-secondary hover:bg-surface-hover'}`}
+                    title={p.enabled ? '禁用' : '启用'}
+                  >
+                    <Power className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => handleTest(p)}
+                    disabled={testingId === p.id}
+                    className="p-1.5 rounded hover:bg-surface-hover text-content-secondary transition-colors disabled:opacity-50"
+                    title="测试连接"
+                  >
+                    {testingId === p.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <TestTube className="w-3.5 h-3.5" />}
+                  </button>
+                  <button
+                    onClick={() => handleViewTools(p)}
+                    disabled={loadingToolsId === p.id}
+                    className="p-1.5 rounded hover:bg-surface-hover text-content-secondary transition-colors disabled:opacity-50"
+                    title="查看工具"
+                  >
+                    {loadingToolsId === p.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wrench className="w-3.5 h-3.5" />}
+                  </button>
+                  <button
+                    onClick={() => openEdit(p)}
+                    className="p-1.5 rounded hover:bg-surface-hover text-content-secondary transition-colors"
+                    title="编辑"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <button onClick={() => handleDelete(p)} className="p-1.5 rounded hover:bg-red-50 text-content-secondary hover:text-red-500 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 弹窗 */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={closeModal}>
+          <div className="bg-white rounded-modal shadow-xl p-6 w-full max-w-lg mx-4 max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-content">
+                {modalMode === 'edit' ? '编辑插件' : modalMode === 'full' ? '创建 MCP 插件' : '快速添加 MCP 插件'}
+              </h2>
+              <button onClick={closeModal} className="p-1 rounded hover:bg-surface-hover text-content-secondary"><X className="w-4 h-4" /></button>
+            </div>
+
+            {modalMode === 'simple' ? (
+              <div className="space-y-4">
+                <p className="text-xs text-content-secondary">粘贴标准 MCP 配置 JSON（如 Claude Desktop 格式）</p>
+                <textarea
+                  value={configJson}
+                  onChange={e => setConfigJson(e.target.value)}
+                  rows={10}
+                  placeholder='{"mcpServers":{"name":{"command":"...","args":[...]}}}'
+                  className={`${inputCls} resize-none font-mono`}
+                />
+                <div className="flex justify-end gap-2 pt-2">
+                  <button onClick={closeModal} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
+                  <button onClick={handleCreateSimple} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">创建</button>
+                </div>
+              </div>
             ) : (
-              viewingTools.tools.map((tool, index) => (
-                <Card key={index} size="small" style={{ borderRadius: 8 }}>
-                  <Descriptions column={1} size="small">
-                    <Descriptions.Item label="工具名称">
-                      <Text code strong>
-                        {tool.name}
-                      </Text>
-                    </Descriptions.Item>
-                    {tool.description && (
-                      <Descriptions.Item label="描述">{tool.description}</Descriptions.Item>
-                    )}
-                    {tool.inputSchema && (
-                      <Descriptions.Item label="输入参数">
-                        <pre
-                          style={{
-                            margin: 0,
-                            padding: 8,
-                            background: '#f5f5f5',
-                            borderRadius: 4,
-                            fontSize: isMobile ? '11px' : '12px',
-                            overflow: 'auto',
-                          }}
-                        >
-                          {JSON.stringify(tool.inputSchema, null, 2)}
-                        </pre>
-                      </Descriptions.Item>
-                    )}
-                  </Descriptions>
-                </Card>
-              ))
+              /* 完整创建 / 编辑 共用表单 */
+              <div className="space-y-4">
+                {modalMode === 'full' && (
+                  <div>
+                    <label className="block text-sm text-content-secondary mb-1">插件名称 *</label>
+                    <input value={form.plugin_name} onChange={e => setForm(f => ({ ...f, plugin_name: e.target.value }))} placeholder="my-plugin" className={inputCls} />
+                  </div>
+                )}
+                <div>
+                  <label className="block text-sm text-content-secondary mb-1">显示名称</label>
+                  <input value={form.display_name} onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))} placeholder="我的插件" className={inputCls} />
+                </div>
+                <div>
+                  <label className="block text-sm text-content-secondary mb-1">描述</label>
+                  <input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="插件功能描述" className={inputCls} />
+                </div>
+
+                {modalMode === 'full' && (
+                  <div>
+                    <label className="block text-sm text-content-secondary mb-1">类型</label>
+                    <select value={form.server_type} onChange={e => setForm(f => ({ ...f, server_type: e.target.value as 'http' | 'stdio' }))} className={inputCls}>
+                      <option value="stdio">Stdio</option>
+                      <option value="http">HTTP</option>
+                    </select>
+                  </div>
+                )}
+
+                {/* 根据类型显示不同字段 */}
+                {(modalMode === 'edit' ? editingPlugin?.plugin_type : form.server_type) === 'http' ? (
+                  <>
+                    <div>
+                      <label className="block text-sm text-content-secondary mb-1">服务器 URL</label>
+                      <input value={form.server_url} onChange={e => setForm(f => ({ ...f, server_url: e.target.value }))} placeholder="http://localhost:3000/mcp" className={inputCls} />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-content-secondary mb-1">Headers (JSON)</label>
+                      <textarea value={form.headers} onChange={e => setForm(f => ({ ...f, headers: e.target.value }))} rows={3} placeholder='{"Authorization": "Bearer ..."}' className={`${inputCls} resize-none font-mono`} />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <label className="block text-sm text-content-secondary mb-1">命令</label>
+                      <input value={form.command} onChange={e => setForm(f => ({ ...f, command: e.target.value }))} placeholder="npx" className={inputCls} />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-content-secondary mb-1">参数（每行一个）</label>
+                      <textarea value={form.args} onChange={e => setForm(f => ({ ...f, args: e.target.value }))} rows={3} placeholder={"-y\n@modelcontextprotocol/server-xxx"} className={`${inputCls} resize-none font-mono`} />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-content-secondary mb-1">环境变量 (JSON)</label>
+                      <textarea value={form.env} onChange={e => setForm(f => ({ ...f, env: e.target.value }))} rows={3} placeholder='{"API_KEY": "..."}' className={`${inputCls} resize-none font-mono`} />
+                    </div>
+                  </>
+                )}
+
+                <label className="flex items-center gap-2 text-sm text-content-secondary cursor-pointer">
+                  <input type="checkbox" checked={form.enabled} onChange={e => setForm(f => ({ ...f, enabled: e.target.checked }))} className="rounded" />
+                  启用插件
+                </label>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <button onClick={closeModal} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
+                  <button
+                    onClick={modalMode === 'edit' ? handleUpdate : handleCreateFull}
+                    className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors"
+                  >
+                    {modalMode === 'edit' ? '保存' : '创建'}
+                  </button>
+                </div>
+              </div>
             )}
-          </Space>
-        )}
-      </Modal>
-    </Layout>
-  );
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }

@@ -145,6 +145,45 @@ def _configure_third_party_loggers():
     logging.getLogger('app.api.wizard').setLevel(logging.WARNING)
 
 
+class InMemoryLogHandler(logging.Handler):
+    """将日志存入内存环形缓冲区，供前端日志面板读取"""
+
+    def __init__(self, capacity: int = 500):
+        super().__init__()
+        from collections import deque
+        self.buffer: "deque[dict]" = deque(maxlen=capacity)
+        self._seq = 0
+
+    def emit(self, record: logging.LogRecord):
+        try:
+            self._seq += 1
+            self.buffer.append({
+                "seq": self._seq,
+                "ts": record.created,
+                "level": record.levelname,
+                "name": record.name,
+                "msg": record.getMessage(),
+            })
+        except Exception:
+            self.handleError(record)
+
+    def get_recent(self, after_seq: int = 0, limit: int = 200) -> list[dict]:
+        return [e for e in self.buffer if e["seq"] > after_seq][-limit:]
+
+
+_log_buffer: InMemoryLogHandler | None = None
+
+
+def get_log_buffer() -> InMemoryLogHandler:
+    global _log_buffer
+    if _log_buffer is None:
+        _log_buffer = InMemoryLogHandler(capacity=500)
+        _log_buffer.setLevel(logging.DEBUG)
+        _log_buffer.setFormatter(UvicornFormatter(use_colors=False))
+        logging.getLogger().addHandler(_log_buffer)
+    return _log_buffer
+
+
 def get_logger(name: str) -> logging.Logger:
     """
     获取指定名称的日志器

@@ -1,7 +1,7 @@
 """分析任务模型 - 追踪异步章节分析任务状态"""
 from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, Index
 from sqlalchemy.sql import func
-from app.database import Base
+from app.db_base import Base
 import uuid
 
 

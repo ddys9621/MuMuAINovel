@@ -1,287 +1,359 @@
-import { useEffect, useState } from 'react';
-import { Button, Typography, message, Spin, Form, Input, Tabs } from 'antd';
-import { UserOutlined, LockOutlined, CheckCircleFilled } from '@ant-design/icons';
-import { authApi } from '../services/api';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import AnnouncementModal from '../components/AnnouncementModal';
-import { freshTheme } from '../styles/theme';
+import { useState, useEffect, type FormEvent } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import {
+  Check,
+  User,
+  Lock,
+  Loader2,
+  ExternalLink,
+  Sparkles,
+  Smartphone,
+  Library,
+} from 'lucide-react'
+import { toast } from 'sonner'
+import { authApi } from '@/services/api'
+import { BrandLogo } from '@/components/ui/BrandLogo'
 
-const { Title, Paragraph } = Typography;
+const FEATURES = [
+  '世界设定、角色档案与章节素材统一归档',
+  '从灵感记录到正式项目，创作入口清晰可控',
+  '项目进度、更新时间与状态变化一目了然',
+  '支持本地账号与 LinuxDO 两种登录方式',
+] as const
 
-/* ── 特性列表数据 ── */
-const features = [
-  'AI 驱动的智能小说创作体验',
-  '全面的角色、世界观管理系统',
-  '可视化大纲与章节编辑器',
-  '一键生成，优雅的写作流程',
-  '多种写作风格，自由切换',
-  '独立数据空间，安全可靠',
-];
+const SCENES = [
+  {
+    icon: Library,
+    title: '项目总览清晰',
+    desc: '快速回到最近推进的作品，保持创作连续性。',
+  },
+  {
+    icon: Sparkles,
+    title: '创作结构完整',
+    desc: '世界观、角色、大纲与章节内容可以持续沉淀。',
+  },
+  {
+    icon: Smartphone,
+    title: '登录流程顺滑',
+    desc: '打开即登录，直接回到当前正在创作的工作台。',
+  },
+] as const
 
 export default function Login() {
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const [loading, setLoading] = useState(false);
-  const [checking, setChecking] = useState(true);
-  const [localAuthEnabled, setLocalAuthEnabled] = useState(false);
-  const [linuxdoEnabled, setLinuxdoEnabled] = useState(false);
-  const [form] = Form.useForm();
-  const [showAnnouncement, setShowAnnouncement] = useState(false);
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const redirectTo = searchParams.get('redirect') || '/'
+
+  const [loading, setLoading] = useState(false)
+  const [checking, setChecking] = useState(true)
+  const [localAuthEnabled, setLocalAuthEnabled] = useState(false)
+  const [linuxdoEnabled, setLinuxdoEnabled] = useState(false)
+  const [activeTab, setActiveTab] = useState<'local' | 'linuxdo'>('local')
+
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
 
   useEffect(() => {
-    const checkAuth = async () => {
+    const init = async () => {
       try {
-        await authApi.getCurrentUser();
-        const redirect = searchParams.get('redirect') || '/';
-        navigate(redirect);
+        await authApi.getCurrentUser()
+        navigate(redirectTo, { replace: true })
+        return
       } catch {
-        try {
-          const config = await authApi.getAuthConfig();
-          setLocalAuthEnabled(config.local_auth_enabled);
-          setLinuxdoEnabled(config.linuxdo_enabled);
-        } catch (error) {
-          console.error('获取认证配置失败:', error);
-          setLinuxdoEnabled(true);
-        }
-        setChecking(false);
+        // 未登录，继续
       }
-    };
-    checkAuth();
-  }, [navigate, searchParams]);
 
-  const handleLocalLogin = async (values: { username: string; password: string }) => {
-    try {
-      setLoading(true);
-      const response = await authApi.localLogin(values.username, values.password);
-      if (response.success) {
-        message.success('登录成功！');
-        const doNotShowUntil = localStorage.getItem('announcement_do_not_show_until');
-        const now = new Date().getTime();
-        if (!doNotShowUntil || now > parseInt(doNotShowUntil)) {
-          setShowAnnouncement(true);
-        } else {
-          const redirect = searchParams.get('redirect') || '/';
-          navigate(redirect);
+      try {
+        const config = await authApi.getAuthConfig()
+        setLocalAuthEnabled(config.local_auth_enabled)
+        setLinuxdoEnabled(config.linuxdo_enabled)
+
+        if (!config.local_auth_enabled && config.linuxdo_enabled) {
+          setActiveTab('linuxdo')
         }
+      } catch {
+        toast.error('获取认证配置失败')
+      } finally {
+        setChecking(false)
       }
-    } catch (error) {
-      console.error('本地登录失败:', error);
-      setLoading(false);
     }
-  };
 
-  const handleLinuxDOLogin = async () => {
+    init()
+  }, [navigate, redirectTo])
+
+  const handleLocalLogin = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!username.trim() || !password.trim()) {
+      toast.error('请输入用户名和密码')
+      return
+    }
+
+    setLoading(true)
     try {
-      setLoading(true);
-      const response = await authApi.getLinuxDOAuthUrl();
-      const redirect = searchParams.get('redirect');
-      if (redirect) sessionStorage.setItem('login_redirect', redirect);
-      window.location.href = response.auth_url;
-    } catch (error) {
-      console.error('获取授权地址失败:', error);
-      message.error('获取授权地址失败，请稍后重试');
-      setLoading(false);
+      const res = await authApi.localLogin(username, password)
+      if (res.success) {
+        toast.success('登录成功')
+        navigate(redirectTo, { replace: true })
+      }
+    } catch {
+      // api 拦截器已处理 toast
+    } finally {
+      setLoading(false)
     }
-  };
-
-  const handleAnnouncementClose = () => {
-    setShowAnnouncement(false);
-    const redirect = searchParams.get('redirect') || '/';
-    navigate(redirect);
-  };
-
-  const handleDoNotShowToday = () => {
-    const tomorrow = new Date();
-    tomorrow.setHours(23, 59, 59, 999);
-    localStorage.setItem('announcement_do_not_show_until', tomorrow.getTime().toString());
-  };
-
-  /* ── Loading 态 ── */
-  if (checking) {
-    return (
-      <div style={{
-        display: 'flex', justifyContent: 'center', alignItems: 'center',
-        minHeight: '100vh',
-        background: freshTheme.colors.gradients.page,
-      }}>
-        <Spin size="large" />
-      </div>
-    );
   }
 
-  /* ── 本地登录表单 ── */
-  const renderLocalLogin = () => (
-    <Form form={form} onFinish={handleLocalLogin} size="large" style={{ marginTop: 16 }}>
-      <Form.Item name="username" rules={[{ required: true, message: '请输入用户名' }]}>
-        <Input
-          prefix={<UserOutlined style={{ color: freshTheme.colors.text.light }} />}
-          placeholder="用户名"
-          autoComplete="username"
-          style={{
-            borderRadius: freshTheme.radius.md,
-            border: `1px solid ${freshTheme.colors.background.border}`,
-            height: 48,
-          }}
-        />
-      </Form.Item>
-      <Form.Item name="password" rules={[{ required: true, message: '请输入密码' }]}>
-        <Input.Password
-          prefix={<LockOutlined style={{ color: freshTheme.colors.text.light }} />}
-          placeholder="密码"
-          autoComplete="current-password"
-          style={{
-            borderRadius: freshTheme.radius.md,
-            border: `1px solid ${freshTheme.colors.background.border}`,
-            height: 48,
-          }}
-        />
-      </Form.Item>
-      <Form.Item style={{ marginBottom: 0 }}>
-        <Button type="primary" htmlType="submit" loading={loading} block style={loginBtnStyle}>
-          登 录
-        </Button>
-      </Form.Item>
-    </Form>
-  );
+  const handleLinuxDOLogin = async () => {
+    setLoading(true)
+    try {
+      const res = await authApi.getLinuxDOAuthUrl()
+      window.location.href = res.auth_url
+    } catch {
+      setLoading(false)
+    }
+  }
 
-  /* ── LinuxDO 登录 ── */
-  const renderLinuxDOLogin = () => (
-    <div style={{ padding: '16px 0 0' }}>
-      <Button
-        type="primary" size="large" loading={loading}
-        onClick={handleLinuxDOLogin} block
-        icon={<img src="/favicon.ico" alt="LinuxDO" style={{ width: 20, height: 20, marginRight: 8, verticalAlign: 'middle' }} />}
-        style={loginBtnStyle}
-      >
-        使用 LinuxDO 登录
-      </Button>
-    </div>
-  );
-
-  return (
-    <>
-      <AnnouncementModal visible={showAnnouncement} onClose={handleAnnouncementClose} onDoNotShowToday={handleDoNotShowToday} />
-
-      <div className="login-container" style={containerStyle}>
-        {/* ====== 左侧品牌展示区 ====== */}
-        <div className="login-left-panel" style={leftPanelStyle}>
-          {/* 装饰光晕 */}
-          <div style={{ position: 'absolute', top: '-80px', right: '-80px', width: 300, height: 300, borderRadius: '50%', background: 'rgba(255,255,255,0.12)', filter: 'blur(60px)', pointerEvents: 'none' }} />
-          <div style={{ position: 'absolute', bottom: '-60px', left: '-60px', width: 240, height: 240, borderRadius: '50%', background: 'rgba(255,255,255,0.08)', filter: 'blur(60px)', pointerEvents: 'none' }} />
-
-          <div style={{ position: 'relative', zIndex: 1 }}>
-            {/* Logo */}
-            <div style={{
-              width: 64, height: 64, borderRadius: freshTheme.radius.lg,
-              background: 'rgba(255,255,255,0.2)', backdropFilter: 'blur(10px)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              marginBottom: 28, border: '1px solid rgba(255,255,255,0.3)',
-            }}>
-              <img src="/logo.svg" alt="Logo" style={{ width: 40, height: 40, filter: 'brightness(0) invert(1)' }} />
-            </div>
-
-            <Title level={2} style={{ color: '#fff', fontWeight: 700, marginBottom: 4, fontSize: 30 }}>
-              AI小说创作助手
-            </Title>
-            <div style={{ width: 40, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.5)', margin: '16px 0 20px' }} />
-            <Paragraph style={{ color: 'rgba(255,255,255,0.85)', fontSize: 18, fontWeight: 500, marginBottom: 36 }}>
-              更优雅的创作体验
-            </Paragraph>
-
-            {/* 特性列表 */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {features.map((text, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <CheckCircleFilled style={{ color: 'rgba(255,255,255,0.85)', fontSize: 16 }} />
-                  <span style={{ color: 'rgba(255,255,255,0.9)', fontSize: 15 }}>{text}</span>
-                </div>
-              ))}
-            </div>
+  if (checking) {
+    return (
+      <div className="fixed inset-0 flex items-center justify-center bg-transparent px-4">
+        <div className="fanqie-soft-card flex min-w-[240px] flex-col items-center gap-4 px-8 py-10 text-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-brand/10 text-brand">
+            <Loader2 className="h-6 w-6 animate-spin" />
           </div>
-        </div>
-
-        {/* ====== 右侧登录表单区 ====== */}
-        <div className="login-right-panel" style={rightPanelStyle}>
-          <div style={formWrapperStyle}>
-            <Title level={3} style={{ color: freshTheme.colors.text.primary, fontWeight: 700, marginBottom: 4 }}>
-              登录
-            </Title>
-            <Paragraph style={{ color: freshTheme.colors.text.secondary, marginBottom: 28 }}>
-              {localAuthEnabled && linuxdoEnabled ? '没有账号？首次登录自动注册 >' :
-               localAuthEnabled ? '使用账户密码登录' :
-               '使用 LinuxDO 账号登录'}
-            </Paragraph>
-
-            {localAuthEnabled && linuxdoEnabled ? (
-              <Tabs
-                defaultActiveKey="local" centered
-                items={[
-                  { key: 'local', label: '账户密码', children: renderLocalLogin() },
-                  { key: 'linuxdo', label: 'LinuxDO', children: renderLinuxDOLogin() },
-                ]}
-              />
-            ) : localAuthEnabled ? renderLocalLogin() : renderLinuxDOLogin()}
-
-            {/* 底部提示 */}
-            <div style={{
-              marginTop: 28, padding: 16,
-              background: `linear-gradient(135deg, ${freshTheme.colors.primary.sakura}18 0%, ${freshTheme.colors.primary.mint}18 100%)`,
-              borderRadius: freshTheme.radius.md,
-              border: `1px solid ${freshTheme.colors.background.border}`,
-            }}>
-              <Paragraph style={{ fontSize: 13, color: freshTheme.colors.text.secondary, marginBottom: 0, lineHeight: 1.8 }}>
-                🎉 首次登录将自动创建账号<br />
-                🔒 每个用户拥有独立的数据空间
-              </Paragraph>
-            </div>
+          <div>
+            <p className="text-base font-semibold text-content">正在校验登录状态</p>
+            <p className="mt-1 text-sm text-content-secondary">稍后即可进入 HH小说创作</p>
           </div>
         </div>
       </div>
-    </>
-  );
+    )
+  }
+
+  const bothEnabled = localAuthEnabled && linuxdoEnabled
+
+  return (
+    <div className="relative min-h-screen overflow-hidden bg-[#fff9f5] px-4 py-4 md:px-6 md:py-6">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,121,80,0.18),transparent_26%),radial-gradient(circle_at_bottom_right,rgba(255,198,127,0.14),transparent_30%)]" />
+      <div className="pointer-events-none absolute left-1/2 top-0 h-64 w-64 -translate-x-1/2 rounded-full bg-brand/8 blur-3xl" />
+
+      <div className="relative mx-auto flex min-h-[calc(100vh-2rem)] max-w-[1600px] overflow-hidden rounded-[36px] border border-white/70 bg-white/60 shadow-[0_42px_120px_-56px_rgba(132,63,29,0.4)] backdrop-blur-xl md:min-h-[calc(100vh-3rem)] md:flex-row">
+        <section className="relative hidden w-[55%] overflow-hidden bg-[linear-gradient(140deg,#ff7f59_0%,#ff9a63_32%,#ffbe7d_72%,#ffe3bc_100%)] px-10 py-10 text-white md:flex md:flex-col lg:px-14 lg:py-12">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(255,255,255,0.3),transparent_20%),radial-gradient(circle_at_78%_14%,rgba(255,244,230,0.3),transparent_22%),linear-gradient(180deg,rgba(255,255,255,0.04),rgba(108,45,12,0.12))]" />
+          <div className="absolute -left-20 bottom-0 h-60 w-60 rounded-full bg-white/10 blur-3xl" />
+          <div className="absolute right-8 top-12 h-40 w-40 rounded-full bg-white/20 blur-3xl" />
+
+          <div className="relative z-10 flex items-center justify-between gap-4">
+            <div className="inline-flex items-center gap-3 rounded-pill border border-white/20 bg-white/10 px-4 py-2 text-sm font-medium backdrop-blur-sm">
+              <BrandLogo size="sm" className="h-7 w-7 rounded-xl shadow-none ring-1 ring-white/20" textClassName="text-[11px]" />
+              <span>HH小说创作</span>
+            </div>
+            <div className="rounded-pill border border-white/16 bg-white/10 px-3 py-1.5 text-xs font-medium text-white/90 backdrop-blur-sm">
+              专业小说创作平台
+            </div>
+          </div>
+
+          <div className="relative z-10 mt-12 max-w-[620px]">
+            <div className="inline-flex items-center gap-2 rounded-pill bg-white/14 px-3 py-1.5 text-xs font-medium backdrop-blur-sm">
+              <Sparkles className="h-3.5 w-3.5" />
+              开始你的小说创作
+            </div>
+            <h1 className="mt-5 text-4xl font-semibold leading-tight lg:text-[54px] lg:leading-[1.06]">
+              从设定到章节，
+              <br />
+              让创作持续推进。
+            </h1>
+            <p className="mt-5 max-w-[560px] text-base leading-7 text-white/90 lg:text-lg">
+              HH小说创作为长篇写作提供清晰的结构化工作台，帮助你统一管理世界观、角色设定、大纲规划与章节内容。
+            </p>
+
+            <div className="mt-6 flex flex-wrap gap-2.5 text-sm text-white/92">
+              <span className="rounded-pill border border-white/16 bg-white/10 px-3 py-1.5 backdrop-blur-sm">世界设定</span>
+              <span className="rounded-pill border border-white/16 bg-white/10 px-3 py-1.5 backdrop-blur-sm">角色管理</span>
+              <span className="rounded-pill border border-white/16 bg-white/10 px-3 py-1.5 backdrop-blur-sm">大纲规划</span>
+              <span className="rounded-pill border border-white/16 bg-white/10 px-3 py-1.5 backdrop-blur-sm">章节创作</span>
+            </div>
+          </div>
+
+          <div className="relative z-10 mt-10 grid gap-3 lg:grid-cols-2">
+            {FEATURES.map((text) => (
+              <div key={text} className="rounded-[24px] border border-white/16 bg-white/10 p-4 backdrop-blur-sm shadow-[0_24px_50px_-36px_rgba(94,37,10,0.55)]">
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-white/14">
+                    <Check className="h-4 w-4" />
+                  </span>
+                  <p className="text-sm leading-6 text-white/92">{text}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="relative z-10 mt-auto grid gap-3 pt-10 lg:grid-cols-3">
+            {SCENES.map(({ icon: Icon, title, desc }, index) => (
+              <div key={title} className={`rounded-[24px] border border-white/16 bg-white/12 p-4 backdrop-blur-sm ${index === 1 ? 'lg:-translate-y-3' : ''}`}>
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/16">
+                  <Icon className="h-5 w-5" />
+                </div>
+                <h2 className="mt-4 text-base font-semibold">{title}</h2>
+                <p className="mt-2 text-sm leading-6 text-white/82">{desc}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="relative flex flex-1 items-center justify-center bg-[linear-gradient(180deg,rgba(255,252,248,0.92)_0%,rgba(255,246,239,0.98)_100%)] px-5 py-10 md:px-8 lg:px-12">
+          <div className="absolute inset-x-10 top-0 h-24 rounded-full bg-brand/10 blur-3xl" />
+          <div className="relative z-10 w-full max-w-[460px]">
+            <div className="mb-8 flex items-center gap-3 md:hidden">
+              <BrandLogo size="lg" />
+              <div>
+                <p className="text-base font-semibold text-content">HH小说创作</p>
+                <p className="text-sm text-content-secondary">专业小说创作平台</p>
+              </div>
+            </div>
+
+            <div className="fanqie-soft-card p-6 md:p-8">
+              <div className="mb-8">
+                <div className="fanqie-chip border-brand/10 bg-brand/5 text-brand">欢迎回来</div>
+                <h2 className="mt-4 text-[30px] font-semibold leading-tight text-content">登录 HH小说创作</h2>
+                <p className="mt-3 text-sm leading-6 text-content-secondary">
+                  {bothEnabled
+                    ? '选择适合你的登录方式，继续当前创作进度。'
+                    : linuxdoEnabled
+                      ? '使用 LinuxDO 账号快速进入创作工作台。'
+                      : '使用本地账号登录并继续创作。'}
+                </p>
+                <div className="mt-5 flex flex-wrap gap-2">
+                  <span className="rounded-pill bg-white px-3 py-1.5 text-xs font-medium text-content-secondary shadow-xs">结构化创作</span>
+                  <span className="rounded-pill bg-white px-3 py-1.5 text-xs font-medium text-content-secondary shadow-xs">项目集中管理</span>
+                  <span className="rounded-pill bg-white px-3 py-1.5 text-xs font-medium text-content-secondary shadow-xs">安全访问</span>
+                </div>
+              </div>
+
+              {bothEnabled && (
+                <div className="mb-6 grid grid-cols-2 rounded-[20px] bg-[#fff2ea] p-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('local')}
+                    className={`rounded-[16px] px-4 py-3 text-sm font-medium transition-all ${
+                      activeTab === 'local'
+                        ? 'bg-white text-content shadow-xs'
+                        : 'text-content-secondary hover:text-content'
+                    }`}
+                  >
+                    本地登录
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('linuxdo')}
+                    className={`rounded-[16px] px-4 py-3 text-sm font-medium transition-all ${
+                      activeTab === 'linuxdo'
+                        ? 'bg-white text-content shadow-xs'
+                        : 'text-content-secondary hover:text-content'
+                    }`}
+                  >
+                    LinuxDO
+                  </button>
+                </div>
+              )}
+
+              {localAuthEnabled && activeTab === 'local' && (
+                <form onSubmit={handleLocalLogin} className="space-y-5">
+                  <div>
+                    <label htmlFor="username" className="mb-2 block text-sm font-medium text-content">
+                      用户名
+                    </label>
+                    <div className="relative">
+                      <User className="pointer-events-none absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-content-tertiary" />
+                      <input
+                        id="username"
+                        type="text"
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
+                        placeholder="请输入用户名"
+                        autoComplete="username"
+                        className="h-12 w-full rounded-[18px] pl-12 pr-4 text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label htmlFor="password" className="mb-2 block text-sm font-medium text-content">
+                      密码
+                    </label>
+                    <div className="relative">
+                      <Lock className="pointer-events-none absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-content-tertiary" />
+                      <input
+                        id="password"
+                        type="password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="请输入密码"
+                        autoComplete="current-password"
+                        className="h-12 w-full rounded-[18px] pl-12 pr-4 text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="fanqie-primary-btn h-12 w-full text-[15px] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        登录中…
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="h-4 w-4" />
+                        进入创作工作台
+                      </>
+                    )}
+                  </button>
+                </form>
+              )}
+
+              {linuxdoEnabled && activeTab === 'linuxdo' && (
+                <button
+                  type="button"
+                  onClick={handleLinuxDOLogin}
+                  disabled={loading}
+                  className="fanqie-secondary-btn h-12 w-full justify-center text-[15px] font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      跳转中…
+                    </>
+                  ) : (
+                    <>
+                      <ExternalLink className="h-4 w-4" />
+                      使用 LinuxDO 登录
+                    </>
+                  )}
+                </button>
+              )}
+
+              {!localAuthEnabled && !linuxdoEnabled && (
+                <p className="rounded-[18px] bg-white/80 px-4 py-3 text-center text-sm text-content-secondary">
+                  暂未开启任何登录方式，请联系管理员
+                </p>
+              )}
+
+              {(localAuthEnabled || linuxdoEnabled) && (
+                <div className="mt-6 rounded-[20px] border border-brand/10 bg-brand/5 px-4 py-4 text-sm text-content-secondary">
+                  <p className="font-medium text-content">首次登录会自动创建账号</p>
+                  <div className="mt-2 space-y-1.5 text-xs leading-5 text-content-secondary">
+                    <p>• 登录后可继续访问已有项目与创作内容</p>
+                    <p>• 支持按当前配置使用本地账号或 LinuxDO 登录</p>
+                    <p>• 进入后可直接回到项目列表继续创作</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  )
 }
-
-/* ══════════ 样式常量 ══════════ */
-
-const containerStyle: React.CSSProperties = {
-  display: 'flex',
-  minHeight: '100vh',
-  background: freshTheme.colors.gradients.page,
-};
-
-const leftPanelStyle: React.CSSProperties = {
-  flex: '0 0 45%',
-  background: `linear-gradient(135deg, ${freshTheme.colors.primary.sakura} 0%, #E8A0B4 30%, ${freshTheme.colors.primary.lavender} 70%, ${freshTheme.colors.primary.mint} 100%)`,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  padding: '60px 48px',
-  position: 'relative',
-  overflow: 'hidden',
-};
-
-const rightPanelStyle: React.CSSProperties = {
-  flex: 1,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  padding: '40px 24px',
-  background: freshTheme.colors.background.card,
-};
-
-const formWrapperStyle: React.CSSProperties = {
-  width: '100%',
-  maxWidth: 400,
-};
-
-const loginBtnStyle: React.CSSProperties = {
-  height: 48,
-  fontSize: 16,
-  fontWeight: 600,
-  background: freshTheme.colors.gradients.sakuraMint,
-  border: 'none',
-  borderRadius: freshTheme.radius.md,
-  boxShadow: freshTheme.shadow.soft,
-  color: freshTheme.colors.text.primary,
-  transition: freshTheme.transition.normal,
-};

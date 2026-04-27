@@ -1,7 +1,7 @@
 """世界规则数据模型"""
 from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Integer
 from sqlalchemy.sql import func
-from app.database import Base
+from app.db_base import Base
 import uuid
 
 

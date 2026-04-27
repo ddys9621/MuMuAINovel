@@ -1,327 +1,200 @@
-import { useState, useEffect } from 'react';
-import { Card, Tabs, Table, Button, Modal, Form, Input, InputNumber, message, Popconfirm, Space } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, BookOutlined } from '@ant-design/icons';
-import { useStore } from '../store';
-import { worldRulesApi } from '../services/api';
-import type { WorldRule, WorldRuleCreate, WorldRuleUpdate } from '../types';
+import { useEffect, useState, useCallback } from 'react'
+import { Plus, Pencil, Trash2, Shield, Map, Sword, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
+import { useStore } from '@/store/index'
+import { worldRulesApi } from '@/services/api'
+import type { WorldRule, WorldRuleCreate, WorldRuleUpdate } from '@/types'
 
-const { TextArea } = Input;
+const CATEGORIES = [
+  { value: 'cultivation_realm' as const, label: '修炼境界', icon: Shield },
+  { value: 'equipment_template' as const, label: '装备模板', icon: Sword },
+  { value: 'map_location' as const, label: '地图位置', icon: Map },
+]
+
+type Category = WorldRule['category']
 
 export default function WorldRules() {
-  const { currentProject } = useStore();
-  const [activeTab, setActiveTab] = useState<'cultivation_realm' | 'equipment_template' | 'map_location'>('cultivation_realm');
-  const [rules, setRules] = useState<WorldRule[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [isModalVisible, setIsModalVisible] = useState(false);
-  const [editingRule, setEditingRule] = useState<WorldRule | null>(null);
-  const [form] = Form.useForm();
+  const { currentProject } = useStore()
+  const [rules, setRules] = useState<WorldRule[]>([])
+  const [loading, setLoading] = useState(false)
+  const [activeCategory, setActiveCategory] = useState<Category | 'all'>('all')
+  const [showModal, setShowModal] = useState(false)
+  const [editingRule, setEditingRule] = useState<WorldRule | null>(null)
 
-  // 加载规则列表
-  const loadRules = async (category: 'cultivation_realm' | 'equipment_template' | 'map_location') => {
-    if (!currentProject) return;
+  // 表单
+  const [form, setForm] = useState<WorldRuleCreate>({
+    category: 'cultivation_realm',
+    key: '',
+    name: '',
+    order_index: 0,
+    summary: '',
+    details: '',
+  })
 
-    setLoading(true);
+  const fetchRules = useCallback(async () => {
+    if (!currentProject?.id) return
     try {
-      const response = await worldRulesApi.list(currentProject.id, category);
-      setRules(response.items);
-    } catch (error) {
-      message.error('加载规则失败');
-      console.error(error);
+      setLoading(true)
+      const cat = activeCategory === 'all' ? undefined : activeCategory
+      const res = await worldRulesApi.list(currentProject.id, cat)
+      setRules(res.items)
+    } catch {
+      // api 层已 toast
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }, [currentProject?.id, activeCategory])
 
-  // 切换 Tab 时重新加载
-  useEffect(() => {
-    loadRules(activeTab);
-  }, [activeTab, currentProject]);
+  useEffect(() => { fetchRules() }, [fetchRules])
 
-  // 打开新增/编辑弹窗
-  const handleOpenModal = (rule?: WorldRule) => {
-    if (rule) {
-      setEditingRule(rule);
-      form.setFieldsValue({
-        key: rule.key,
-        name: rule.name,
-        order_index: rule.order_index,
-        summary: rule.summary,
-        details: rule.details,
-      });
-    } else {
-      setEditingRule(null);
-      form.resetFields();
-      // 设置默认 order_index 为当前列表最大值 + 1
-      const maxOrder = rules.length > 0 ? Math.max(...rules.map(r => r.order_index)) : 0;
-      form.setFieldsValue({ order_index: maxOrder + 1 });
+  const openCreate = () => {
+    setEditingRule(null)
+    setForm({ category: 'cultivation_realm', key: '', name: '', order_index: rules.length, summary: '', details: '' })
+    setShowModal(true)
+  }
+
+  const openEdit = (rule: WorldRule) => {
+    setEditingRule(rule)
+    setForm({ category: rule.category, key: rule.key, name: rule.name, order_index: rule.order_index, summary: rule.summary || '', details: rule.details || '' })
+    setShowModal(true)
+  }
+
+  const handleSubmit = async () => {
+    if (!currentProject?.id) return
+    if (!form.key.trim() || !form.name.trim()) {
+      toast.error('请填写标识和名称')
+      return
     }
-    setIsModalVisible(true);
-  };
-
-  // 保存规则
-  const handleSave = async () => {
-    if (!currentProject) return;
-
     try {
-      const values = await form.validateFields();
-      
       if (editingRule) {
-        // 更新
-        const updateData: WorldRuleUpdate = {
-          key: values.key,
-          name: values.name,
-          order_index: values.order_index,
-          summary: values.summary,
-          details: values.details,
-        };
-        await worldRulesApi.update(editingRule.id, updateData);
-        message.success('更新成功');
+        const data: WorldRuleUpdate = { ...form }
+        const updated = await worldRulesApi.update(editingRule.id, data)
+        setRules(prev => prev.map(r => r.id === updated.id ? updated : r))
+        toast.success('规则已更新')
       } else {
-        // 新增
-        const createData: WorldRuleCreate = {
-          category: activeTab,
-          key: values.key,
-          name: values.name,
-          order_index: values.order_index,
-          summary: values.summary,
-          details: values.details,
-        };
-        await worldRulesApi.create(currentProject.id, createData);
-        message.success('创建成功');
+        const created = await worldRulesApi.create(currentProject.id, form)
+        setRules(prev => [...prev, created])
+        toast.success('规则已创建')
       }
-
-      setIsModalVisible(false);
-      loadRules(activeTab);
-    } catch (error: any) {
-      if (error.errorFields) {
-        // 表单验证错误
-        return;
-      }
-      message.error(error.message || '保存失败');
-      console.error(error);
+      setShowModal(false)
+    } catch {
+      // api 层已 toast
     }
-  };
+  }
 
-  // 删除规则
-  const handleDelete = async (ruleId: string) => {
+  const handleDelete = async (rule: WorldRule) => {
+    if (!confirm(`确定删除「${rule.name}」？`)) return
     try {
-      await worldRulesApi.delete(ruleId);
-      message.success('删除成功');
-      loadRules(activeTab);
-    } catch (error) {
-      message.error('删除失败');
-      console.error(error);
+      await worldRulesApi.delete(rule.id)
+      setRules(prev => prev.filter(r => r.id !== rule.id))
+      toast.success('规则已删除')
+    } catch {
+      // api 层已 toast
     }
-  };
+  }
 
-  if (!currentProject) return null;
-
-  // 表格列定义
-  const columns = [
-    {
-      title: '序号',
-      dataIndex: 'order_index',
-      key: 'order_index',
-      width: 80,
-      sorter: (a: WorldRule, b: WorldRule) => a.order_index - b.order_index,
-    },
-    {
-      title: '标识',
-      dataIndex: 'key',
-      key: 'key',
-      width: 180,
-    },
-    {
-      title: '名称',
-      dataIndex: 'name',
-      key: 'name',
-      width: 150,
-    },
-    {
-      title: '简要描述',
-      dataIndex: 'summary',
-      key: 'summary',
-      ellipsis: true,
-    },
-    {
-      title: '操作',
-      key: 'action',
-      width: 150,
-      render: (_: any, record: WorldRule) => (
-        <Space>
-          <Button
-            type="link"
-            size="small"
-            icon={<EditOutlined />}
-            onClick={() => handleOpenModal(record)}
-          >
-            编辑
-          </Button>
-          <Popconfirm
-            title="确定删除此规则吗？"
-            onConfirm={() => handleDelete(record.id)}
-            okText="确定"
-            cancelText="取消"
-          >
-            <Button
-              type="link"
-              size="small"
-              danger
-              icon={<DeleteOutlined />}
-            >
-              删除
-            </Button>
-          </Popconfirm>
-        </Space>
-      ),
-    },
-  ];
+  const filtered = activeCategory === 'all' ? rules : rules.filter(r => r.category === activeCategory)
+  const getCategoryLabel = (cat: Category) => CATEGORIES.find(c => c.value === cat)?.label || cat
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* 固定头部 */}
-      <div style={{
-        position: 'sticky',
-        top: 0,
-        zIndex: 10,
-        backgroundColor: '#fff',
-        padding: '16px 0',
-        marginBottom: 24,
-        borderBottom: '1px solid #f0f0f0',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <BookOutlined style={{ fontSize: 24, marginRight: 12, color: '#1890ff' }} />
-          <h2 style={{ margin: 0 }}>世界规则系统</h2>
+    <div className="space-y-6">
+      {/* 头部 */}
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-bold text-content">世界规则</h1>
+        <button onClick={openCreate} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5">
+          <Plus className="w-4 h-4" />
+          添加规则
+        </button>
+      </div>
+
+      {/* 分类筛选 */}
+      <div className="flex gap-2 flex-wrap">
+        <button
+          onClick={() => setActiveCategory('all')}
+          className={`rounded-btn px-3 py-1.5 text-sm transition-colors ${activeCategory === 'all' ? 'bg-brand text-white' : 'border border-surface-border text-content-secondary hover:bg-surface-hover'}`}
+        >
+          全部
+        </button>
+        {CATEGORIES.map(cat => (
+          <button
+            key={cat.value}
+            onClick={() => setActiveCategory(cat.value)}
+            className={`rounded-btn px-3 py-1.5 text-sm transition-colors inline-flex items-center gap-1.5 ${activeCategory === cat.value ? 'bg-brand text-white' : 'border border-surface-border text-content-secondary hover:bg-surface-hover'}`}
+          >
+            <cat.icon className="w-3.5 h-3.5" />
+            {cat.label}
+          </button>
+        ))}
+      </div>
+
+      {/* 列表 */}
+      {loading ? (
+        <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-content-secondary" /></div>
+      ) : filtered.length === 0 ? (
+        <div className="text-center py-12 text-content-secondary text-sm">暂无规则，点击上方按钮添加</div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {filtered.map(rule => (
+            <div key={rule.id} className="bg-white border border-surface-border rounded-card p-4 space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <span className="text-xs text-content-secondary bg-surface-hover rounded px-1.5 py-0.5">{getCategoryLabel(rule.category)}</span>
+                  <h3 className="text-sm font-semibold text-content mt-1">{rule.name}</h3>
+                </div>
+                <div className="flex gap-1 shrink-0">
+                  <button onClick={() => openEdit(rule)} className="p-1.5 rounded hover:bg-surface-hover text-content-secondary transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
+                  <button onClick={() => handleDelete(rule)} className="p-1.5 rounded hover:bg-red-50 text-content-secondary hover:text-red-500 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                </div>
+              </div>
+              {rule.summary && <p className="text-xs text-content-secondary line-clamp-2">{rule.summary}</p>}
+              {rule.details && <p className="text-xs text-content-secondary/70 line-clamp-3">{rule.details}</p>}
+            </div>
+          ))}
         </div>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => handleOpenModal()}
-        >
-          新增规则
-        </Button>
-      </div>
+      )}
 
-      {/* 可滚动内容区域 */}
-      <div style={{ flex: 1, overflowY: 'auto' }}>
-        <Card>
-          <Tabs
-            activeKey={activeTab}
-            onChange={(key) => setActiveTab(key as 'cultivation_realm' | 'equipment_template' | 'map_location')}
-            items={[
-              {
-                key: 'cultivation_realm',
-                label: '能力/地位体系',
-                children: (
-                  <Table
-                    columns={columns}
-                    dataSource={rules}
-                    rowKey="id"
-                    loading={loading}
-                    pagination={{ pageSize: 20 }}
-                  />
-                ),
-              },
-              {
-                key: 'equipment_template',
-                label: '资源/载体系统',
-                children: (
-                  <Table
-                    columns={columns}
-                    dataSource={rules}
-                    rowKey="id"
-                    loading={loading}
-                    pagination={{ pageSize: 20 }}
-                  />
-                ),
-              },
-              {
-                key: 'map_location',
-                label: '地图/地点系统',
-                children: (
-                  <Table
-                    columns={columns}
-                    dataSource={rules}
-                    rowKey="id"
-                    loading={loading}
-                    pagination={{ pageSize: 20 }}
-                  />
-                ),
-              },
-            ]}
-          />
-        </Card>
-      </div>
+      {/* 弹窗 */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowModal(false)}>
+          <div className="bg-white rounded-card p-6 w-full max-w-lg mx-4 space-y-4" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-bold text-content">{editingRule ? '编辑规则' : '添加规则'}</h2>
 
-      {/* 新增/编辑弹窗 */}
-      <Modal
-        title={editingRule ? '编辑规则' : '新增规则'}
-        open={isModalVisible}
-        onOk={handleSave}
-        onCancel={() => setIsModalVisible(false)}
-        width={600}
-        okText="保存"
-        cancelText="取消"
-      >
-        <Form
-          form={form}
-          layout="vertical"
-        >
-          <Form.Item
-            name="key"
-            label="规则标识"
-            rules={[
-              { required: true, message: '请输入规则标识' },
-              { pattern: /^[a-z_]+$/, message: '只能使用小写字母和下划线' }
-            ]}
-            extra="唯一标识，如：foundation_establishment"
-          >
-            <Input placeholder="foundation_establishment" />
-          </Form.Item>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">分类</label>
+                <select
+                  value={form.category}
+                  onChange={e => setForm(f => ({ ...f, category: e.target.value as Category }))}
+                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors"
+                >
+                  {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">标识 (key)</label>
+                <input value={form.key} onChange={e => setForm(f => ({ ...f, key: e.target.value }))} placeholder="如 qi_refining" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+              </div>
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">名称</label>
+                <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="如 炼气期" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+              </div>
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">摘要</label>
+                <input value={form.summary || ''} onChange={e => setForm(f => ({ ...f, summary: e.target.value }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+              </div>
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">详情</label>
+                <textarea value={form.details || ''} onChange={e => setForm(f => ({ ...f, details: e.target.value }))} rows={3} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors resize-none" />
+              </div>
+            </div>
 
-          <Form.Item
-            name="name"
-            label="规则名称"
-            rules={[{ required: true, message: '请输入规则名称' }]}
-          >
-            <Input placeholder="筑基期" />
-          </Form.Item>
-
-          <Form.Item
-            name="order_index"
-            label="排序序号"
-            rules={[{ required: true, message: '请输入排序序号' }]}
-            extra="用于境界层级等有顺序的规则"
-          >
-            <InputNumber min={0} style={{ width: '100%' }} />
-          </Form.Item>
-
-          <Form.Item
-            name="summary"
-            label="简要描述"
-          >
-            <TextArea
-              rows={3}
-              placeholder="简要描述此规则的核心内容"
-            />
-          </Form.Item>
-
-          <Form.Item
-            name="details"
-            label="详细设定"
-            extra="可以使用 JSON 格式或长文本，存储突破条件、战力范围、叙事建议等"
-          >
-            <TextArea
-              rows={6}
-              placeholder='例如：{"breakthrough": "需要凝聚金丹", "lifespan": "500年", "power": "可御剑飞行"}'
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => setShowModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
+              <button onClick={handleSubmit} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">确定</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
-  );
+  )
 }
-

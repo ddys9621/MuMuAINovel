@@ -17,6 +17,7 @@ export interface SSEClientOptions {
   onError?: (error: string, code?: number) => void;
   onComplete?: () => void;
   onConnectionError?: (error: Event) => void;
+  signal?: AbortSignal;
 }
 
 export class SSEClient {
@@ -107,9 +108,16 @@ export class SSEClient {
         }
         break;
 
-      case 'start':
       case 'content':
-        // 这些类型可能由后端发送，静默处理
+        if (message.content) {
+          this.accumulatedContent += message.content;
+          if (this.options.onChunk) {
+            this.options.onChunk(message.content);
+          }
+        }
+        break;
+
+      case 'start':
         console.debug(`[SSE] 收到消息类型: ${message.type}`, message);
         break;
 
@@ -149,9 +157,20 @@ export class SSEPostClient {
 
   async connect(): Promise<any> {
     return new Promise(async (resolve, reject) => {
+      const externalSignal = this.options.signal;
+      const abortHandler = () => this.abort();
+
       try {
         this.abortController = new AbortController();
         this.isAborted = false;
+
+        if (externalSignal?.aborted) {
+          this.abort();
+          reject(new DOMException('Request aborted', 'AbortError'));
+          return;
+        }
+
+        externalSignal?.addEventListener('abort', abortHandler, { once: true });
 
         const response = await fetch(this.url, {
           method: 'POST',
@@ -211,16 +230,18 @@ export class SSEPostClient {
 
       } catch (error: any) {
         if (error.name === 'AbortError') {
-          console.log('请求已取消');
+          console.log('Request aborted');
+          reject(error);
         } else {
-          console.error('SSE POST请求失败:', error);
+          console.error('SSE POST request failed:', error);
           if (this.options.onError) {
-            this.options.onError(error.message || '请求失败');
+            this.options.onError(error.message || 'Request failed');
           }
           reject(error);
         }
       } finally {
-        // 确保 reader 被正确关闭，防止连接泄漏
+        externalSignal?.removeEventListener('abort', abortHandler);
+        // Ensure the reader is closed to avoid leaks
         await this.closeReader();
       }
     });
@@ -252,6 +273,7 @@ export class SSEPostClient {
         break;
 
       case 'chunk':
+      case 'content':
         if (message.content) {
           this.accumulatedContent += message.content;
           if (this.options.onChunk) {

@@ -198,7 +198,7 @@ class PromptService:
     "relationships_array": [
       {{
         "target_character_name": "已生成的角色名称",
-        "relationship_type": "关系类型（师父/朋友/敌人/父亲/母亲等）",
+        "relationship_type": "关系类型（必须从以下选择：父亲/母亲/兄弟/姐妹/子女/配偶/恋人/师父/徒弟/朋友/同学/邻居/知己/上司/下属/同事/合作伙伴/敌人/仇人/竞争对手/宿敌）",
         "intimacy_level": 75,
         "description": "关系描述"
       }}
@@ -237,10 +237,10 @@ class PromptService:
 - 组织应该是推动剧情发展的关键力量
 - 可以是正派势力、中立势力或反派势力，但一定要有存在感
 
-**关系类型参考（从中选择或自定义）：**
+**关系类型（必须从以下列表中精确选择一个，禁止自定义）：**
 - 家族：父亲、母亲、兄弟、姐妹、子女、配偶、恋人
-- 社交：师父、徒弟、朋友、同学、同事、邻居、知己
-- 职业：上司、下属、合作伙伴
+- 社交：师父、徒弟、朋友、同学、邻居、知己
+- 职业：上司、下属、同事、合作伙伴
 - 敌对：敌人、仇人、竞争对手、宿敌
 
 **重要说明：**
@@ -415,52 +415,6 @@ class PromptService:
 - 专有名词用【】标记
 - 直接以{{开始}}结束"""
     
-
-    # AI去味提示词（核心特色功能）
-    AI_DENOISING = """你是一位追求自然写作风格的编辑。你的任务是将AI生成的文本改写得更像人类作家的手笔。
-
-原文：
-{original_text}
-
-修改要求：
-1. 去除AI痕迹：
-   - 删除过于工整的排比句
-   - 减少重复的修辞手法
-   - 去掉刻意的对称结构
-   - 避免机械式的总结陈词
-   - **重点处理结尾**：删除"道心坚定"、"一往无前"、"无论前方"等升华式表达
-   - **删除宏大叙事**：去掉"天下苍生"、"更大的使命"、"命运的抉择"等大词
-   - **删除预告式结尾**：去掉"他知道，未来..."、"更大的挑战在等着..."这种句子
-   - **去掉【】标记**：把【仙凡融会之战】改成"仙凡大战"，把【千年之约】改成"千年之约"
-   - **弱化玄学说教句**：删掉或改写类似"与天地融为一体"、"万物生灭的根源"、"更高的本质规则"、"触及了大道本源"、"天地运行的奥秘"、"宇宙的终极真理"这类抽象总结，用更日常的感觉替代，比如"那一刻他只觉得脑子里一片空白，像是突然被什么点了一下"
-
-2. 增加人性化：
-   - 使用更口语化的表达
-   - 添加不完美的细节
-   - 保留适度的随意性
-   - 增加真实的情感波动
-
-3. 优化叙事：
-   - 让节奏更自然不做作
-   - 用简单词汇替换华丽辞藻
-   - 保持叙述的松弛感
-   - 让对话更生活化
-   - **结尾改成具体动作或场景**：例如"他转身离开了。"、"外面传来敲门声。"
-
-4. 保持原意：
-   - 不改变核心情节
-   - 保留关键信息点
-   - 维持角色性格
-   - 确保逻辑连贯
-
-修改风格：
-- 像是一个喜欢讲故事的普通人写的
-- 有点粗糙但很真诚
-- 自然流畅不刻意
-- 让人读起来很舒服
-- 多用短句，少用长句
-
-请直接输出修改后的文本，无需解释。"""
 
     # 章节完整创作提示词
     CHAPTER_GENERATION = """你是一位专业的小说作家。必须严格遵守以下信息创作本章内容：
@@ -681,6 +635,8 @@ class PromptService:
    - **未完结伏笔**：适当时机可以回收伏笔，制造呼应效果
    - **角色状态记忆**：确保角色行为符合其发展轨迹
    - **重要情节点**：与关键剧情保持一致
+   - **叙事承诺/因果链**：不要遗忘已立下的约定、未解决谜团和关键因果后果
+   - **视角信息边界**：POV 角色只能使用其已知信息，禁止全知视角污染
 
 **重要提醒：**
 - 章节大纲和剧情卡片是创作的核心依据，必须严格遵循
@@ -774,7 +730,7 @@ class PromptService:
   "relationships": [
     {{
       "target_character_name": "已存在的角色名称",
-      "relationship_type": "关系类型（如：师父、朋友、敌人、父亲、母亲等）",
+      "relationship_type": "关系类型（必须从以下选择：父亲/母亲/兄弟/姐妹/子女/配偶/恋人/师父/徒弟/朋友/同学/邻居/知己/上司/下属/同事/合作伙伴/敌人/仇人/竞争对手/宿敌）",
       "intimacy_level": 75,
       "description": "这段关系的详细描述",
       "started_at": "关系开始的故事时间点（可选）"
@@ -793,10 +749,10 @@ class PromptService:
   ]
 }}
 
-**关系类型参考（请从中选择或自定义）：**
+**关系类型（必须从以下列表中精确选择一个，禁止自定义）：**
 - 家族关系：父亲、母亲、兄弟、姐妹、子女、配偶、恋人
-- 社交关系：师父、徒弟、朋友、同学、同事、邻居、知己
-- 职业关系：上司、下属、合作伙伴
+- 社交关系：师父、徒弟、朋友、同学、邻居、知己
+- 职业关系：上司、下属、同事、合作伙伴
 - 敌对关系：敌人、仇人、竞争对手、宿敌
 
 **重要说明：**
@@ -919,14 +875,6 @@ class PromptService:
             return template.format(**kwargs)
         except KeyError as e:
             raise ValueError(f"缺少必需的参数: {e}")
-    
-    @classmethod
-    def get_denoising_prompt(cls, original_text: str) -> str:
-        """获取AI去味提示词"""
-        return cls.format_prompt(
-            cls.AI_DENOISING,
-            original_text=original_text
-        )
     
     @classmethod
     def get_world_building_prompt(cls, title: str, theme: str, genre: str = "") -> str:
@@ -1067,6 +1015,12 @@ class PromptService:
             memory_text += "\n" + memory_context.get('foreshadows', '')
             memory_text += "\n" + memory_context.get('character_states', '')
             memory_text += "\n" + memory_context.get('plot_points', '')
+            memory_text += "\n" + memory_context.get('causal_chains', '')
+            memory_text += "\n" + memory_context.get('narrative_promises', '')
+            memory_text += "\n" + memory_context.get('relationship_dynamics', '')
+            memory_text += "\n" + memory_context.get('timeline_events', '')
+            memory_text += "\n" + memory_context.get('pov_known_info', '')
+            memory_text += "\n" + memory_context.get('affiliation_dynamics', '')
         
         # 格式化MCP参考资料
         mcp_text = ""
@@ -1177,6 +1131,12 @@ class PromptService:
             memory_text += "\n" + memory_context.get('foreshadows', '')
             memory_text += "\n" + memory_context.get('character_states', '')
             memory_text += "\n" + memory_context.get('plot_points', '')
+            memory_text += "\n" + memory_context.get('causal_chains', '')
+            memory_text += "\n" + memory_context.get('narrative_promises', '')
+            memory_text += "\n" + memory_context.get('relationship_dynamics', '')
+            memory_text += "\n" + memory_context.get('timeline_events', '')
+            memory_text += "\n" + memory_context.get('pov_known_info', '')
+            memory_text += "\n" + memory_context.get('affiliation_dynamics', '')
         else:
             memory_text = "暂无相关记忆"
         

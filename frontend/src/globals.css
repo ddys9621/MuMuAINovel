@@ -1,0 +1,140 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-surface-border;
+    box-sizing: border-box;
+  }
+
+  [class^='rounded'],
+  [class*=' rounded'] {
+    border-radius: 0 !important;
+  }
+
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
+  body {
+    @apply bg-surface text-content font-sans antialiased;
+    background-image:
+      radial-gradient(circle at top left, rgba(255, 140, 102, 0.16), transparent 30%),
+      radial-gradient(circle at top right, rgba(255, 203, 148, 0.16), transparent 28%),
+      linear-gradient(180deg, #fffaf4 0%, #fff7f0 45%, #fff4eb 100%);
+  }
+
+  a,
+  button,
+  input,
+  textarea,
+  select {
+    transition: color 0.2s ease, background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  }
+
+  button {
+    -webkit-tap-highlight-color: transparent;
+    border-radius: 0;
+  }
+
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
+  textarea,
+  select {
+    @apply border border-surface-border bg-white/90 text-content placeholder:text-content-tertiary;
+    border-radius: 0;
+    box-shadow: 0 2px 8px rgba(166, 74, 33, 0.05);
+  }
+
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):focus,
+  textarea:focus,
+  select:focus {
+    @apply border-brand outline-none ring-4 ring-brand/10;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(186, 125, 92, 0.35);
+    border-radius: 0;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(186, 125, 92, 0.55);
+  }
+
+  ::selection {
+    background: rgba(255, 90, 60, 0.18);
+  }
+}
+
+@layer components {
+  .fanqie-card {
+    @apply border border-white/80 bg-white/90 shadow-card backdrop-blur-sm;
+  }
+
+  .fanqie-soft-card {
+    @apply border border-[#f4e1d5] bg-gradient-to-br from-white via-[#fffaf6] to-[#fff1e8] shadow-card;
+  }
+
+  .fanqie-outline-card {
+    @apply border border-dashed border-brand/25 bg-white/70;
+  }
+
+  .fanqie-chip {
+    @apply inline-flex items-center gap-1 border border-white/70 bg-white/80 px-3 py-1 text-xs font-medium text-content-secondary shadow-xs backdrop-blur-sm;
+  }
+
+  .fanqie-primary-btn {
+    @apply inline-flex items-center justify-center gap-2 bg-brand px-4 py-2.5 text-sm font-medium text-white shadow-xs shadow-brand/25 hover:bg-brand-600 active:scale-[0.98];
+  }
+
+  .fanqie-secondary-btn {
+    @apply inline-flex items-center justify-center gap-2 border border-surface-border bg-white/85 px-4 py-2.5 text-sm font-medium text-content-secondary shadow-xs hover:bg-surface-hover hover:text-content;
+  }
+
+  .fanqie-toolbar-btn {
+    @apply inline-flex items-center justify-center gap-2 border border-white/80 bg-white/75 px-3 py-2 text-sm text-content-secondary shadow-xs hover:-translate-y-0.5 hover:bg-white hover:text-content;
+  }
+
+  .hh-hero-shell {
+    @apply relative overflow-hidden border border-white/70 text-white shadow-lg;
+    background: linear-gradient(135deg, rgba(255, 130, 86, 0.96) 0%, rgba(255, 170, 95, 0.9) 58%, rgba(255, 220, 170, 0.84) 100%);
+  }
+
+  .hh-hero-eyebrow {
+    @apply inline-flex items-center gap-2 bg-white/15 px-3 py-1.5 text-xs font-medium backdrop-blur-sm;
+  }
+
+  .hh-hero-tag {
+    @apply bg-white/15 px-3 py-1 text-xs font-medium text-white/90;
+  }
+
+  .hh-hero-sidecard {
+    @apply border p-4 backdrop-blur-sm;
+    border-color: rgba(255, 255, 255, 0.16);
+    background-color: rgba(255, 255, 255, 0.12);
+    box-shadow: 0 26px 50px -34px rgba(120, 53, 25, 0.45);
+  }
+
+  .hh-hero-metric {
+    @apply px-4 py-4 backdrop-blur-sm;
+    background-color: rgba(255, 255, 255, 0.14);
+  }
+
+  .hh-sidebar-note {
+    @apply relative border p-3.5 text-sidebar-text backdrop-blur-sm;
+    border-color: rgba(255, 255, 255, 0.1);
+    background-color: rgba(255, 255, 255, 0.05);
+    box-shadow: 0 20px 40px -28px rgba(0, 0, 0, 0.45);
+  }
+}

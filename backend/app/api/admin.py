@@ -1,18 +1,21 @@
 """
-管理员API - 用户管理功能
+管理员API - 用户管理功能 + 日志查看
 """
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Request, Depends, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime
 import hashlib
+import json
+import asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db, init_db
 from app.models.user import User
 from app.user_manager import user_manager
 from app.user_password import password_manager
-from app.logger import get_logger
+from app.logger import get_logger, get_log_buffer
 
 logger = get_logger(__name__)
 
@@ -391,3 +394,40 @@ async def delete_user(
     except Exception as e:
         logger.error(f"删除用户失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"删除用户失败: {str(e)}")
+
+
+# ==================== 日志查看 API ====================
+
+@router.get("/logs", summary="获取最近日志")
+async def get_logs(
+    request: Request,
+    after_seq: int = Query(0, description="返回此序号之后的日志"),
+    limit: int = Query(200, ge=1, le=500, description="最多返回条数"),
+):
+    """返回内存缓冲区中的最近日志条目"""
+    buf = get_log_buffer()
+    entries = buf.get_recent(after_seq=after_seq, limit=limit)
+    return {"entries": entries, "total_buffered": len(buf.buffer)}
+
+
+@router.get("/logs/stream", summary="实时日志流（SSE）")
+async def stream_logs(request: Request):
+    """SSE 长连接推送新日志，前端可通过 EventSource 订阅"""
+    buf = get_log_buffer()
+    last_seq = buf._seq
+
+    async def event_gen():
+        nonlocal last_seq
+        while True:
+            new_entries = buf.get_recent(after_seq=last_seq, limit=50)
+            if new_entries:
+                last_seq = new_entries[-1]["seq"]
+                data = json.dumps(new_entries, ensure_ascii=False)
+                yield f"data: {data}\n\n"
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

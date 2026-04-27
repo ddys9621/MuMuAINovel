@@ -1,458 +1,624 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { Card, Spin, Alert, Button, Space, Switch, Drawer, message, Progress } from 'antd';
+import { useEffect, useState, useCallback } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
 import {
-  ArrowLeftOutlined,
-  EyeOutlined,
-  EyeInvisibleOutlined,
-  MenuOutlined,
-  ReloadOutlined,
-  LeftOutlined,
-  RightOutlined,
-} from '@ant-design/icons';
-import api from '../services/api';
-import AnnotatedText, { type MemoryAnnotation } from '../components/AnnotatedText';
-import MemorySidebar from '../components/MemorySidebar';
+  ArrowLeft,
+  Loader2,
+  ChevronLeft,
+  ChevronRight,
+  PanelRightOpen,
+  PanelRightClose,
+  BarChart3,
+  Users,
+  Heart,
+  Star,
+  AlertCircle,
+  BookOpenText,
+  Sparkles,
+  Eye,
+  Clock,
+  Link2,
+  ShieldAlert,
+  ChevronDown,
+  MapPin,
+  ArrowRight,
+} from 'lucide-react'
+import { chapterApi } from '@/services/api'
+import type { Chapter } from '@/types'
+import { normalizeAnalysisData, type NormalizedAnalysisData } from '@/utils/chapterAnalysis'
 
-interface ChapterData {
-  id: string;
-  chapter_number: number;
-  title: string;
-  content: string;
-  word_count: number;
+function NavButton({
+  chapter,
+  direction,
+  onClick,
+}: {
+  chapter: Chapter | null
+  direction: 'prev' | 'next'
+  onClick: () => void
+}) {
+  if (!chapter) return <div />
+  return (
+    <button
+      onClick={onClick}
+      className="fanqie-secondary-btn max-w-[220px] justify-start px-3 py-2 text-left"
+    >
+      {direction === 'prev' && <ChevronLeft className="h-4 w-4" />}
+      <span className="truncate">
+        {direction === 'prev' ? '上一章' : '下一章'}：{chapter.title}
+      </span>
+      {direction === 'next' && <ChevronRight className="h-4 w-4" />}
+    </button>
+  )
 }
 
-interface AnnotationsData {
-  chapter_id: string;
-  chapter_number: number;
-  title: string;
-  word_count: number;
-  annotations: MemoryAnnotation[];
-  has_analysis: boolean;
-  summary: {
-    total_annotations: number;
-    hooks: number;
-    foreshadows: number;
-    plot_points: number;
-    character_events: number;
-  };
-}
-
-interface NavigationData {
-  current: {
-    id: string;
-    chapter_number: number;
-    title: string;
-  };
-  previous: {
-    id: string;
-    chapter_number: number;
-    title: string;
-  } | null;
-  next: {
-    id: string;
-    chapter_number: number;
-    title: string;
-  } | null;
-}
-
-/**
- * 章节阅读器页面
- * 展示带有记忆标注的章节内容
- */
-const ChapterReader: React.FC = () => {
-  const { chapterId } = useParams<{ chapterId: string }>();
-  const navigate = useNavigate();
-
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [chapter, setChapter] = useState<ChapterData | null>(null);
-  const [annotationsData, setAnnotationsData] = useState<AnnotationsData | null>(null);
-  const [showAnnotations, setShowAnnotations] = useState(true);
-  const [activeAnnotationId, setActiveAnnotationId] = useState<string | undefined>();
-  const [sidebarVisible, setSidebarVisible] = useState(false);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [analysisProgress, setAnalysisProgress] = useState(0);
-  const [navigation, setNavigation] = useState<NavigationData | null>(null);
+function AnalysisSidebar({
+  chapterId,
+  open,
+  onClose,
+}: {
+  chapterId: string
+  open: boolean
+  onClose: () => void
+}) {
+  const [analysis, setAnalysis] = useState<NormalizedAnalysisData | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
   useEffect(() => {
-    if (chapterId) {
-      loadChapterData();
-    }
-  }, [chapterId]);
+    if (!open || !chapterId) return
+    setLoading(true)
+    setError('')
+    chapterApi
+      .getAnalysis(chapterId)
+      .then((data) => setAnalysis(normalizeAnalysisData(data as unknown as Record<string, unknown>)))
+      .catch(() => setError('暂无分析数据'))
+      .finally(() => setLoading(false))
+  }, [open, chapterId])
 
-  const loadChapterData = async () => {
+  if (!open) return null
+
+  const plotAnalysis = analysis?.plot_analysis
+  const characterStatus = analysis?.character_status
+  const emotionCurve = analysis?.emotion_curve
+  const score = analysis?.score
+  const narrativeState = analysis?.narrative_state
+  const consistencyAudit = analysis?.consistency_audit
+
+  const promises = narrativeState?.promises ?? []
+  const timelineEvents = narrativeState?.timeline_events ?? []
+  const relationshipGraph = narrativeState?.relationship_graph
+  const causalLinks = narrativeState?.causal_links ?? []
+  const auditIssues = consistencyAudit?.issues ?? []
+  const auditSummary = consistencyAudit?.summary
+
+  const [expandedSection, setExpandedSection] = useState<string | null>(null)
+  const toggleSection = (key: string) => setExpandedSection(prev => prev === key ? null : key)
+
+  const severityStyle: Record<string, string> = {
+    critical: 'bg-red-100 text-red-700 border-red-200',
+    high: 'bg-orange-100 text-orange-700 border-orange-200',
+    medium: 'bg-yellow-100 text-yellow-700 border-yellow-200',
+    low: 'bg-gray-100 text-gray-500 border-gray-200',
+  }
+  const severityLabel: Record<string, string> = {
+    critical: '严重',
+    high: '高',
+    medium: '中',
+    low: '低',
+  }
+  const promiseStatusStyle: Record<string, string> = {
+    open: 'bg-blue-100 text-blue-700',
+    progressing: 'bg-amber-100 text-amber-700',
+    resolved: 'bg-emerald-100 text-emerald-700',
+    broken: 'bg-red-100 text-red-700',
+  }
+  const promiseStatusLabel: Record<string, string> = {
+    open: '未解',
+    progressing: '推进中',
+    resolved: '已回收',
+    broken: '已破裂',
+  }
+  const promiseTypeLabel: Record<string, string> = {
+    foreshadow: '伏笔',
+    promise: '承诺',
+    mystery: '悬念',
+    conflict: '冲突',
+  }
+
+  return (
+    <aside className="w-[340px] shrink-0 border-l border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.96)_0%,rgba(255,247,240,0.98)_100%)] shadow-[-18px_0_48px_-36px_rgba(109,56,32,0.35)]">
+      <div className="sticky top-0 z-10 border-b border-surface-border bg-white/85 px-5 py-4 backdrop-blur-md">
+        <div className="mb-2 inline-flex items-center gap-2 rounded-pill bg-brand/10 px-3 py-1 text-xs font-medium text-brand">
+          <Sparkles className="h-3.5 w-3.5" />
+          章节洞察
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base font-semibold text-content">章节分析</h3>
+            <p className="mt-1 text-xs text-content-secondary">结构、人物、叙事与审计一侧查看</p>
+          </div>
+          <button onClick={onClose} className="fanqie-toolbar-btn h-10 w-10 p-0">
+            <PanelRightClose className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+
+      <div className="space-y-4 overflow-y-auto p-5" style={{ maxHeight: 'calc(100vh - 120px)' }}>
+        {loading && (
+          <div className="flex justify-center py-10">
+            <Loader2 className="h-5 w-5 animate-spin text-brand" />
+          </div>
+        )}
+
+        {error && (
+          <div className="fanqie-soft-card flex flex-col items-center py-8 text-content-tertiary">
+            <AlertCircle className="mb-3 h-6 w-6 opacity-60" />
+            <p className="text-xs">{error}</p>
+          </div>
+        )}
+
+        {analysis && !loading && (
+          <>
+            {score != null && (
+              <div className="fanqie-soft-card p-4">
+                <div className="mb-2 flex items-center gap-2">
+                  <Star className="h-4 w-4 text-gold" />
+                  <span className="text-xs text-content-secondary">综合评分</span>
+                </div>
+                <p className="text-3xl font-semibold text-content">{score}<span className="text-sm font-normal text-content-tertiary"> / 10</span></p>
+              </div>
+            )}
+
+            {plotAnalysis && (
+              <div className="fanqie-card p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <BarChart3 className="h-4 w-4 text-brand" />
+                  <span className="text-xs font-medium text-content-secondary">情节分析</span>
+                </div>
+                <p className="text-sm leading-7 text-content whitespace-pre-wrap">{plotAnalysis}</p>
+              </div>
+            )}
+
+            {characterStatus && characterStatus.length > 0 && (
+              <div className="fanqie-card p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <Users className="h-4 w-4 text-emerald-600" />
+                  <span className="text-xs font-medium text-content-secondary">角色状态</span>
+                </div>
+                <div className="space-y-2">
+                  {characterStatus.map((char, i) => (
+                    <div key={i} className="rounded-[18px] bg-surface px-3 py-3">
+                      <p className="text-sm font-medium text-content">{char.name || `角色 ${i + 1}`}</p>
+                      {char.status && <p className="mt-1 text-xs leading-6 text-content-secondary">{char.status}</p>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {emotionCurve && emotionCurve.length > 0 && (
+              <div className="fanqie-card p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <Heart className="h-4 w-4 text-rose-500" />
+                  <span className="text-xs font-medium text-content-secondary">情感曲线</span>
+                </div>
+                <div className="space-y-2.5">
+                  {emotionCurve.map((point, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <span className="w-16 shrink-0 truncate text-xs text-content-secondary">{point.label}</span>
+                      <div className="h-2 flex-1 overflow-hidden rounded-full bg-[#f7e8de]">
+                        <div
+                          className="h-full rounded-full bg-brand transition-all"
+                          style={{ width: `${Math.min(100, Math.max(0, point.value))}%` }}
+                        />
+                      </div>
+                      <span className="w-8 text-right text-xs text-content-tertiary">{point.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ═══ 承诺 / 伏笔追踪 ═══ */}
+            {promises.length > 0 && (
+              <div className="fanqie-card overflow-hidden">
+                <button
+                  onClick={() => toggleSection('promises')}
+                  className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-surface/40"
+                >
+                  <div className="flex items-center gap-2">
+                    <Eye className="h-4 w-4 text-purple-500" />
+                    <span className="text-xs font-medium text-content-secondary">承诺 / 伏笔</span>
+                    <span className="rounded-full bg-purple-100 px-1.5 py-0.5 text-[10px] font-medium text-purple-600">{promises.length}</span>
+                  </div>
+                  <ChevronDown className={`h-3.5 w-3.5 text-content-tertiary transition-transform ${expandedSection === 'promises' ? 'rotate-180' : ''}`} />
+                </button>
+                {expandedSection === 'promises' && (
+                  <div className="space-y-2 px-4 pb-4">
+                    {promises.map((p, i) => {
+                      const status = String(p.status || 'open')
+                      const pType = String(p.promise_type || '')
+                      const priority = String(p.priority || '')
+                      return (
+                        <div key={String(p.id || i)} className="rounded-[14px] border border-surface-border bg-surface/30 px-3 py-2.5">
+                          <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                            {pType && <span className="rounded bg-purple-50 px-1.5 py-0.5 text-[10px] font-medium text-purple-600">{promiseTypeLabel[pType] || pType}</span>}
+                            <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${promiseStatusStyle[status] || 'bg-gray-100 text-gray-600'}`}>{promiseStatusLabel[status] || status}</span>
+                            {priority === 'critical' && <span className="rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-600">紧急</span>}
+                            {priority === 'high' && <span className="rounded bg-orange-50 px-1.5 py-0.5 text-[10px] font-medium text-orange-600">高优</span>}
+                          </div>
+                          <p className="text-xs font-medium text-content">{String(p.title || '未命名')}</p>
+                          {Boolean(p.content) && <p className="mt-1 text-[11px] leading-5 text-content-secondary line-clamp-2">{String(p.content)}</p>}
+                          <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-content-tertiary">
+                            {Boolean(p.owner_character_name) && <span>发起: {String(p.owner_character_name)}</span>}
+                            {Boolean(p.target_character_name) && <span>对象: {String(p.target_character_name)}</span>}
+                            {p.source_chapter_number != null && <span>第{String(p.source_chapter_number)}章埋设</span>}
+                            {p.resolved_chapter_number != null && <span>第{String(p.resolved_chapter_number)}章回收</span>}
+                            {p.deadline_chapter != null && <span>期限: 第{String(p.deadline_chapter)}章</span>}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ═══ 时间轴事件 ═══ */}
+            {timelineEvents.length > 0 && (
+              <div className="fanqie-card overflow-hidden">
+                <button
+                  onClick={() => toggleSection('timeline')}
+                  className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-surface/40"
+                >
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-sky-500" />
+                    <span className="text-xs font-medium text-content-secondary">时间轴事件</span>
+                    <span className="rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-600">{timelineEvents.length}</span>
+                  </div>
+                  <ChevronDown className={`h-3.5 w-3.5 text-content-tertiary transition-transform ${expandedSection === 'timeline' ? 'rotate-180' : ''}`} />
+                </button>
+                {expandedSection === 'timeline' && (
+                  <div className="relative px-4 pb-4">
+                    <div className="absolute bottom-4 left-[26px] top-0 w-px bg-sky-200" />
+                    <div className="space-y-3">
+                      {timelineEvents.map((evt, i) => {
+                        const actors = (evt.actor_names as string[]) || []
+                        const targets = (evt.target_names as string[]) || []
+                        return (
+                          <div key={String(evt.id || i)} className="relative pl-6">
+                            <div className="absolute left-0 top-1 h-2.5 w-2.5 rounded-full border-2 border-sky-400 bg-white" />
+                            <div className="rounded-[12px] border border-surface-border bg-surface/30 px-3 py-2">
+                              <div className="mb-0.5 flex items-center gap-1.5">
+                                {Boolean(evt.event_type) && <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-sky-600">{String(evt.event_type)}</span>}
+                                {evt.public_visibility === 'secret' && <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">秘密</span>}
+                              </div>
+                              <p className="text-xs font-medium text-content">{String(evt.title || '未命名事件')}</p>
+                              {Boolean(evt.description) && <p className="mt-0.5 text-[11px] leading-5 text-content-secondary line-clamp-2">{String(evt.description)}</p>}
+                              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-content-tertiary">
+                                {Boolean(evt.location) && <span className="inline-flex items-center gap-0.5"><MapPin className="h-2.5 w-2.5" />{String(evt.location)}</span>}
+                                {Boolean(evt.time_marker) && <span>{String(evt.time_marker)}</span>}
+                                {actors.length > 0 && <span>参与: {actors.join(', ')}</span>}
+                                {targets.length > 0 && <span>目标: {targets.join(', ')}</span>}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ═══ 关系变化图 ═══ */}
+            {relationshipGraph && (relationshipGraph.nodes.length > 0 || relationshipGraph.edges.length > 0) && (
+              <div className="fanqie-card overflow-hidden">
+                <button
+                  onClick={() => toggleSection('relationship')}
+                  className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-surface/40"
+                >
+                  <div className="flex items-center gap-2">
+                    <Users className="h-4 w-4 text-pink-500" />
+                    <span className="text-xs font-medium text-content-secondary">关系变化</span>
+                    <span className="rounded-full bg-pink-100 px-1.5 py-0.5 text-[10px] font-medium text-pink-600">{relationshipGraph.edges.length}</span>
+                  </div>
+                  <ChevronDown className={`h-3.5 w-3.5 text-content-tertiary transition-transform ${expandedSection === 'relationship' ? 'rotate-180' : ''}`} />
+                </button>
+                {expandedSection === 'relationship' && (
+                  <div className="space-y-2 px-4 pb-4">
+                    {relationshipGraph.edges.map((edge, i) => {
+                      const delta = Number(edge.delta || 0)
+                      const deltaColor = delta > 0 ? 'text-emerald-600' : delta < 0 ? 'text-red-600' : 'text-gray-500'
+                      const deltaSign = delta > 0 ? '+' : ''
+                      return (
+                        <div key={i} className="rounded-[14px] border border-surface-border bg-surface/30 px-3 py-2.5">
+                          <div className="flex items-center gap-1.5 text-xs">
+                            <span className="font-medium text-content">{String(edge.source)}</span>
+                            <ArrowRight className="h-3 w-3 text-content-tertiary" />
+                            <span className="font-medium text-content">{String(edge.target)}</span>
+                            <span className={`ml-auto font-semibold ${deltaColor}`}>{deltaSign}{delta}</span>
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-content-tertiary">
+                            {Boolean(edge.reason) && <span>{String(edge.reason)}</span>}
+                            {Boolean(edge.new_status) && <span>状态: {String(edge.new_status)}</span>}
+                            {edge.intimacy_level != null && <span>亲密度: {String(edge.intimacy_level)}</span>}
+                          </div>
+                        </div>
+                      )
+                    })}
+                    {relationshipGraph.edges.length === 0 && relationshipGraph.nodes.length > 0 && (
+                      <p className="py-2 text-center text-[11px] text-content-tertiary">本章涉及 {relationshipGraph.nodes.length} 位角色，但无关系变化</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ═══ 因果链 ═══ */}
+            {causalLinks.length > 0 && (
+              <div className="fanqie-card overflow-hidden">
+                <button
+                  onClick={() => toggleSection('causal')}
+                  className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-surface/40"
+                >
+                  <div className="flex items-center gap-2">
+                    <Link2 className="h-4 w-4 text-amber-500" />
+                    <span className="text-xs font-medium text-content-secondary">因果链</span>
+                    <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-600">{causalLinks.length}</span>
+                  </div>
+                  <ChevronDown className={`h-3.5 w-3.5 text-content-tertiary transition-transform ${expandedSection === 'causal' ? 'rotate-180' : ''}`} />
+                </button>
+                {expandedSection === 'causal' && (
+                  <div className="space-y-2 px-4 pb-4">
+                    {causalLinks.map((link, i) => (
+                      <div key={i} className="rounded-[14px] border border-surface-border bg-surface/30 px-3 py-2.5">
+                        <div className="flex items-center gap-1.5 text-[11px] text-content-secondary">
+                          <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-600">
+                            重要度 {Number(link.importance || 0)}
+                          </span>
+                          {Boolean(link.reversible) && <span className="rounded bg-green-50 px-1 py-0.5 text-[10px] text-green-600">可逆</span>}
+                        </div>
+                        <div className="mt-1.5 space-y-1 text-xs">
+                          {Boolean(link.cause) && <p><span className="font-medium text-content">起因：</span><span className="text-content-secondary">{String(link.cause)}</span></p>}
+                          {Boolean(link.event) && <p><span className="font-medium text-content">事件：</span><span className="text-content-secondary">{String(link.event)}</span></p>}
+                          {Boolean(link.decision) && <p><span className="font-medium text-content">决策：</span><span className="text-content-secondary">{String(link.decision)}</span></p>}
+                          {Boolean(link.effect) && <p><span className="font-medium text-content">影响：</span><span className="text-content-secondary">{String(link.effect)}</span></p>}
+                        </div>
+                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-content-tertiary">
+                          {Array.isArray(link.actor_names) && (link.actor_names as string[]).length > 0 && <span>参与: {(link.actor_names as string[]).join(', ')}</span>}
+                          {Array.isArray(link.target_names) && (link.target_names as string[]).length > 0 && <span>目标: {(link.target_names as string[]).join(', ')}</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ═══ 一致性审计 ═══ */}
+            {auditSummary && auditSummary.total > 0 && (
+              <div className="fanqie-card overflow-hidden border-red-200/60">
+                <button
+                  onClick={() => toggleSection('audit')}
+                  className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-surface/40"
+                >
+                  <div className="flex items-center gap-2">
+                    <ShieldAlert className="h-4 w-4 text-red-500" />
+                    <span className="text-xs font-medium text-content-secondary">一致性审计</span>
+                    <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-600">{auditSummary.total} 项</span>
+                  </div>
+                  <ChevronDown className={`h-3.5 w-3.5 text-content-tertiary transition-transform ${expandedSection === 'audit' ? 'rotate-180' : ''}`} />
+                </button>
+                {expandedSection === 'audit' && (
+                  <div className="px-4 pb-4">
+                    <div className="mb-3 flex flex-wrap gap-2">
+                      {auditSummary.critical > 0 && <span className="rounded bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-700">严重 {auditSummary.critical}</span>}
+                      {auditSummary.high > 0 && <span className="rounded bg-orange-100 px-2 py-0.5 text-[10px] font-semibold text-orange-700">高 {auditSummary.high}</span>}
+                      {auditSummary.medium > 0 && <span className="rounded bg-yellow-100 px-2 py-0.5 text-[10px] font-semibold text-yellow-700">中 {auditSummary.medium}</span>}
+                      {auditSummary.low > 0 && <span className="rounded bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-600">低 {auditSummary.low}</span>}
+                    </div>
+                    <div className="space-y-2">
+                      {auditIssues.map((issue, i) => {
+                        const sev = String(issue.severity || 'medium')
+                        return (
+                          <div key={i} className={`rounded-[14px] border px-3 py-2.5 ${severityStyle[sev] || severityStyle.medium}`}>
+                            <div className="mb-0.5 flex items-center gap-1.5">
+                              <span className="text-[10px] font-semibold">{severityLabel[sev] || sev}</span>
+                              {Boolean(issue.issue_type) && <span className="text-[10px] opacity-70">{String(issue.issue_type)}</span>}
+                            </div>
+                            <p className="text-xs font-medium">{String(issue.title || '未命名问题')}</p>
+                            {Boolean(issue.details) && <p className="mt-0.5 text-[11px] leading-5 opacity-80">{String(issue.details)}</p>}
+                            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] opacity-60">
+                              {Boolean(issue.character_name) && <span>角色: {String(issue.character_name)}</span>}
+                              {issue.reference_chapter_number != null && <span>参考: 第{String(issue.reference_chapter_number)}章</span>}
+                              {Boolean(issue.evidence) && <span className="line-clamp-1">证据: {String(issue.evidence)}</span>}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!plotAnalysis && !characterStatus?.length && !emotionCurve?.length && score == null
+              && !promises.length && !timelineEvents.length && !causalLinks.length
+              && !(auditSummary && auditSummary.total > 0)
+              && !(relationshipGraph && (relationshipGraph.nodes.length > 0 || relationshipGraph.edges.length > 0)) && (
+              <p className="py-4 text-center text-xs text-content-tertiary">分析数据为空</p>
+            )}
+          </>
+        )}
+      </div>
+    </aside>
+  )
+}
+
+export default function ChapterReader() {
+  const { chapterId } = useParams<{ chapterId: string }>()
+  const navigate = useNavigate()
+  const [chapter, setChapter] = useState<Chapter | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  const [prevChapter, setPrevChapter] = useState<Chapter | null>(null)
+  const [nextChapter, setNextChapter] = useState<Chapter | null>(null)
+  const [showAnalysis, setShowAnalysis] = useState(false)
+
+  const loadChapter = useCallback(async (id: string) => {
+    setLoading(true)
+    setError('')
     try {
-      setLoading(true);
-      setError(null);
-
-      // 并行加载章节内容、标注数据和导航信息
-      // 注意：api拦截器已经解析了response.data，所以直接返回数据对象
-      const [chapterData, annotationsData, navigationData] = await Promise.all([
-        api.get<unknown, ChapterData>(`/chapters/${chapterId}`).catch(err => {
-          console.error('加载章节失败:', err);
-          throw err;
-        }),
-        api.get<unknown, AnnotationsData>(`/chapters/${chapterId}/annotations`).catch(err => {
-          console.warn('加载标注失败:', err);
-          return null;
-        }), // 如果没有分析数据也不报错
-        api.get<unknown, NavigationData>(`/chapters/${chapterId}/navigation`).catch(err => {
-          console.warn('加载导航信息失败:', err);
-          return null;
-        }),
-      ]);
-
-      console.log('章节数据:', chapterData);
-      console.log('标注数据:', annotationsData);
-      console.log('导航数据:', navigationData);
-
-      // 验证数据
-      if (!chapterData || !chapterData.content) {
-        throw new Error('章节数据无效：缺少内容');
-      }
-
-      setChapter(chapterData);
-      setNavigation(navigationData);
-      
-      // 验证标注数据
-      if (annotationsData) {
-        const validAnnotations = annotationsData.annotations.filter(
-          (a: MemoryAnnotation) => a.position >= 0 && a.position < chapterData.content.length
-        );
-        const invalidCount = annotationsData.annotations.length - validAnnotations.length;
-        
-        if (invalidCount > 0) {
-          console.warn(`${invalidCount}个标注位置无效，将仅显示${validAnnotations.length}个有效标注`);
-        }
-        
-        setAnnotationsData(annotationsData);
-      } else {
-        setAnnotationsData(null);
-      }
-    } catch (err: any) {
-      console.error('加载章节数据失败:', err);
-      setError(err.response?.data?.detail || err.message || '加载失败');
+      const data = await chapterApi.getChapter(id)
+      setChapter(data)
+    } catch {
+      setError('章节加载失败')
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }, [])
 
-  const handleAnnotationClick = (annotation: MemoryAnnotation) => {
-    setActiveAnnotationId(annotation.id);
-    // 移动端显示侧边栏
-    if (window.innerWidth < 768) {
-      setSidebarVisible(true);
-    }
-  };
-
-  const handleBackClick = () => {
-    navigate(-1);
-  };
-
-  const handlePreviousChapter = () => {
-    if (navigation?.previous) {
-      navigate(`/chapters/${navigation.previous.id}/reader`);
-    }
-  };
-
-  const handleNextChapter = () => {
-    if (navigation?.next) {
-      navigate(`/chapters/${navigation.next.id}/reader`);
-    }
-  };
-
-  const handleReanalyze = async () => {
-    if (!chapterId) return;
-
+  const loadNavigation = useCallback(async (id: string) => {
     try {
-      setAnalyzing(true);
-      setAnalysisProgress(0);
-      message.loading({ content: '开始分析章节...', key: 'analyze', duration: 0 });
-
-      // 触发分析
-      await api.post(`/chapters/${chapterId}/analyze`);
-
-      // 轮询分析状态
-      const pollInterval = setInterval(async () => {
-        try {
-          const statusRes = await api.get(`/chapters/${chapterId}/analysis/status`);
-          const { status, progress, error_message } = statusRes.data;
-
-          setAnalysisProgress(progress || 0);
-
-          if (status === 'completed') {
-            clearInterval(pollInterval);
-            setAnalyzing(false);
-            message.success({ content: '分析完成！', key: 'analyze' });
-            
-            // 重新加载标注数据
-            const annotationsRes = await api.get(`/chapters/${chapterId}/annotations`);
-            setAnnotationsData(annotationsRes.data);
-          } else if (status === 'failed') {
-            clearInterval(pollInterval);
-            setAnalyzing(false);
-            message.error({
-              content: `分析失败：${error_message || '未知错误'}`,
-              key: 'analyze'
-            });
-          }
-        } catch (err) {
-          console.error('轮询分析状态失败:', err);
-        }
-      }, 2000); // 每2秒轮询一次
-
-      // 30秒超时
-      setTimeout(() => {
-        clearInterval(pollInterval);
-        if (analyzing) {
-          setAnalyzing(false);
-          message.warning({ content: '分析超时，请稍后刷新查看结果', key: 'analyze' });
-        }
-      }, 30000);
-
-    } catch (err: any) {
-      setAnalyzing(false);
-      message.error({
-        content: err.response?.data?.detail || '触发分析失败',
-        key: 'analyze'
-      });
+      const nav = await chapterApi.getNavigation(id)
+      setPrevChapter(nav.previous)
+      setNextChapter(nav.next)
+    } catch {
+      setPrevChapter(null)
+      setNextChapter(null)
     }
-  };
+  }, [])
+
+  useEffect(() => {
+    if (!chapterId) return
+    loadChapter(chapterId)
+    loadNavigation(chapterId)
+  }, [chapterId, loadChapter, loadNavigation])
+
+  const navigateTo = (ch: Chapter) => {
+    navigate(`/reader/${ch.id}`, { replace: true })
+    window.scrollTo(0, 0)
+  }
 
   if (loading) {
     return (
-      <div style={{ textAlign: 'center', padding: '100px 0' }}>
-        <Spin size="large" tip="加载章节中...">
-          <div style={{ minHeight: 100 }} />
-        </Spin>
+      <div className="flex min-h-screen items-center justify-center bg-transparent px-4">
+        <div className="fanqie-soft-card flex min-w-[220px] flex-col items-center gap-4 px-8 py-10 text-center">
+          <Loader2 className="h-6 w-6 animate-spin text-brand" />
+          <p className="text-sm text-content-secondary">正在加载章节内容...</p>
+        </div>
       </div>
-    );
+    )
   }
 
   if (error || !chapter) {
     return (
-      <div style={{ padding: 24 }}>
-        <Alert
-          message="加载失败"
-          description={error || '章节不存在'}
-          type="error"
-          showIcon
-        />
-        <Button onClick={handleBackClick} style={{ marginTop: 16 }}>
-          返回
-        </Button>
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-transparent px-4">
+        <div className="fanqie-soft-card flex max-w-md flex-col items-center px-8 py-10 text-center">
+          <AlertCircle className="mb-3 h-8 w-8 text-brand/70" />
+          <p className="text-sm text-content-secondary">{error || '章节不存在'}</p>
+          <button onClick={() => navigate(-1)} className="fanqie-secondary-btn mt-5">返回</button>
+        </div>
       </div>
-    );
+    )
   }
 
-  const hasAnnotations = annotationsData && annotationsData.annotations.length > 0;
-
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      {/* 顶部工具栏 */}
-      <Card
-        size="small"
-        style={{
-          borderRadius: 0,
-          borderLeft: 0,
-          borderRight: 0,
-          borderTop: 0,
-        }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Space>
-            <Button icon={<ArrowLeftOutlined />} onClick={handleBackClick}>
-              返回
-            </Button>
-            <Button
-              icon={<LeftOutlined />}
-              onClick={handlePreviousChapter}
-              disabled={!navigation?.previous}
-              title={navigation?.previous ? `上一章: ${navigation.previous.title}` : '已是第一章'}
-            >
-              上一章
-            </Button>
-            <span style={{ fontSize: 16, fontWeight: 600 }}>
-              第{chapter.chapter_number}章: {chapter.title}
-            </span>
-            <Button
-              icon={<RightOutlined />}
-              onClick={handleNextChapter}
-              disabled={!navigation?.next}
-              title={navigation?.next ? `下一章: ${navigation.next.title}` : '已是最后一章'}
-            >
-              下一章
-            </Button>
-          </Space>
+    <div className="min-h-screen bg-transparent md:px-4 md:py-4">
+      <div className="mx-auto flex min-h-screen max-w-[1640px] overflow-hidden rounded-[32px] border border-white/70 bg-white/55 shadow-xl backdrop-blur-xl md:min-h-[calc(100vh-2rem)]">
+        <div className="flex min-w-0 flex-1 flex-col bg-[linear-gradient(180deg,rgba(255,250,244,0.92)_0%,rgba(255,246,239,0.98)_100%)]">
+          <div className="sticky top-0 z-20 border-b border-white/70 bg-white/70 backdrop-blur-xl">
+            <div className="mx-auto flex max-w-[980px] items-center gap-3 px-5 py-4 md:px-8">
+              <button onClick={() => navigate(-1)} className="fanqie-toolbar-btn h-11 w-11 p-0">
+                <ArrowLeft className="h-4 w-4" />
+              </button>
 
-          <Space>
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={handleReanalyze}
-              loading={analyzing}
-              disabled={analyzing}
-            >
-              {analyzing ? '分析中...' : '重新分析'}
-            </Button>
-            {hasAnnotations && (
-              <>
-                <Switch
-                  checked={showAnnotations}
-                  onChange={setShowAnnotations}
-                  checkedChildren={<EyeOutlined />}
-                  unCheckedChildren={<EyeInvisibleOutlined />}
-                />
-                <span style={{ fontSize: 13, color: '#666' }}>显示标注</span>
-                <Button
-                  icon={<MenuOutlined />}
-                  onClick={() => setSidebarVisible(true)}
-                  style={{ display: window.innerWidth < 768 ? 'inline-block' : 'none' }}
-                >
-                  分析
-                </Button>
-              </>
-            )}
-          </Space>
-        </div>
-
-        {analyzing && (
-          <div style={{ marginTop: 12 }}>
-            <Progress percent={analysisProgress} size="small" status="active" />
-            <span style={{ fontSize: 12, color: '#666', marginLeft: 8 }}>
-              正在分析章节...
-            </span>
-          </div>
-        )}
-
-        {!analyzing && hasAnnotations && annotationsData && (
-          <div style={{ marginTop: 12, fontSize: 12, color: '#999' }}>
-            共有 {annotationsData.summary.total_annotations} 个标注：
-            {annotationsData.summary.hooks > 0 && ` 🎣${annotationsData.summary.hooks}个钩子`}
-            {annotationsData.summary.foreshadows > 0 &&
-              ` 🌟${annotationsData.summary.foreshadows}个伏笔`}
-            {annotationsData.summary.plot_points > 0 &&
-              ` 💎${annotationsData.summary.plot_points}个情节点`}
-            {annotationsData.summary.character_events > 0 &&
-              ` 👤${annotationsData.summary.character_events}个角色事件`}
-          </div>
-        )}
-      </Card>
-
-      {/* 主内容区域 */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        {/* 左侧：章节内容 */}
-        <div
-          style={{
-            flex: 1,
-            overflowY: 'auto',
-            padding: '32px 48px',
-            maxWidth: hasAnnotations ? 'calc(100% - 400px)' : '100%',
-          }}
-        >
-          <Card>
-            <div style={{ maxWidth: 800, margin: '0 auto' }}>
-              {!hasAnnotations && (
-                <Alert
-                  message="暂无分析数据"
-                  description="该章节尚未进行AI分析，无法显示记忆标注。"
-                  type="info"
-                  showIcon
-                  style={{ marginBottom: 24 }}
-                />
-              )}
-
-              {showAnnotations && hasAnnotations && annotationsData ? (
-                <AnnotatedText
-                  content={chapter.content}
-                  annotations={annotationsData.annotations}
-                  onAnnotationClick={handleAnnotationClick}
-                  activeAnnotationId={activeAnnotationId}
-                />
-              ) : (
-                <div
-                  style={{
-                    lineHeight: 2,
-                    fontSize: 16,
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                  }}
-                >
-                  {chapter.content}
+              <div className="min-w-0 flex-1">
+                <div className="mb-1 flex items-center gap-2">
+                  <span className="fanqie-chip border-brand/10 bg-brand/5 text-brand">沉浸式阅读</span>
+                  <span className="hidden text-xs text-content-tertiary md:inline">第 {chapter.chapter_number} 章</span>
                 </div>
-              )}
+                <p className="truncate text-lg font-semibold text-content">{chapter.title}</p>
+                <p className="truncate text-xs text-content-secondary md:text-sm">{(chapter.word_count || 0).toLocaleString()} 字 · 保持当前章节阅读节奏</p>
+              </div>
 
-              {/* 底部翻页按钮 */}
-              <div style={{ marginTop: 48, paddingTop: 24, borderTop: '1px solid #f0f0f0' }}>
-                <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-                  <Button
-                    size="large"
-                    icon={<LeftOutlined />}
-                    onClick={handlePreviousChapter}
-                    disabled={!navigation?.previous}
-                  >
-                    {navigation?.previous
-                      ? `上一章: 第${navigation.previous.chapter_number}章 ${navigation.previous.title}`
-                      : '已是第一章'}
-                  </Button>
-                  <Button
-                    size="large"
-                    type="primary"
-                    icon={<RightOutlined />}
-                    onClick={handleNextChapter}
-                    disabled={!navigation?.next}
-                    iconPosition="end"
-                  >
-                    {navigation?.next
-                      ? `下一章: 第${navigation.next.chapter_number}章 ${navigation.next.title}`
-                      : '已是最后一章'}
-                  </Button>
-                </Space>
+              <div className="hidden items-center gap-2 md:flex">
+                {prevChapter && (
+                  <button onClick={() => navigateTo(prevChapter)} className="fanqie-toolbar-btn h-11 w-11 p-0" title={`上一章：${prevChapter.title}`}>
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                )}
+                {nextChapter && (
+                  <button onClick={() => navigateTo(nextChapter)} className="fanqie-toolbar-btn h-11 w-11 p-0" title={`下一章：${nextChapter.title}`}>
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowAnalysis(!showAnalysis)}
+                  className={`fanqie-toolbar-btn h-11 w-11 p-0 ${showAnalysis ? 'border-brand/20 bg-brand/10 text-brand' : ''}`}
+                  title="章节分析"
+                >
+                  <PanelRightOpen className="h-4 w-4" />
+                </button>
               </div>
             </div>
-          </Card>
+          </div>
+
+          <div className="mx-auto flex w-full max-w-[980px] flex-1 flex-col px-5 pb-10 pt-5 md:px-8 md:pt-6">
+            <div className="flex items-center justify-between gap-3 md:hidden">
+              <NavButton chapter={prevChapter} direction="prev" onClick={() => prevChapter && navigateTo(prevChapter)} />
+              <button
+                onClick={() => setShowAnalysis(!showAnalysis)}
+                className={`fanqie-toolbar-btn h-11 w-11 shrink-0 p-0 ${showAnalysis ? 'border-brand/20 bg-brand/10 text-brand' : ''}`}
+                title="章节分析"
+              >
+                <PanelRightOpen className="h-4 w-4" />
+              </button>
+              <NavButton chapter={nextChapter} direction="next" onClick={() => nextChapter && navigateTo(nextChapter)} />
+            </div>
+
+            <section className="fanqie-soft-card mt-5 flex-1 px-6 py-8 md:px-10 md:py-10">
+              <div className="mb-8 flex items-center gap-3 text-content-secondary">
+                <div className="flex h-12 w-12 items-center justify-center rounded-[18px] bg-brand/10 text-brand">
+                  <BookOpenText className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-[0.18em] text-content-tertiary">Chapter Reader</p>
+                  <p className="text-sm">当前章节沉浸阅读模式</p>
+                </div>
+              </div>
+
+              <article className="mx-auto max-w-3xl">
+                <h1 className="mb-8 text-3xl font-semibold leading-tight text-content md:text-[36px]">{chapter.title}</h1>
+                {chapter.content ? (
+                  <div
+                    className="whitespace-pre-wrap text-[17px] leading-[2.15] text-content md:text-[18px]"
+                    style={{ fontFamily: 'Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif' }}
+                  >
+                    {chapter.content}
+                  </div>
+                ) : (
+                  <p className="text-sm text-content-secondary">暂无内容</p>
+                )}
+              </article>
+            </section>
+
+            <div className="mt-6 flex flex-col gap-3 border-t border-surface-border pt-6 md:flex-row md:items-center md:justify-between">
+              <NavButton chapter={prevChapter} direction="prev" onClick={() => prevChapter && navigateTo(prevChapter)} />
+              <NavButton chapter={nextChapter} direction="next" onClick={() => nextChapter && navigateTo(nextChapter)} />
+            </div>
+          </div>
         </div>
 
-        {/* 右侧：记忆侧边栏（桌面端） */}
-        {hasAnnotations && annotationsData && window.innerWidth >= 768 && (
-          <div
-            style={{
-              width: 400,
-              borderLeft: '1px solid #f0f0f0',
-              overflowY: 'auto',
-              background: '#fafafa',
-            }}
-          >
-            <MemorySidebar
-              annotations={annotationsData.annotations}
-              activeAnnotationId={activeAnnotationId}
-              onAnnotationClick={handleAnnotationClick}
-            />
-          </div>
+        {chapterId && (
+          <AnalysisSidebar
+            chapterId={chapterId}
+            open={showAnalysis}
+            onClose={() => setShowAnalysis(false)}
+          />
         )}
       </div>
-
-      {/* 移动端抽屉 */}
-      {hasAnnotations && annotationsData && (
-        <Drawer
-          title="章节分析"
-          placement="right"
-          onClose={() => setSidebarVisible(false)}
-          open={sidebarVisible}
-          width="80%"
-        >
-          <MemorySidebar
-            annotations={annotationsData.annotations}
-            activeAnnotationId={activeAnnotationId}
-            onAnnotationClick={(annotation) => {
-              handleAnnotationClick(annotation);
-              setSidebarVisible(false);
-            }}
-          />
-        </Drawer>
-      )}
     </div>
-  );
-};
-
-export default ChapterReader;
+  )
+}

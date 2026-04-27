@@ -1,7 +1,7 @@
 """写作风格数据模型"""
 from sqlalchemy import Column, String, Text, Boolean, DateTime, ForeignKey, Integer
 from sqlalchemy.sql import func
-from app.database import Base
+from app.db_base import Base
 
 
 class WritingStyle(Base):

@@ -1,769 +1,284 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import {
-  Table,
-  Button,
-  Modal,
-  Form,
-  Input,
-  Switch,
-  Space,
-  Tag,
-  Popconfirm,
-  message,
-  Card,
-  Typography,
-  Badge,
-  InputNumber,
-  Tooltip,
-  Row,
-  Col,
-  Pagination,
-  Dropdown,
-} from 'antd';
-import {
-  PlusOutlined,
-  EditOutlined,
-  DeleteOutlined,
-  KeyOutlined,
-  StopOutlined,
-  CheckCircleOutlined,
-  ArrowLeftOutlined,
-  TeamOutlined,
-  UserOutlined,
-  SearchOutlined,
-  MoreOutlined,
-} from '@ant-design/icons';
-import { adminApi } from '../services/api';
-import type { User } from '../types';
-import UserMenu from '../components/UserMenu';
-
-const { Title, Text } = Typography;
-
-interface UserWithStatus extends User {
-  is_active?: boolean;
-}
+import { useEffect, useState, useCallback } from 'react'
+import { Plus, Pencil, Trash2, Shield, ShieldOff, KeyRound, Loader2, Users, UserCheck, UserX, X } from 'lucide-react'
+import { toast } from 'sonner'
+import { adminApi } from '@/services/api'
+import type { User } from '@/types'
 
 export default function UserManagement() {
-  const navigate = useNavigate();
-  const [users, setUsers] = useState<UserWithStatus[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [editModalVisible, setEditModalVisible] = useState(false);
-  const [resetPasswordModalVisible, setResetPasswordModalVisible] = useState(false);
-  const [currentUser, setCurrentUser] = useState<UserWithStatus | null>(null);
-  const [newPassword, setNewPassword] = useState('');
-  const [pageSize, setPageSize] = useState(20);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [searchText, setSearchText] = useState('');
-  
-  const [form] = Form.useForm();
-  const [editForm] = Form.useForm();
+  const [users, setUsers] = useState<User[]>([])
+  const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(false)
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [createForm, setCreateForm] = useState({ username: '', display_name: '', password: '', is_admin: false })
 
-  // 过滤用户列表
-  const filteredUsers = users.filter(user => {
-    if (!searchText) return true;
-    const searchLower = searchText.toLowerCase();
-    return (
-      user.username?.toLowerCase().includes(searchLower) ||
-      user.display_name?.toLowerCase().includes(searchLower) ||
-      user.user_id?.toLowerCase().includes(searchLower)
-    );
-  });
+  // 编辑弹窗
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editingUser, setEditingUser] = useState<User | null>(null)
+  const [editForm, setEditForm] = useState({ display_name: '', avatar_url: '', trust_level: 0 })
 
-  // 加载用户列表
-  const loadUsers = async () => {
-    setLoading(true);
+  // 状态切换 loading
+  const [togglingId, setTogglingId] = useState<string | null>(null)
+
+  const fetchUsers = useCallback(async () => {
     try {
-      const res = await adminApi.getUsers();
-      setUsers(res.users);
-    } catch (error) {
-      console.error('加载用户列表失败:', error);
-      message.error('加载用户列表失败');
-    } finally {
-      setLoading(false);
+      setLoading(true)
+      const res = await adminApi.getUsers()
+      setUsers(res.users)
+      setTotal(res.total)
+    } catch { /* api 层已 toast */ } finally { setLoading(false) }
+  }, [])
+
+  useEffect(() => { fetchUsers() }, [fetchUsers])
+
+  const handleCreate = async () => {
+    if (!createForm.username.trim() || !createForm.display_name.trim()) {
+      toast.error('请填写用户名和显示名')
+      return
     }
-  };
-
-  useEffect(() => {
-    loadUsers();
-  }, []);
-
-  // 添加用户
-  const handleCreate = async (values: any) => {
     try {
-      const res = await adminApi.createUser(values);
-      message.success('用户创建成功');
-      
-      // 如果有默认密码，显示给管理员
-      if (res.default_password) {
-        Modal.info({
-          title: '用户创建成功',
-          content: (
-            <div>
-              <p>用户名：<Text strong>{values.username}</Text></p>
-              <p>初始密码：<Text strong copyable>{res.default_password}</Text></p>
-              <p style={{ color: '#ff4d4f', marginTop: 16 }}>
-                ⚠️ 请复制密码并告知用户，此密码仅显示一次！
-              </p>
-            </div>
-          ),
-          width: 500,
-        });
-      }
-      
-      setModalVisible(false);
-      form.resetFields();
-      loadUsers();
-    } catch (error) {
-      console.error('创建用户失败:', error);
-      message.error('创建用户失败');
-    }
-  };
+      const res = await adminApi.createUser({
+        username: createForm.username,
+        display_name: createForm.display_name,
+        password: createForm.password || undefined,
+        is_admin: createForm.is_admin,
+      })
+      toast.success(res.default_password ? `用户已创建，默认密码：${res.default_password}` : '用户已创建')
+      setShowCreateModal(false)
+      setCreateForm({ username: '', display_name: '', password: '', is_admin: false })
+      fetchUsers()
+    } catch { /* api 层已 toast */ }
+  }
 
   // 编辑用户
-  const handleEdit = (user: UserWithStatus) => {
-    setCurrentUser(user);
-    editForm.setFieldsValue({
+  const openEdit = (user: User) => {
+    setEditingUser(user)
+    setEditForm({
       display_name: user.display_name,
-      avatar_url: user.avatar_url,
+      avatar_url: user.avatar_url || '',
       trust_level: user.trust_level,
-      is_admin: user.is_admin,
-    });
-    setEditModalVisible(true);
-  };
+    })
+    setShowEditModal(true)
+  }
 
-  const handleUpdate = async (values: any) => {
-    if (!currentUser) return;
-    
+  const handleUpdate = async () => {
+    if (!editingUser) return
+    if (!editForm.display_name.trim()) { toast.error('显示名不能为空'); return }
     try {
-      await adminApi.updateUser(currentUser.user_id, values);
-      message.success('用户信息更新成功');
-      setEditModalVisible(false);
-      editForm.resetFields();
-      loadUsers();
-    } catch (error) {
-      console.error('更新用户失败:', error);
-      message.error('更新用户失败');
-    }
-  };
+      const res = await adminApi.updateUser(editingUser.user_id, {
+        display_name: editForm.display_name,
+        avatar_url: editForm.avatar_url || undefined,
+        trust_level: editForm.trust_level,
+      })
+      setUsers(prev => prev.map(u => u.user_id === res.user.user_id ? res.user : u))
+      toast.success('用户信息已更新')
+      setShowEditModal(false)
+      setEditingUser(null)
+    } catch { /* api 层已 toast */ }
+  }
 
-  // 切换用户状态
-  const handleToggleStatus = async (user: UserWithStatus) => {
-    const isActive = user.is_active !== false;
-    const action = isActive ? '禁用' : '启用';
-    
+  // 启用/禁用用户
+  const handleToggleStatus = async (user: User) => {
+    const newActive = !(user.is_active !== false)
+    const action = newActive ? '启用' : '禁用'
+    if (!confirm(`确定${action}用户「${user.display_name}」？`)) return
     try {
-      await adminApi.toggleUserStatus(user.user_id, !isActive);
-      message.success(`用户已${action}`);
-      loadUsers();
-    } catch (error) {
-      console.error(`${action}用户失败:`, error);
-      message.error(`${action}用户失败`);
-    }
-  };
+      setTogglingId(user.user_id)
+      const res = await adminApi.toggleUserStatus(user.user_id, newActive)
+      setUsers(prev => prev.map(u => u.user_id === user.user_id ? { ...u, is_active: res.is_active } : u))
+      toast.success(res.message || `已${action}用户`)
+    } catch { /* api 层已 toast */ } finally { setTogglingId(null) }
+  }
 
-  // 重置密码
-  const handleResetPassword = (user: UserWithStatus) => {
-    setCurrentUser(user);
-    setNewPassword('');
-    setResetPasswordModalVisible(true);
-  };
-
-  const handleResetPasswordConfirm = async () => {
-    if (!currentUser) return;
-    
+  const handleResetPassword = async (user: User) => {
+    if (!confirm(`确定重置「${user.display_name}」的密码？`)) return
     try {
-      const res = await adminApi.resetPassword(
-        currentUser.user_id,
-        newPassword || undefined
-      );
-      
-      Modal.info({
-        title: '密码重置成功',
-        content: (
-          <div>
-            <p>用户：<Text strong>{currentUser.username}</Text></p>
-            <p>新密码：<Text strong copyable>{res.new_password}</Text></p>
-            <p style={{ color: '#ff4d4f', marginTop: 16 }}>
-              ⚠️ 请复制密码并告知用户！
-            </p>
-          </div>
-        ),
-        width: 500,
-      });
-      
-      setResetPasswordModalVisible(false);
-      setNewPassword('');
-    } catch (error) {
-      console.error('重置密码失败:', error);
-      message.error('重置密码失败');
-    }
-  };
+      const res = await adminApi.resetPassword(user.user_id)
+      toast.success(`密码已重置为：${res.new_password}`)
+    } catch { /* api 层已 toast */ }
+  }
 
-  // 删除用户
-  const handleDelete = async (user: UserWithStatus) => {
+  const handleDelete = async (user: User) => {
+    if (!confirm(`确定删除用户「${user.display_name}」？此操作不可恢复。`)) return
     try {
-      await adminApi.deleteUser(user.user_id);
-      message.success('用户已删除');
-      loadUsers();
-    } catch (error) {
-      console.error('删除用户失败:', error);
-      message.error('删除用户失败');
-    }
-  };
+      await adminApi.deleteUser(user.user_id)
+      setUsers(prev => prev.filter(u => u.user_id !== user.user_id))
+      toast.success('用户已删除')
+    } catch { /* api 层已 toast */ }
+  }
 
-  const isMobile = window.innerWidth <= 768;
-
-  // 表格列定义
-  const columns = [
-    {
-      title: '用户名',
-      dataIndex: 'username',
-      key: 'username',
-      width: 150,
-      render: (text: string) => (
-        <Space>
-          <UserOutlined style={{ color: '#1890ff' }} />
-          <Text strong>{text}</Text>
-        </Space>
-      ),
-    },
-    {
-      title: '显示名称',
-      dataIndex: 'display_name',
-      key: 'display_name',
-      width: 150,
-    },
-    {
-      title: '状态',
-      dataIndex: 'is_active',
-      key: 'is_active',
-      width: 100,
-      render: (isActive: boolean) => (
-        <Badge
-          status={isActive !== false ? 'success' : 'error'}
-          text={isActive !== false ? '正常' : '已禁用'}
-        />
-      ),
-    },
-    {
-      title: '角色',
-      dataIndex: 'is_admin',
-      key: 'is_admin',
-      width: 100,
-      render: (isAdmin: boolean) => (
-        <Tag color={isAdmin ? 'gold' : 'blue'}>
-          {isAdmin ? '👑 管理员' : '普通用户'}
-        </Tag>
-      ),
-    },
-    {
-      title: '信任等级',
-      dataIndex: 'trust_level',
-      key: 'trust_level',
-      width: 100,
-      render: (level: number) => (
-        <Tag color={level === -1 ? 'default' : level >= 5 ? 'green' : 'blue'}>
-          {level === -1 ? '已禁用' : `Level ${level}`}
-        </Tag>
-      ),
-    },
-    {
-      title: '创建时间',
-      dataIndex: 'created_at',
-      key: 'created_at',
-      width: 180,
-      render: (date: string) => date ? new Date(date).toLocaleString('zh-CN') : '-',
-    },
-    {
-      title: '最后登录',
-      dataIndex: 'last_login',
-      key: 'last_login',
-      width: 180,
-      render: (date: string) => date ? new Date(date).toLocaleString('zh-CN') : '从未登录',
-    },
-    {
-      title: '操作',
-      key: 'action',
-      width: isMobile ? 80 : 300,
-      fixed: 'right' as const,
-      render: (_: any, record: UserWithStatus) => {
-        const isActive = record.is_active !== false;
-        
-        // 移动端：使用下拉菜单
-        if (isMobile) {
-          const menuItems = [
-            {
-              key: 'edit',
-              label: '编辑用户',
-              icon: <EditOutlined />,
-              onClick: () => handleEdit(record),
-            },
-            {
-              key: 'reset',
-              label: '重置密码',
-              icon: <KeyOutlined />,
-              onClick: () => handleResetPassword(record),
-            },
-            {
-              key: 'toggle',
-              label: isActive ? '禁用用户' : '启用用户',
-              icon: isActive ? <StopOutlined /> : <CheckCircleOutlined />,
-              danger: isActive,
-              onClick: () => {
-                Modal.confirm({
-                  title: `确定${isActive ? '禁用' : '启用'}该用户吗？`,
-                  onOk: () => handleToggleStatus(record),
-                  okText: '确定',
-                  cancelText: '取消',
-                });
-              },
-            },
-            ...(!record.is_admin ? [{
-              key: 'delete',
-              label: '删除用户',
-              icon: <DeleteOutlined />,
-              danger: true,
-              onClick: () => {
-                Modal.confirm({
-                  title: '确定删除该用户吗？此操作不可恢复！',
-                  onOk: () => handleDelete(record),
-                  okText: '确定',
-                  cancelText: '取消',
-                  okButtonProps: { danger: true },
-                });
-              },
-            }] : []),
-          ];
-
-          return (
-            <Dropdown menu={{ items: menuItems }} trigger={['click']}>
-              <Button type="text" icon={<MoreOutlined />} />
-            </Dropdown>
-          );
-        }
-        
-        // 桌面端：保持原有按钮样式
-        return (
-          <Space size="small">
-            <Tooltip title="编辑用户">
-              <Button
-                type="link"
-                size="small"
-                icon={<EditOutlined />}
-                onClick={() => handleEdit(record)}
-              >
-                编辑
-              </Button>
-            </Tooltip>
-            
-            <Tooltip title="重置密码">
-              <Button
-                type="link"
-                size="small"
-                icon={<KeyOutlined />}
-                onClick={() => handleResetPassword(record)}
-              >
-                重置密码
-              </Button>
-            </Tooltip>
-            
-            <Popconfirm
-              title={`确定${isActive ? '禁用' : '启用'}该用户吗？`}
-              onConfirm={() => handleToggleStatus(record)}
-              okText="确定"
-              cancelText="取消"
-            >
-              <Tooltip title={isActive ? '禁用用户' : '启用用户'}>
-                <Button
-                  type="link"
-                  size="small"
-                  danger={isActive}
-                  icon={isActive ? <StopOutlined /> : <CheckCircleOutlined />}
-                >
-                  {isActive ? '禁用' : '启用'}
-                </Button>
-              </Tooltip>
-            </Popconfirm>
-            
-            {!record.is_admin && (
-              <Popconfirm
-                title="确定删除该用户吗？此操作不可恢复！"
-                onConfirm={() => handleDelete(record)}
-                okText="确定"
-                cancelText="取消"
-                okButtonProps={{ danger: true }}
-              >
-                <Tooltip title="删除用户">
-                  <Button
-                    type="link"
-                    size="small"
-                    danger
-                    icon={<DeleteOutlined />}
-                  >
-                    删除
-                  </Button>
-                </Tooltip>
-              </Popconfirm>
-            )}
-          </Space>
-        );
-      },
-    },
-  ];
+  const inputCls = 'w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors'
 
   return (
-    <div style={{
-      height: '100vh',
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-      padding: isMobile ? '20px 16px' : '40px 24px',
-      display: 'flex',
-      flexDirection: 'column',
-      overflow: 'hidden',
-    }}>
-      <div style={{
-        maxWidth: 1400,
-        margin: '0 auto',
-        width: '100%',
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-      }}>
-        {/* 顶部导航卡片 */}
-        <Card
-          variant="borderless"
-          style={{
-            background: 'rgba(255, 255, 255, 0.95)',
-            borderRadius: isMobile ? 12 : 16,
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
-            marginBottom: isMobile ? 20 : 24,
-          }}
-        >
-          <Row align="middle" justify="space-between" gutter={[16, 16]}>
-            <Col xs={24} sm={12}>
-              <Space direction="vertical" size={4}>
-                <Title level={isMobile ? 3 : 2} style={{ margin: 0 }}>
-                  <TeamOutlined style={{ color: '#fa8c16', marginRight: 8 }} />
-                  用户管理
-                </Title>
-                <Text type="secondary" style={{ fontSize: isMobile ? 12 : 14 }}>
-                  管理系统用户和权限
-                </Text>
-              </Space>
-            </Col>
-            <Col xs={24} sm={12}>
-              <Space size={12} style={{ display: 'flex', justifyContent: isMobile ? 'flex-start' : 'flex-end', width: '100%' }}>
-                <Button
-                  icon={<ArrowLeftOutlined />}
-                  onClick={() => navigate('/')}
-                  style={{
-                    borderRadius: 8,
-                    borderColor: '#d9d9d9',
-                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
-                    transition: 'all 0.3s ease'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.borderColor = '#667eea';
-                    e.currentTarget.style.color = '#667eea';
-                    e.currentTarget.style.boxShadow = '0 2px 12px rgba(102, 126, 234, 0.3)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.borderColor = '#d9d9d9';
-                    e.currentTarget.style.color = 'rgba(0, 0, 0, 0.88)';
-                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.08)';
-                  }}
-                >
-                  返回主页
-                </Button>
-                <Button
-                  type="primary"
-                  icon={<PlusOutlined />}
-                  onClick={() => setModalVisible(true)}
-                  style={{
-                    borderRadius: 8,
-                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                    border: 'none',
-                    boxShadow: '0 2px 8px rgba(102, 126, 234, 0.4)'
-                  }}
-                >
-                  添加用户
-                </Button>
-                <UserMenu />
-              </Space>
-            </Col>
-          </Row>
-        </Card>
-
-        {/* 主内容卡片 */}
-        <Card
-          variant="borderless"
-          style={{
-            background: 'rgba(255, 255, 255, 0.95)',
-            borderRadius: isMobile ? 12 : 16,
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
-            flex: 1,
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-          }}
-          styles={{
-            body: {
-              padding: 0,
-              height: '100%',
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
-            }
-          }}
-        >
-          {/* 搜索栏 */}
-          <div style={{
-            padding: '16px 24px 0 24px',
-            borderBottom: '1px solid #f0f0f0',
-          }}>
-            <Input
-              placeholder="搜索用户名、显示名称或用户ID"
-              prefix={<SearchOutlined style={{ color: '#999' }} />}
-              value={searchText}
-              onChange={(e) => {
-                setSearchText(e.target.value);
-                setCurrentPage(1); // 搜索时重置到第一页
-              }}
-              allowClear
-              style={{
-                borderRadius: 8,
-              }}
-            />
-          </div>
-
-          {/* 表格区域 */}
-          <div style={{
-            flex: 1,
-            overflow: 'auto',
-            padding: '16px 24px 0 24px',
-          }}>
-            <Table
-              columns={columns}
-              dataSource={filteredUsers.slice((currentPage - 1) * pageSize, currentPage * pageSize)}
-              rowKey="user_id"
-              loading={loading}
-              scroll={{
-                x: 1400,
-                y: 'calc(100vh - 410px)'
-              }}
-              pagination={false}
-            />
-          </div>
-          
-          {/* 固定分页控件 */}
-          <div style={{
-            padding: '16px 24px 24px 24px',
-            borderTop: '1px solid #f0f0f0',
-            background: 'rgba(255, 255, 255, 0.95)',
-            display: 'flex',
-            justifyContent: 'center',
-          }}>
-            <Pagination
-              current={currentPage}
-              pageSize={pageSize}
-              total={filteredUsers.length}
-              showSizeChanger
-              showTotal={(total) => `共 ${total} 个用户${searchText ? ' (已过滤)' : ''}`}
-              pageSizeOptions={[20, 50, 100]}
-              onChange={(page, size) => {
-                setCurrentPage(page);
-                setPageSize(size);
-              }}
-              onShowSizeChange={(_current, size) => {
-                setCurrentPage(1);
-                setPageSize(size);
-              }}
-            />
-          </div>
-        </Card>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-bold text-content">用户管理 ({total})</h1>
+        <button onClick={() => setShowCreateModal(true)} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5">
+          <Plus className="w-4 h-4" />
+          添加用户
+        </button>
       </div>
 
-      {/* 添加用户对话框 */}
-      <Modal
-        title={<span><PlusOutlined style={{ marginRight: 8 }} />添加用户</span>}
-        open={modalVisible}
-        onCancel={() => {
-          setModalVisible(false);
-          form.resetFields();
-        }}
-        onOk={() => form.submit()}
-        width={isMobile ? '90%' : 600}
-        centered
-        okText="创建"
-        cancelText="取消"
-      >
-        <Form
-          form={form}
-          layout="vertical"
-          onFinish={handleCreate}
-        >
-          <Form.Item
-            label="用户名"
-            name="username"
-            rules={[
-              { required: true, message: '请输入用户名' },
-              { min: 3, max: 20, message: '用户名长度3-20位' },
-              { pattern: /^[a-zA-Z0-9_]+$/, message: '只能包含字母、数字和下划线' },
-            ]}
-          >
-            <Input placeholder="请输入用户名" />
-          </Form.Item>
-
-          <Form.Item
-            label="显示名称"
-            name="display_name"
-            rules={[
-              { required: true, message: '请输入显示名称' },
-              { min: 2, max: 50, message: '显示名称长度2-50位' },
-            ]}
-          >
-            <Input placeholder="请输入显示名称" />
-          </Form.Item>
-
-          <Form.Item
-            label="初始密码"
-            name="password"
-            extra="留空则自动生成 username@666"
-            rules={[
-              { min: 6, message: '密码长度至少6位' },
-            ]}
-          >
-            <Input.Password placeholder="留空则自动生成" />
-          </Form.Item>
-
-          <Form.Item
-            label="头像URL"
-            name="avatar_url"
-          >
-            <Input placeholder="请输入头像URL（可选）" />
-          </Form.Item>
-
-          <Form.Item
-            label="信任等级"
-            name="trust_level"
-            initialValue={0}
-          >
-            <InputNumber min={0} max={9} style={{ width: '100%' }} />
-          </Form.Item>
-
-          <Form.Item
-            label="设为管理员"
-            name="is_admin"
-            valuePropName="checked"
-            initialValue={false}
-          >
-            <Switch
-              size={isMobile ? 'small' : 'default'}
-              style={{
-                flexShrink: 0,
-                height: isMobile ? 16 : 22,
-                minHeight: isMobile ? 16 : 22,
-                lineHeight: isMobile ? '16px' : '22px'
-              }}
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      {/* 编辑用户对话框 */}
-      <Modal
-        title={<span><EditOutlined style={{ marginRight: 8 }} />编辑用户</span>}
-        open={editModalVisible}
-        onCancel={() => {
-          setEditModalVisible(false);
-          editForm.resetFields();
-        }}
-        onOk={() => editForm.submit()}
-        width={isMobile ? '90%' : 600}
-        centered
-        okText="保存"
-        cancelText="取消"
-      >
-        <Form
-          form={editForm}
-          layout="vertical"
-          onFinish={handleUpdate}
-        >
-          <Form.Item
-            label="显示名称"
-            name="display_name"
-            rules={[
-              { required: true, message: '请输入显示名称' },
-              { min: 2, max: 50, message: '显示名称长度2-50位' },
-            ]}
-          >
-            <Input placeholder="请输入显示名称" />
-          </Form.Item>
-
-          <Form.Item
-            label="头像URL"
-            name="avatar_url"
-          >
-            <Input placeholder="请输入头像URL（可选）" />
-          </Form.Item>
-
-          <Form.Item
-            label="信任等级"
-            name="trust_level"
-          >
-            <InputNumber min={0} max={9} style={{ width: '100%' }} />
-          </Form.Item>
-
-          <Form.Item
-            label="设为管理员"
-            name="is_admin"
-            valuePropName="checked"
-          >
-            <Switch
-              size={isMobile ? 'small' : 'default'}
-              style={{
-                flexShrink: 0,
-                height: isMobile ? 16 : 22,
-                minHeight: isMobile ? 16 : 22,
-                lineHeight: isMobile ? '16px' : '22px'
-              }}
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      {/* 重置密码对话框 */}
-      <Modal
-        title={<span><KeyOutlined style={{ marginRight: 8 }} />重置密码</span>}
-        open={resetPasswordModalVisible}
-        onCancel={() => {
-          setResetPasswordModalVisible(false);
-          setNewPassword('');
-        }}
-        onOk={handleResetPasswordConfirm}
-        width={isMobile ? '90%' : 500}
-        centered
-        okText="确认重置"
-        cancelText="取消"
-      >
-        <div style={{ marginBottom: 16 }}>
-          <Text>用户：<Text strong>{currentUser?.username}</Text></Text>
+      {loading ? (
+        <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-content-secondary" /></div>
+      ) : users.length === 0 ? (
+        <div className="text-center py-12 text-content-secondary text-sm">
+          <Users className="w-8 h-8 mx-auto mb-2 opacity-40" />
+          暂无用户
         </div>
-        <Form layout="vertical">
-          <Form.Item
-            label="新密码"
-            extra="留空则重置为默认密码 username@666"
-          >
-            <Input.Password
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              placeholder="留空则使用默认密码"
-            />
-          </Form.Item>
-        </Form>
-      </Modal>
+      ) : (
+        <div className="bg-white border border-surface-border rounded-card overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-surface-border bg-surface-hover/50">
+                  <th className="text-left px-4 py-3 text-content-secondary font-medium">用户</th>
+                  <th className="text-left px-4 py-3 text-content-secondary font-medium">用户名</th>
+                  <th className="text-left px-4 py-3 text-content-secondary font-medium">信任等级</th>
+                  <th className="text-left px-4 py-3 text-content-secondary font-medium">角色</th>
+                  <th className="text-left px-4 py-3 text-content-secondary font-medium">状态</th>
+                  <th className="text-left px-4 py-3 text-content-secondary font-medium">最后登录</th>
+                  <th className="text-right px-4 py-3 text-content-secondary font-medium">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map(user => {
+                  const isActive = user.is_active !== false
+                  return (
+                    <tr key={user.user_id} className={`border-b border-surface-border last:border-0 hover:bg-surface-hover/30 transition-colors ${!isActive ? 'opacity-60' : ''}`}>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          {user.avatar_url ? (
+                            <img src={user.avatar_url} alt="" className="w-7 h-7 rounded-full" />
+                          ) : (
+                            <div className="w-7 h-7 rounded-full bg-brand/10 flex items-center justify-center text-xs text-brand font-medium">
+                              {user.display_name[0]}
+                            </div>
+                          )}
+                          <span className="text-content">{user.display_name}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-content-secondary">{user.username}</td>
+                      <td className="px-4 py-3 text-content-secondary">{user.trust_level}</td>
+                      <td className="px-4 py-3">
+                        {user.is_admin ? (
+                          <span className="inline-flex items-center gap-1 text-xs text-brand"><Shield className="w-3 h-3" />管理员</span>
+                        ) : (
+                          <span className="text-xs text-content-secondary">普通用户</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {isActive ? (
+                          <span className="inline-flex items-center gap-1 text-xs text-green-600"><UserCheck className="w-3 h-3" />正常</span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-xs text-red-500"><UserX className="w-3 h-3" />已禁用</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-content-secondary text-xs">
+                        {user.last_login ? new Date(user.last_login).toLocaleString('zh-CN') : '-'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex justify-end gap-1">
+                          <button
+                            onClick={() => openEdit(user)}
+                            title="编辑"
+                            className="p-1.5 rounded hover:bg-surface-hover text-content-secondary transition-colors"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleToggleStatus(user)}
+                            disabled={togglingId === user.user_id}
+                            title={isActive ? '禁用用户' : '启用用户'}
+                            className={`p-1.5 rounded transition-colors disabled:opacity-50 ${isActive ? 'hover:bg-orange-50 text-content-secondary hover:text-orange-500' : 'hover:bg-green-50 text-content-secondary hover:text-green-600'}`}
+                          >
+                            {togglingId === user.user_id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : isActive ? (
+                              <ShieldOff className="w-3.5 h-3.5" />
+                            ) : (
+                              <UserCheck className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                          <button onClick={() => handleResetPassword(user)} title="重置密码" className="p-1.5 rounded hover:bg-surface-hover text-content-secondary transition-colors"><KeyRound className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => handleDelete(user)} title="删除" className="p-1.5 rounded hover:bg-red-50 text-content-secondary hover:text-red-500 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* 创建用户弹窗 */}
+      {showCreateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowCreateModal(false)}>
+          <div className="bg-white rounded-modal shadow-xl p-6 w-full max-w-md mx-4 space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold text-content">添加用户</h2>
+              <button onClick={() => setShowCreateModal(false)} className="p-1 rounded hover:bg-surface-hover text-content-secondary"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">用户名</label>
+                <input value={createForm.username} onChange={e => setCreateForm(f => ({ ...f, username: e.target.value }))} className={inputCls} />
+              </div>
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">显示名</label>
+                <input value={createForm.display_name} onChange={e => setCreateForm(f => ({ ...f, display_name: e.target.value }))} className={inputCls} />
+              </div>
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">密码（留空自动生成）</label>
+                <input type="password" value={createForm.password} onChange={e => setCreateForm(f => ({ ...f, password: e.target.value }))} className={inputCls} />
+              </div>
+              <label className="flex items-center gap-2 text-sm text-content-secondary cursor-pointer">
+                <input type="checkbox" checked={createForm.is_admin} onChange={e => setCreateForm(f => ({ ...f, is_admin: e.target.checked }))} className="rounded" />
+                设为管理员
+              </label>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => setShowCreateModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
+              <button onClick={handleCreate} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">创建</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 编辑用户弹窗 */}
+      {showEditModal && editingUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => { setShowEditModal(false); setEditingUser(null) }}>
+          <div className="bg-white rounded-modal shadow-xl p-6 w-full max-w-md mx-4 space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-bold text-content">编辑用户</h2>
+              <button onClick={() => { setShowEditModal(false); setEditingUser(null) }} className="p-1 rounded hover:bg-surface-hover text-content-secondary"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">用户名</label>
+                <input value={editingUser.username} disabled className={`${inputCls} bg-surface-hover/50 cursor-not-allowed`} />
+              </div>
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">显示名</label>
+                <input value={editForm.display_name} onChange={e => setEditForm(f => ({ ...f, display_name: e.target.value }))} className={inputCls} />
+              </div>
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">头像 URL</label>
+                <input value={editForm.avatar_url} onChange={e => setEditForm(f => ({ ...f, avatar_url: e.target.value }))} placeholder="https://..." className={inputCls} />
+              </div>
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">信任等级</label>
+                <input type="number" min={0} max={10} value={editForm.trust_level} onChange={e => setEditForm(f => ({ ...f, trust_level: parseInt(e.target.value) || 0 }))} className={inputCls} />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => { setShowEditModal(false); setEditingUser(null) }} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
+              <button onClick={handleUpdate} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">保存</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
-  );
+  )
 }

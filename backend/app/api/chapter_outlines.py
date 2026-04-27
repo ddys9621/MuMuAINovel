@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, func, distinct
 from typing import List, Optional
+from pydantic import BaseModel
 import json
 
 from app.database import get_db
@@ -14,8 +15,8 @@ from app.models import (
     ChapterOutlinePlotLineLink, PlotCardChapterOutlineLink, PlotCardPlotLineLink
 )
 from app.schemas.chapter_outline import (
-    ChapterOutlineCreate, ChapterOutlineUpdate, ChapterOutlineResponse, 
-    ChapterOutlineGenerateRequest, ChapterOutlineReorderRequest, 
+    ChapterOutlineCreate, ChapterOutlineUpdate, ChapterOutlineResponse,
+    ChapterOutlineGenerateRequest, ChapterOutlineReorderRequest,
     ChapterOutlineListResponse, ChapterOutlineBatchCreateRequest
 )
 from app.schemas.link_schemas import (
@@ -27,7 +28,6 @@ from app.schemas.link_schemas import (
 )
 from app.services.ai_service import AIService
 from app.api.settings import get_user_ai_service
-from app.logger import get_logger
 
 router = APIRouter(prefix="/chapter-outlines", tags=["章纲"])
 
@@ -164,7 +164,7 @@ async def get_chapter_outline(outline_id: str, db: AsyncSession = Depends(get_db
     if not outline:
         raise HTTPException(status_code=404, detail="章纲不存在")
     
-    # 处理 JSON 字段
+    db.expunge(outline)
     if outline.key_events:
         try:
             outline.key_events = json.loads(outline.key_events)
@@ -253,7 +253,7 @@ async def create_chapter_outline(outline_data: ChapterOutlineCreate, db: AsyncSe
         db.add(link)
         await db.commit()
     
-    # 处理返回的 JSON 字段
+    db.expunge(outline)
     if outline.key_events:
         try:
             outline.key_events = json.loads(outline.key_events)
@@ -317,7 +317,7 @@ async def update_chapter_outline(
         await db.commit()
         await db.refresh(outline)
     
-    # 处理返回的 JSON 字段
+    db.expunge(outline)
     if outline.key_events:
         try:
             outline.key_events = json.loads(outline.key_events)
@@ -452,9 +452,12 @@ async def batch_create_chapter_outlines(
             db.add(link)
         await db.commit()
 
-    # 刷新并处理返回数据
+    # 刷新并处理返回数据（脱离会话后再修改，避免 autoflush 类型错误）
     for outline in created_outlines:
         await db.refresh(outline)
+    
+    for outline in created_outlines:
+        db.expunge(outline)
         
         if outline.key_events:
             try:
@@ -513,8 +516,8 @@ async def generate_chapter_outlines(
             user_id=getattr(request.state, 'user_id', None)
         )
         
-        # 处理返回的 JSON 字段
         for outline in outlines:
+            db.expunge(outline)
             if outline.key_events:
                 try:
                     outline.key_events = json.loads(outline.key_events)
@@ -952,12 +955,16 @@ async def unlink_plot_cards_from_chapter_outline(
     }
 
 
+class UpdatePlotCardUsageRequest(BaseModel):
+    usage_type: str
+    usage_notes: Optional[str] = None
+
+
 @router.put("/{outline_id}/plot-cards/{card_id}/usage")
 async def update_plot_card_usage(
     outline_id: str,
     card_id: str,
-    usage_type: str,
-    usage_notes: Optional[str] = None,
+    usage_data: UpdatePlotCardUsageRequest,
     db: AsyncSession = Depends(get_db)
 ):
     """更新剧情卡片在章纲中的使用状态"""
@@ -981,7 +988,7 @@ async def update_plot_card_usage(
             PlotCardChapterOutlineLink.chapter_outline_id == outline_id,
             PlotCardChapterOutlineLink.plot_card_id == card_id
         )
-        .values(usage_type=usage_type, usage_notes=usage_notes)
+        .values(usage_type=usage_data.usage_type, usage_notes=usage_data.usage_notes)
     )
     
     await db.commit()

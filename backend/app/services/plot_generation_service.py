@@ -12,6 +12,7 @@ from app.services.plot_prompts import PlotPromptService
 from app.services.ai_service import AIService
 from app.services.world_rule_service import WorldRuleService
 from app.logger import get_logger
+from app.utils.plot_line_types import normalize_plot_line_type
 
 logger = get_logger(__name__)
 
@@ -1083,6 +1084,8 @@ class PlotGenerationService:
         """生成剧情线"""
         
         # 获取项目信息
+        line_type = normalize_plot_line_type(line_type)
+
         project_result = await db.execute(select(Project).where(Project.id == project_id))
         project = project_result.scalar_one_or_none()
         if not project:
@@ -1281,7 +1284,10 @@ class PlotGenerationService:
                     "index": i + 1,
                     "title": line_data.get("title", f"剧情线 {i+1}"),
                     "description": line_data.get("description", ""),
-                    "line_type": line_data.get("line_type", line_type),
+                    "line_type": normalize_plot_line_type(
+                        line_data.get("line_type", line_type),
+                        default=line_type
+                    ),
                     "plot_cards": line_data.get("plot_cards", []),
                     "estimated_chapters": normalized_estimated,
                 })
@@ -1381,7 +1387,7 @@ class PlotGenerationService:
                     story_outline_id=outline_id,
                     title=line_data["title"],
                     description=line_data["description"],
-                    line_type=line_data["line_type"],
+                    line_type=normalize_plot_line_type(line_data["line_type"], default=line_type),
                     order_index=base_order_index + line_index,
                     timeline_data=timeline_data_json,
                     estimated_chapters=estimated_chapters
@@ -1604,7 +1610,7 @@ class PlotGenerationService:
             # 如果没有设置,用默认算法估算
             if not estimated_chapters or estimated_chapters < 1:
                 beats_count = len(plot_line_beats)
-                line_type = plot_line.line_type or "main"
+                line_type = normalize_plot_line_type(plot_line.line_type or "main")
 
                 if line_type == "main":
                     estimated_chapters = max(30, beats_count * 3)

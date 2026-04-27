@@ -1,438 +1,177 @@
-import { useState, useEffect } from 'react';
-import {
-  Button,
-  Modal,
-  Form,
-  Input,
-  message,
-  Card,
-  Space,
-  Tag,
-  Popconfirm,
-  Empty,
-  Typography,
-  Row,
-  Col,
-  Tooltip
-} from 'antd';
-import {
-  PlusOutlined,
-  EditOutlined,
-  DeleteOutlined,
-  StarOutlined,
-  StarFilled
-} from '@ant-design/icons';
-import { useStore } from '../store';
-import { writingStyleApi } from '../services/api';
-import type { WritingStyle, WritingStyleCreate, WritingStyleUpdate } from '../types';
-
-const { TextArea } = Input;
-const { Text, Paragraph } = Typography;
+import { useEffect, useState, useCallback } from 'react'
+import { Plus, Pencil, Trash2, Star, Palette, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
+import { useStore } from '@/store/index'
+import { writingStyleApi } from '@/services/api'
+import type { WritingStyle, PresetStyle, WritingStyleCreate, WritingStyleUpdate } from '@/types'
 
 export default function WritingStyles() {
-  const { currentProject } = useStore();
-  const [styles, setStyles] = useState<WritingStyle[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [editingStyle, setEditingStyle] = useState<WritingStyle | null>(null);
-  const [createForm] = Form.useForm();
-  const [editForm] = Form.useForm();
+  const { currentProject } = useStore()
+  const [styles, setStyles] = useState<WritingStyle[]>([])
+  const [presets, setPresets] = useState<PresetStyle[]>([])
+  const [loading, setLoading] = useState(false)
+  const [showModal, setShowModal] = useState(false)
+  const [editingStyle, setEditingStyle] = useState<WritingStyle | null>(null)
+  const [form, setForm] = useState({ name: '', description: '', prompt_content: '', style_type: 'custom' as 'preset' | 'custom', preset_id: '' })
 
-  const isMobile = window.innerWidth <= 768;
-  
-  // 卡片网格配置
-  const gridConfig = {
-    gutter: isMobile ? 8 : 16, // 卡片之间的间距
-    xs: 24,
-    sm: 24,
-    md: 12,
-    lg: 8,
-    xl: 6,
-  };
-
-  // 加载项目风格
-  useEffect(() => {
-    if (currentProject?.id) {
-      loadProjectStyles();
-    }
-  }, [currentProject?.id]);
-
-  const loadProjectStyles = async () => {
-    if (!currentProject?.id) return;
-    
+  const fetchData = useCallback(async () => {
+    if (!currentProject?.id) return
     try {
-      setLoading(true);
-      const response = await writingStyleApi.getProjectStyles(currentProject.id);
-      // 对风格列表进行排序：默认风格优先，然后按原有顺序
-      const sortedStyles = (response.styles || []).sort((a, b) => {
-        // 默认风格排在前面
-        if (a.is_default && !b.is_default) return -1;
-        if (!a.is_default && b.is_default) return 1;
-        return 0;
-      });
-      setStyles(sortedStyles);
-    } catch {
-      message.error('加载风格列表失败');
-    } finally {
-      setLoading(false);
+      setLoading(true)
+      const [stylesRes, presetsRes] = await Promise.all([
+        writingStyleApi.getProjectStyles(currentProject.id),
+        writingStyleApi.getPresetStyles(),
+      ])
+      setStyles(stylesRes.styles)
+      setPresets(presetsRes)
+    } catch { /* api 层已 toast */ } finally { setLoading(false) }
+  }, [currentProject?.id])
+
+  useEffect(() => { fetchData() }, [fetchData])
+
+  const openCreate = () => {
+    setEditingStyle(null)
+    setForm({ name: '', description: '', prompt_content: '', style_type: 'custom', preset_id: '' })
+    setShowModal(true)
+  }
+
+  const openEdit = (s: WritingStyle) => {
+    setEditingStyle(s)
+    setForm({ name: s.name, description: s.description || '', prompt_content: s.prompt_content, style_type: s.style_type, preset_id: s.preset_id || '' })
+    setShowModal(true)
+  }
+
+  const handlePresetSelect = (presetId: string) => {
+    const preset = presets.find(p => p.id === presetId)
+    if (preset) {
+      setForm(f => ({ ...f, preset_id: presetId, name: preset.name, description: preset.description, prompt_content: preset.prompt_content, style_type: 'preset' }))
     }
-  };
+  }
 
-  const handleCreate = async (values: { name: string; description?: string; prompt_content: string }) => {
-    if (!currentProject?.id) return;
-
+  const handleSubmit = async () => {
+    if (!currentProject?.id) return
+    if (!form.name.trim()) { toast.error('请填写名称'); return }
     try {
-      const createData: WritingStyleCreate = {
-        project_id: currentProject.id,
-        name: values.name,
-        style_type: 'custom',
-        description: values.description,
-        prompt_content: values.prompt_content,
-      };
+      if (editingStyle) {
+        const data: WritingStyleUpdate = { name: form.name, description: form.description, prompt_content: form.prompt_content }
+        const updated = await writingStyleApi.updateStyle(editingStyle.id, data)
+        setStyles(prev => prev.map(s => s.id === updated.id ? updated : s))
+        toast.success('风格已更新')
+      } else {
+        const data: WritingStyleCreate = { project_id: currentProject.id, name: form.name, description: form.description, prompt_content: form.prompt_content, style_type: form.style_type, preset_id: form.preset_id || undefined }
+        const created = await writingStyleApi.createStyle(data)
+        setStyles(prev => [...prev, created])
+        toast.success('风格已创建')
+      }
+      setShowModal(false)
+    } catch { /* api 层已 toast */ }
+  }
 
-      await writingStyleApi.createStyle(createData);
-      message.success('创建成功');
-      setIsCreateModalOpen(false);
-      createForm.resetFields();
-      await loadProjectStyles();
-    } catch {
-      message.error('创建失败');
-    }
-  };
-
-  const handleEdit = (style: WritingStyle) => {
-    setEditingStyle(style);
-    editForm.setFieldsValue({
-      name: style.name,
-      description: style.description,
-      prompt_content: style.prompt_content,
-    });
-    setIsEditModalOpen(true);
-  };
-
-  const handleUpdate = async (values: WritingStyleUpdate) => {
-    if (!editingStyle) return;
-
+  const handleDelete = async (s: WritingStyle) => {
+    if (!confirm(`确定删除「${s.name}」？`)) return
     try {
-      await writingStyleApi.updateStyle(editingStyle.id, values);
-      message.success('更新成功');
-      setIsEditModalOpen(false);
-      editForm.resetFields();
-      setEditingStyle(null);
-      await loadProjectStyles();
-    } catch {
-      message.error('更新失败');
-    }
-  };
+      await writingStyleApi.deleteStyle(s.id)
+      setStyles(prev => prev.filter(x => x.id !== s.id))
+      toast.success('风格已删除')
+    } catch { /* api 层已 toast */ }
+  }
 
-  const handleDelete = async (styleId: number) => {
+  const handleSetDefault = async (s: WritingStyle) => {
+    if (!currentProject?.id) return
     try {
-      await writingStyleApi.deleteStyle(styleId);
-      message.success('删除成功');
-      await loadProjectStyles();
-    } catch {
-      message.error('删除失败');
-    }
-  };
-
-  const handleSetDefault = async (styleId: number) => {
-    if (!currentProject?.id) return;
-    
-    try {
-      await writingStyleApi.setDefaultStyle(styleId, currentProject.id);
-      message.success('设置默认风格成功');
-      await loadProjectStyles();
-    } catch {
-      message.error('设置失败');
-    }
-  };
-
-  const showCreateModal = () => {
-    createForm.resetFields();
-    setIsCreateModalOpen(true);
-  };
-
-  if (!currentProject) return null;
-
-  const getStyleTypeColor = (styleType: string) => {
-    return styleType === 'preset' ? 'blue' : 'purple';
-  };
-
-  const getStyleTypeLabel = (styleType: string) => {
-    return styleType === 'preset' ? '预设' : '自定义';
-  };
+      await writingStyleApi.setDefaultStyle(s.id, currentProject.id)
+      setStyles(prev => prev.map(x => ({ ...x, is_default: x.id === s.id })))
+      toast.success(`已将「${s.name}」设为默认风格`)
+    } catch { /* api 层已 toast */ }
+  }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{
-        position: 'sticky',
-        top: 0,
-        zIndex: 10,
-        backgroundColor: '#fff',
-        padding: isMobile ? '12px 0' : '16px 0',
-        marginBottom: isMobile ? 12 : 16,
-        borderBottom: '1px solid #f0f0f0',
-        display: 'flex',
-        flexDirection: isMobile ? 'column' : 'row',
-        gap: isMobile ? 12 : 0,
-        justifyContent: 'space-between',
-        alignItems: isMobile ? 'stretch' : 'center'
-      }}>
-        <h2 style={{ margin: 0, fontSize: isMobile ? 18 : 24 }}>写作风格管理</h2>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={showCreateModal}
-          block={isMobile}
-        >
-          创建自定义风格
-        </Button>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-bold text-content">写作风格</h1>
+        <button onClick={openCreate} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5">
+          <Plus className="w-4 h-4" />
+          添加风格
+        </button>
       </div>
 
-      <div style={{ flex: 1, overflowY: 'auto' }}>
-        {styles.length === 0 ? (
-          <Empty description="暂无风格数据" />
-        ) : (
-          <Row
-            gutter={[0, gridConfig.gutter]}
-            style={{ marginLeft: 0, marginRight: 0 }}
-          >
-            {styles.map((style) => (
-              <Col
-                xs={gridConfig.xs}
-                sm={gridConfig.sm}
-                md={gridConfig.md}
-                lg={gridConfig.lg}
-                xl={gridConfig.xl}
-                key={style.id}
-                style={{
-                  paddingLeft: 0,
-                  paddingRight: gridConfig.gutter / 2,
-                  marginBottom: gridConfig.gutter
-                }}
-              >
-                <Card
-                  hoverable
-                  style={{
-                    height: '100%',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    borderRadius: 12,
-                    border: style.is_default ? '2px solid #1890ff' : '1px solid #f0f0f0',
-                  }}
-                  styles={{
-                    body: {
-                      flex: 1,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      padding: '16px',
-                    }
-                  }}
-                  actions={[
-                    <Tooltip key="default" title={style.is_default ? '当前默认' : '设为默认'}>
-                      <span
-                        onClick={() => !style.is_default && handleSetDefault(style.id)}
-                        style={{ cursor: style.is_default ? 'default' : 'pointer' }}
-                      >
-                        {style.is_default ? (
-                          <StarFilled style={{ color: '#faad14', fontSize: 18 }} />
-                        ) : (
-                          <StarOutlined style={{ fontSize: 18 }} />
-                        )}
-                      </span>
-                    </Tooltip>,
-                    <Tooltip key="edit" title={style.project_id === null ? '预设风格不可编辑' : '编辑'}>
-                      <EditOutlined
-                        onClick={() => style.project_id !== null && handleEdit(style)}
-                        style={{
-                          fontSize: 18,
-                          cursor: style.project_id === null ? 'not-allowed' : 'pointer',
-                          color: style.project_id === null ? '#ccc' : undefined
-                        }}
-                      />
-                    </Tooltip>,
-                    <Popconfirm
-                      key="delete"
-                      title="确定删除这个风格吗？"
-                      description={style.is_default ? '这是默认风格，删除后需要设置新的默认风格' : undefined}
-                      onConfirm={() => handleDelete(style.id)}
-                      okText="确定"
-                      cancelText="取消"
-                      disabled={style.project_id === null || styles.length === 1}
-                    >
-                      <Tooltip title={
-                        style.project_id === null
-                          ? '预设风格不可删除'
-                          : styles.length === 1
-                            ? '至少保留一个风格'
-                            : '删除'
-                      }>
-                        <DeleteOutlined
-                          style={{
-                            fontSize: 18,
-                            color: (style.project_id === null || styles.length === 1) ? '#ccc' : undefined,
-                            cursor: (style.project_id === null || styles.length === 1) ? 'not-allowed' : 'pointer'
-                          }}
-                        />
-                      </Tooltip>
-                    </Popconfirm>,
-                  ]}
-                >
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                    <Space style={{ marginBottom: 12 }} wrap>
-                      <Text strong style={{ fontSize: 16 }}>{style.name}</Text>
-                      <Tag color={getStyleTypeColor(style.style_type)}>
-                        {getStyleTypeLabel(style.style_type)}
-                      </Tag>
-                      {style.is_default && <Tag color="gold">默认</Tag>}
-                    </Space>
-                    
-                    {style.description && (
-                      <Paragraph
-                        type="secondary"
-                        style={{ fontSize: 13, marginBottom: 12 }}
-                        ellipsis={{ rows: 2, tooltip: style.description }}
-                      >
-                        {style.description}
-                      </Paragraph>
-                    )}
-                    
-                    <Paragraph
-                      type="secondary"
-                      style={{
-                        fontSize: 12,
-                        marginBottom: 0,
-                        backgroundColor: '#fafafa',
-                        padding: 8,
-                        borderRadius: 4,
-                        flex: 1,
-                        minHeight: 60,
-                      }}
-                      ellipsis={{ rows: 3, tooltip: style.prompt_content }}
-                    >
-                      {style.prompt_content}
-                    </Paragraph>
+      {loading ? (
+        <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-content-secondary" /></div>
+      ) : styles.length === 0 ? (
+        <div className="text-center py-12 text-content-secondary text-sm">
+          <Palette className="w-8 h-8 mx-auto mb-2 opacity-40" />
+          暂无风格，点击上方按钮添加
+        </div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {styles.map(s => (
+            <div key={s.id} className={`bg-white border rounded-card p-4 space-y-2 ${s.is_default ? 'border-brand' : 'border-surface-border'}`}>
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <h3 className="text-sm font-semibold text-content">{s.name}</h3>
+                    {s.is_default && <Star className="w-3.5 h-3.5 text-brand fill-brand" />}
                   </div>
-                </Card>
-              </Col>
-            ))}
-          </Row>
-        )}
-      </div>
+                  <span className="text-xs text-content-secondary">{s.style_type === 'preset' ? '预设' : '自定义'}</span>
+                </div>
+                <div className="flex gap-1 shrink-0">
+                  {!s.is_default && (
+                    <button onClick={() => handleSetDefault(s)} title="设为默认" className="p-1.5 rounded hover:bg-surface-hover text-content-secondary transition-colors"><Star className="w-3.5 h-3.5" /></button>
+                  )}
+                  <button onClick={() => openEdit(s)} className="p-1.5 rounded hover:bg-surface-hover text-content-secondary transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
+                  <button onClick={() => handleDelete(s)} className="p-1.5 rounded hover:bg-red-50 text-content-secondary hover:text-red-500 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                </div>
+              </div>
+              {s.description && <p className="text-xs text-content-secondary line-clamp-2">{s.description}</p>}
+              <p className="text-xs text-content-secondary/70 line-clamp-3 font-mono">{s.prompt_content}</p>
+            </div>
+          ))}
+        </div>
+      )}
 
-      {/* 创建自定义风格 Modal */}
-      <Modal
-        title="创建自定义风格"
-        open={isCreateModalOpen}
-        onCancel={() => {
-          setIsCreateModalOpen(false);
-          createForm.resetFields();
-        }}
-        footer={null}
-        centered
-        width={isMobile ? 'calc(100vw - 32px)' : 600}
-        style={isMobile ? { maxWidth: 'calc(100vw - 32px)', margin: '0 16px' } : undefined}
-      >
-        <Form
-          form={createForm}
-          layout="vertical"
-          onFinish={handleCreate}
-          style={{ marginTop: 16 }}
-        >
-          <Form.Item
-            label="风格名称"
-            name="name"
-            rules={[{ required: true, message: '请输入风格名称' }]}
-          >
-            <Input placeholder="如：武侠风、科幻风" />
-          </Form.Item>
-          
-          <Form.Item label="风格描述" name="description">
-            <TextArea rows={2} placeholder="简要描述这个风格的特点..." />
-          </Form.Item>
-          
-          <Form.Item
-            label="提示词内容"
-            name="prompt_content"
-            rules={[{ required: true, message: '请输入提示词内容' }]}
-          >
-            <TextArea
-              rows={6}
-              placeholder="输入风格的提示词，用于引导AI生成符合该风格的内容..."
-            />
-          </Form.Item>
-          
-          <Form.Item>
-            <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-              <Button onClick={() => {
-                setIsCreateModalOpen(false);
-                createForm.resetFields();
-              }}>
-                取消
-              </Button>
-              <Button type="primary" htmlType="submit" loading={loading}>
-                创建
-              </Button>
-            </Space>
-          </Form.Item>
-        </Form>
-      </Modal>
+      {/* 弹窗 */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowModal(false)}>
+          <div className="bg-white rounded-card p-6 w-full max-w-lg mx-4 space-y-4 max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-bold text-content">{editingStyle ? '编辑风格' : '添加风格'}</h2>
 
-      {/* 编辑风格 Modal */}
-      <Modal
-        title="编辑写作风格"
-        open={isEditModalOpen}
-        onCancel={() => {
-          setIsEditModalOpen(false);
-          editForm.resetFields();
-          setEditingStyle(null);
-        }}
-        footer={null}
-        centered
-        width={isMobile ? 'calc(100vw - 32px)' : 600}
-        style={isMobile ? { maxWidth: 'calc(100vw - 32px)', margin: '0 16px' } : undefined}
-      >
-        <Form form={editForm} layout="vertical" onFinish={handleUpdate} style={{ marginTop: 16 }}>
-          <Form.Item
-            label="风格名称"
-            name="name"
-            rules={[{ required: true, message: '请输入风格名称' }]}
-          >
-            <Input placeholder="输入风格名称" />
-          </Form.Item>
-          
-          <Form.Item label="风格描述" name="description">
-            <TextArea rows={2} placeholder="简要描述这个风格的特点..." />
-          </Form.Item>
-          
-          <Form.Item
-            label="提示词内容"
-            name="prompt_content"
-            rules={[{ required: true, message: '请输入提示词内容' }]}
-          >
-            <TextArea 
-              rows={6} 
-              placeholder="输入风格的提示词..."
-            />
-          </Form.Item>
-          
-          <Form.Item>
-            <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-              <Button onClick={() => {
-                setIsEditModalOpen(false);
-                editForm.resetFields();
-                setEditingStyle(null);
-              }}>
-                取消
-              </Button>
-              <Button type="primary" htmlType="submit" loading={loading}>
-                保存
-              </Button>
-            </Space>
-          </Form.Item>
-        </Form>
-      </Modal>
+            {/* 预设选择 */}
+            {!editingStyle && presets.length > 0 && (
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">从预设创建</label>
+                <select
+                  value={form.preset_id}
+                  onChange={e => handlePresetSelect(e.target.value)}
+                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors"
+                >
+                  <option value="">自定义风格</option>
+                  {presets.map(p => <option key={p.id} value={p.id}>{p.name} — {p.description}</option>)}
+                </select>
+              </div>
+            )}
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">名称</label>
+                <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+              </div>
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">描述</label>
+                <input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+              </div>
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">Prompt 内容</label>
+                <textarea value={form.prompt_content} onChange={e => setForm(f => ({ ...f, prompt_content: e.target.value }))} rows={6} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors resize-none font-mono" />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => setShowModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
+              <button onClick={handleSubmit} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">确定</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
-  );
+  )
 }

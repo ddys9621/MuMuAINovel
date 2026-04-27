@@ -6,6 +6,7 @@ export interface User {
   avatar_url?: string;
   trust_level: number;
   is_admin: boolean;
+  is_active?: boolean;
   linuxdo_id: string;
   created_at: string;
   last_login: string;
@@ -71,6 +72,9 @@ export interface ProjectCreate {
   theme?: string;
   genre?: string;
   target_words?: number;
+  narrative_perspective?: string;
+  chapter_count?: number;
+  character_count?: number;
   wizard_status?: 'incomplete' | 'completed';
   wizard_step?: number;
   world_time_period?: string;
@@ -242,6 +246,8 @@ export interface ChapterUpdate {
 export interface ChapterGenerateRequest {
   style_id?: number;
   target_word_count?: number;
+  enable_mcp?: boolean;
+  selected_plugins?: string[];
 }
 
 // 章节生成检查响应
@@ -300,18 +306,19 @@ export interface GenerateCharacterRequest {
   selected_plugins?: string[];
 }
 
-export interface PolishTextRequest {
-  text: string;
-  style?: string;
-}
-
 // 向导API响应类型
 export interface GenerateCharactersResponse {
+  message?: string;
+  count?: number;
+  batches?: number;
   characters: Character[];
 }
 
 export interface GenerateOutlineResponse {
-  outlines: Outline[];
+  message?: string;
+  outline?: Outline;
+  outlines?: Outline[];
+  total_chapters?: number;
 }
 
 // API响应类型
@@ -521,7 +528,99 @@ export interface ChapterAnalysisResponse {
   chapter_id: string;
   analysis: AnalysisData;  // 注意：后端返回的是analysis而不是analysis_data
   memories: StoryMemory[];
+  narrative_state?: ChapterNarrativeState;
+  consistency_audit?: ConsistencyAuditView;
   created_at: string;
+}
+
+export interface ChapterCausalLinkView {
+  cause: string;
+  event: string;
+  effect: string;
+  decision: string;
+  importance: number;
+  reversible: boolean;
+  actor_names: string[];
+  target_names: string[];
+  evidence?: string | null;
+}
+
+export interface NarrativePromiseView {
+  id: string;
+  promise_type: 'foreshadow' | 'promise' | 'mystery' | 'conflict' | string;
+  title: string;
+  content: string;
+  priority: 'low' | 'medium' | 'high' | 'critical' | string;
+  status: 'open' | 'progressing' | 'resolved' | 'broken' | string;
+  source_chapter_number?: number | null;
+  resolved_chapter_number?: number | null;
+  deadline_chapter?: number | null;
+  owner_character_name?: string | null;
+  target_character_name?: string | null;
+  resolution_note?: string | null;
+}
+
+export interface TimelineEventView {
+  id: string;
+  event_type: string;
+  title: string;
+  description: string;
+  location?: string | null;
+  time_marker?: string | null;
+  actor_names: string[];
+  target_names: string[];
+  public_visibility?: 'public' | 'private' | 'secret' | string;
+}
+
+export interface RelationshipGraphNode {
+  id: string;
+  label: string;
+}
+
+export interface RelationshipGraphEdge {
+  source: string;
+  target: string;
+  delta: number;
+  reason?: string | null;
+  new_status?: string | null;
+  intimacy_level?: number | null;
+}
+
+export interface RelationshipGraphView {
+  nodes: RelationshipGraphNode[];
+  edges: RelationshipGraphEdge[];
+}
+
+export interface ConsistencyAuditIssue {
+  severity: 'critical' | 'high' | 'medium' | 'low' | string;
+  issue_type: string;
+  rule_code: string;
+  title: string;
+  details: string;
+  evidence?: string | null;
+  character_name?: string | null;
+  signal_key?: string | null;
+  reference_chapter_number?: number | null;
+}
+
+export interface ConsistencyAuditSummary {
+  total: number;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+}
+
+export interface ConsistencyAuditView {
+  summary: ConsistencyAuditSummary;
+  issues: ConsistencyAuditIssue[];
+}
+
+export interface ChapterNarrativeState {
+  causal_links: ChapterCausalLinkView[];
+  promises: NarrativePromiseView[];
+  timeline_events: TimelineEventView[];
+  relationship_graph: RelationshipGraphView;
 }
 
 // 手动触发分析响应
@@ -564,7 +663,7 @@ export interface MCPPluginCreate {
   plugin_name: string;
   display_name?: string;
   description?: string;
-  server_type: 'http' | 'stdio';
+  plugin_type: 'http' | 'stdio';
   server_url?: string;
   command?: string;
   args?: string[];
@@ -883,6 +982,7 @@ export interface ChapterOutlineGenerateRequest {
   based_on_outline: boolean;
   enable_mcp?: boolean;
   selected_plugins?: string[];
+  auto_generate_plot_cards?: boolean;
 }
 
 export interface ChapterOutlineReorderRequest {

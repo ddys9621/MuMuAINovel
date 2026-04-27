@@ -1,54 +1,42 @@
-import { useEffect, useState } from 'react';
-import type { ReactNode } from 'react';
-import { Navigate, useLocation } from 'react-router-dom';
-import { Spin } from 'antd';
-import { authApi } from '../services/api';
-import { sessionManager } from '../utils/sessionManager';
+import { useState, useEffect, type ReactNode } from 'react'
+import { Navigate, useLocation } from 'react-router-dom'
+import { authApi } from '@/services/api'
+import { PageLoading } from '@/components/ui/PageLoading'
+import { sessionManager } from '@/utils/sessionManager'
 
-interface ProtectedRouteProps {
-  children: ReactNode;
-}
-
-export default function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
-  const location = useLocation();
+export function ProtectedRoute({ children }: { children: ReactNode }) {
+  const [loading, setLoading] = useState(true)
+  const [authenticated, setAuthenticated] = useState(false)
+  const location = useLocation()
 
   useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        await authApi.getCurrentUser();
-        setIsAuthenticated(true);
-        // 启动会话管理器
-        sessionManager.start();
-      } catch {
-        setIsAuthenticated(false);
-        // 停止会话管理器
-        sessionManager.stop();
-      }
-    };
-    checkAuth();
-    
+    let cancelled = false
+
+    authApi.getCurrentUser()
+      .then(() => {
+        if (cancelled) return
+        sessionManager.start()
+        setAuthenticated(true)
+      })
+      .catch(() => {
+        if (cancelled) return
+        sessionManager.stop()
+        setAuthenticated(false)
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      })
+
     return () => {
-      // 组件卸载时不停止会话管理器，让它在整个应用生命周期内运行
-    };
-  }, []);
+      cancelled = true
+    }
+  }, [])
 
-  if (isAuthenticated === null) {
-    return (
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        minHeight: '100vh',
-      }}>
-        <Spin size="large" />
-      </div>
-    );
+  if (loading) return <PageLoading />
+  if (!authenticated) {
+    return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname)}`} replace />
   }
-
-  if (!isAuthenticated) {
-    return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname)}`} replace />;
-  }
-
-  return <>{children}</>;
+  return <>{children}</>
 }

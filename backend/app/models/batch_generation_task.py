@@ -1,7 +1,7 @@
 """批量生成任务数据模型"""
 from sqlalchemy import Column, String, Integer, DateTime, Boolean, JSON
 from sqlalchemy.sql import func
-from app.database import Base
+from app.db_base import Base
 import uuid
 
 

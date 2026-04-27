@@ -4,26 +4,46 @@ from typing import Dict, Any
 from datetime import datetime
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import declarative_base
 from fastapi import Request, HTTPException
 from app.config import settings
+from app.db_base import Base
 from app.logger import get_logger
 
 logger = get_logger(__name__)
 
-# 创建基类
-Base = declarative_base()
-
 # 导入所有模型，确保 Base.metadata 能够发现它们
 # 这必须在 Base 创建之后、init_db 之前导入
-from app.models import (
-    Project, Character, Chapter, GenerationHistory,
-    Settings, WritingStyle, ProjectDefaultStyle,
-    RelationshipType, CharacterRelationship, Organization, OrganizationMember,
-    StoryMemory, PlotAnalysis, AnalysisTask, BatchGenerationTask,
-    RegenerationTask, StoryOutline, ChapterOutline, PlotCard, PlotLine,
-    WorldRule
+# 注意：这里不能再走 app.models 聚合入口，否则会触发
+# database -> app.models -> model -> database 的循环导入。
+from app.models.analysis_task import AnalysisTask  # noqa: F401
+from app.models.batch_generation_task import BatchGenerationTask  # noqa: F401
+from app.models.chapter import Chapter  # noqa: F401
+from app.models.chapter_causal_link import ChapterCausalLink  # noqa: F401
+from app.models.chapter_consistency_issue import ChapterConsistencyIssue  # noqa: F401
+from app.models.chapter_continuity_signal import ChapterContinuitySignal  # noqa: F401
+from app.models.chapter_outline import ChapterOutline  # noqa: F401
+from app.models.character import Character  # noqa: F401
+from app.models.character_known_info import CharacterKnownInfo  # noqa: F401
+from app.models.generation_history import GenerationHistory  # noqa: F401
+from app.models.memory import PlotAnalysis, StoryMemory  # noqa: F401
+from app.models.narrative_promise import NarrativePromise  # noqa: F401
+from app.models.plot_card import PlotCard  # noqa: F401
+from app.models.plot_line import PlotLine  # noqa: F401
+from app.models.project import Project  # noqa: F401
+from app.models.project_default_style import ProjectDefaultStyle  # noqa: F401
+from app.models.regeneration_task import RegenerationTask  # noqa: F401
+from app.models.relationship import (  # noqa: F401
+    CharacterRelationship,
+    Organization,
+    OrganizationMember,
+    RelationshipType,
 )
+from app.models.relationship_event import RelationshipEvent  # noqa: F401
+from app.models.settings import Settings  # noqa: F401
+from app.models.story_outline import StoryOutline  # noqa: F401
+from app.models.timeline_event import TimelineEvent  # noqa: F401
+from app.models.world_rule import WorldRule  # noqa: F401
+from app.models.writing_style import WritingStyle  # noqa: F401
 
 # 引擎缓存：每个用户一个引擎
 _engine_cache: Dict[str, Any] = {}
@@ -121,19 +141,34 @@ async def get_db(request: Request):
     _session_stats["created"] += 1
     _session_stats["active"] += 1
     
+    rollback_handled = False
+
+    async def rollback_if_needed(log_message: str = None, log_level: str = "info"):
+        nonlocal rollback_handled
+        if rollback_handled or not session.in_transaction():
+            return False
+
+        # 进入 rollback 前先标记，避免异常链路里重复触发 rollback()
+        rollback_handled = True
+        await session.rollback()
+
+        if log_message:
+            getattr(logger, log_level)(log_message)
+
+        return True
+
     logger.debug(f"📊 会话创建 [User:{user_id}][ID:{session_id}] - 活跃:{_session_stats['active']}, 总创建:{_session_stats['created']}, 总关闭:{_session_stats['closed']}")
     
     try:
         yield session
-        if session.in_transaction():
-            await session.rollback()
+        await rollback_if_needed()
     except GeneratorExit:
         _session_stats["generator_exits"] += 1
         logger.warning(f"⚠️ GeneratorExit [User:{user_id}][ID:{session_id}] - SSE连接断开（总计:{_session_stats['generator_exits']}次）")
         try:
-            if session.in_transaction():
-                await session.rollback()
-                logger.info(f"✅ 事务已回滚 [User:{user_id}][ID:{session_id}]（GeneratorExit）")
+            await rollback_if_needed(
+                f"✅ 事务已回滚 [User:{user_id}][ID:{session_id}]（GeneratorExit）"
+            )
         except Exception as rollback_error:
             _session_stats["errors"] += 1
             logger.error(f"❌ GeneratorExit回滚失败 [User:{user_id}][ID:{session_id}]: {str(rollback_error)}")
@@ -150,17 +185,18 @@ async def get_db(request: Request):
             logger.error(f"❌ 会话异常 [User:{user_id}][ID:{session_id}]: {str(e)}")
 
         try:
-            if session.in_transaction():
-                await session.rollback()
-                logger.info(f"✅ 事务已回滚 [User:{user_id}][ID:{session_id}]（异常）")
+            await rollback_if_needed(
+                f"✅ 事务已回滚 [User:{user_id}][ID:{session_id}]（异常）"
+            )
         except Exception as rollback_error:
             logger.error(f"❌ 异常回滚失败 [User:{user_id}][ID:{session_id}]: {str(rollback_error)}")
         raise
     finally:
         try:
-            if session.in_transaction():
-                await session.rollback()
-                logger.warning(f"⚠️ finally中发现未提交事务 [User:{user_id}][ID:{session_id}]，已回滚")
+            await rollback_if_needed(
+                f"⚠️ finally中发现未提交事务 [User:{user_id}][ID:{session_id}]，已回滚",
+                "warning"
+            )
             
             await session.close()
 

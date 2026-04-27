@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { message } from 'antd';
+import { toast } from 'sonner';
 import {
   plotLineApi,
   plotLineLinkApi,
@@ -291,7 +291,7 @@ export function useLinkGraph(options?: UseLinkGraphOptions): UseLinkGraphResult 
       expandedRef.current.add(projectNode.id);
     } catch (error) {
       console.error('初始化图谱失败', error);
-      message.error('加载关联图谱失败');
+      toast.error('加载关联图谱失败');
     } finally {
       setLoading(false);
     }
@@ -429,7 +429,7 @@ export function useLinkGraph(options?: UseLinkGraphOptions): UseLinkGraphResult 
       expandedRef.current.add(nodeId);
     } catch (error) {
       console.error('展开节点失败', error);
-      message.error('加载节点关联失败');
+      toast.error('加载节点关联失败');
     } finally {
       setNodeLoading((prev) => {
         const next = { ...prev };

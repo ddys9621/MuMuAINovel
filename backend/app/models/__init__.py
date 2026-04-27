@@ -22,6 +22,13 @@ from app.models.plot_card_plot_line_link import PlotCardPlotLineLink
 from app.models.plot_card_chapter_outline_link import PlotCardChapterOutlineLink
 from app.models.world_rule import WorldRule
 from app.models.chapter_generation_session import ChapterGenerationSession
+from app.models.chapter_causal_link import ChapterCausalLink
+from app.models.narrative_promise import NarrativePromise
+from app.models.relationship_event import RelationshipEvent
+from app.models.timeline_event import TimelineEvent
+from app.models.character_known_info import CharacterKnownInfo
+from app.models.chapter_continuity_signal import ChapterContinuitySignal
+from app.models.chapter_consistency_issue import ChapterConsistencyIssue
 
 __all__ = [
     "Project",
@@ -51,5 +58,12 @@ __all__ = [
     "PlotCardPlotLineLink",
     "PlotCardChapterOutlineLink",
     "WorldRule",
-    "ChapterGenerationSession"
+    "ChapterGenerationSession",
+    "ChapterCausalLink",
+    "NarrativePromise",
+    "RelationshipEvent",
+    "TimelineEvent",
+    "CharacterKnownInfo",
+    "ChapterContinuitySignal",
+    "ChapterConsistencyIssue",
 ]

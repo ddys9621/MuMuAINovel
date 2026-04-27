@@ -4,14 +4,14 @@ __pycache__/
 *$py.class
 *.so
 .Python
-build/
+/build/
 develop-eggs/
 dist/
-downloads/
+/downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -53,7 +53,7 @@ secrets/*.txt
 
 # Logs
 *.log
-logs/
+/logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -83,6 +83,8 @@ backend/data/admins.json
 
 # Temporary files
 *.bak
+*.orig
+*.rej
 *.swp
 *.tmp
 .temp/
@@ -104,9 +106,14 @@ dmypy.json
 # Jupyter Notebook
 .ipynb_checkpoints
 
-data/
-docs/
-data_old/
+/data/
+/docs/
+/data_old/
+/backup/
+/llmdoc/
+/backend/data/
+/backend/docs/
+/backend/logs/
 backend/migrate_all_databases.py
 test_api.py
 
@@ -120,8 +127,13 @@ backend/embedding.zip
 *.pth
 *.ckpt
 *.onnx
-models/
+/models/
 
 # 本地发布产物与本机配置
-release/
-config.ini
+/release/
+/config.ini
+/.ace-tool/
+/_tmp_zip_*/
+/.ruff_cache/
+/.cache/
+/.history/

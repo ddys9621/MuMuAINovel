@@ -1,9 +1,10 @@
 """应用配置管理"""
-from pydantic_settings import BaseSettings
-from typing import Optional
 from pathlib import Path
+from typing import Optional
 import logging
-import os
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # 获取项目根目录(从backend/app/config.py向上两级)
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -18,6 +19,12 @@ config_logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
     """应用配置"""
+
+    model_config = SettingsConfigDict(
+        env_file=str(PROJECT_ROOT / ".env"),
+        case_sensitive=False,
+        extra="ignore",
+    )
     
     # 应用配置
     app_name: str = "MuMuAINovel"
@@ -68,6 +75,10 @@ class Settings(BaseSettings):
     default_temperature: float = 0.7
     default_max_tokens: int = 2000
 
+    # 章节分析任务超时配置
+    analysis_task_running_timeout_seconds: int = 300  # running 超过 5 分钟才视为卡死
+    analysis_task_pending_timeout_seconds: int = 120  # pending 超过 2 分钟仍未启动则视为异常
+
     # 章节字数控制配置
     # 软目标区间：生成的章节字数应尽量落在 [target * (1 - soft_range), target * (1 + soft_range)] 内
     # 此参数仅用于生成 Prompt 中的字数范围提示，不会截断输出
@@ -105,10 +116,17 @@ class Settings(BaseSettings):
     SESSION_EXPIRE_MINUTES: int = 120  # 会话过期时间（分钟），默认2小时
     SESSION_REFRESH_THRESHOLD_MINUTES: int = 30  # 会话刷新阈值（分钟），剩余时间少于此值时可刷新
     
-    class Config:
-        env_file = str(PROJECT_ROOT / ".env")
-        case_sensitive = False
-        extra = "ignore"  # 忽略未定义的环境变量，避免验证错误
+    @field_validator("debug", mode="before")
+    @classmethod
+    def normalize_debug_value(cls, value):
+        """兼容 DEBUG=release / production 等部署写法，避免导入期直接炸掉。"""
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on", "debug", "dev", "development"}:
+                return True
+            if normalized in {"0", "false", "no", "off", "release", "prod", "production"}:
+                return False
+        return value
 
 
 # 创建全局配置实例

@@ -1,112 +1,189 @@
-"""剧情分析服务 - 自动分析章节的钩子、伏笔、冲突等元素"""
-from typing import Dict, Any, List, Optional
-from app.services.ai_service import AIService
-from app.logger import get_logger
-import json
+"""Plot analysis service for extracting chapter structure and narrative state."""
+
+from __future__ import annotations
+
 import re
+from typing import Any, Dict, List, Optional
+
+from app.logger import get_logger
+from app.services.ai_service import AIService
 
 logger = get_logger(__name__)
 
 
 class PlotAnalyzer:
-    """剧情分析器 - 使用AI分析章节内容"""
-    
-    # AI分析提示词模板
-    ANALYSIS_PROMPT = """你是一位专业的小说编辑和剧情分析师。请深度分析以下章节内容:
+    """Use LLM to analyze a chapter and extract structured narrative state."""
 
-**章节信息:**
-- 章节: 第{chapter_number}章
-- 标题: {title}
-- 字数: {word_count}字
+    ANALYSIS_PROMPT = """你是一位专业的小说编辑、剧情分析师和叙事状态审计员。请深度分析以下章节内容，并严格输出 JSON。
 
-**章节内容:**
+【章节信息】
+- 章节：第{chapter_number}章
+- 标题：{title}
+- 字数：{word_count}字
+
+【章节正文】
 {content}
 
 ---
 
-**分析任务:**
-请从专业编辑的角度,全面分析这一章节:
+请完成以下分析任务：
 
-### 1. 剧情钩子 (Hooks) - 吸引读者的元素
-识别能够吸引读者继续阅读的关键元素:
-- **悬念钩子**: 未解之谜、疑问、谜团
-- **情感钩子**: 引发共鸣的情感点、触动心弦的时刻
-- **冲突钩子**: 矛盾对抗、紧张局势
-- **认知钩子**: 颠覆认知的信息、惊人真相
+### 1. Hooks
+识别本章最能驱动读者继续阅读的钩子：
+- type: suspense / emotion / conflict / revelation
+- content: 钩子内容
+- strength: 1-10
+- position: opening / middle / ending
+- keyword: 必须从原文逐字复制 8-25 字，能在正文中精确找到
 
-每个钩子需要:
-- 类型分类
-- 具体内容描述
-- 强度评分(1-10)
-- 出现位置(开头/中段/结尾)
-- **关键词**: 【必填】从章节原文中逐字复制一段关键文本(8-25字)，必须是原文中真实存在的连续文字，用于在文本中精确定位。不要概括或改写，必须原样复制！
+### 2. Foreshadows
+识别本章埋设或回收的伏笔：
+- content
+- type: planted / resolved
+- strength: 1-10
+- subtlety: 1-10
+- reference_chapter: 若为回收伏笔，尽量指出对应章节号
+- keyword: 必须从原文逐字复制 8-25 字
 
-### 2. 伏笔分析 (Foreshadowing)
-- **埋下的新伏笔**: 描述内容、预期作用、隐藏程度(1-10)
-- **回收的旧伏笔**: 呼应哪一章、回收效果评分
-- **伏笔质量**: 巧妙性和合理性评估
-- **关键词**: 【必填】从章节原文中逐字复制一段关键文本(8-25字)，必须是原文中真实存在的连续文字，用于在文本中精确定位。不要概括或改写，必须原样复制！
+### 3. Conflict
+- types: 人与人 / 人与己 / 人与环境 / 人与社会
+- parties: 冲突双方
+- level: 1-10
+- description
+- resolution_progress: 0.0-1.0
 
-### 3. 冲突分析 (Conflict)
-- 冲突类型: 人与人/人与己/人与环境/人与社会
-- 冲突各方及其立场
-- 冲突强度评分(1-10)
-- 冲突解决进度(0-100%)
+### 4. Emotional Arc
+- primary_emotion
+- intensity: 1-10
+- curve
+- secondary_emotions
 
-### 4. 情感曲线 (Emotional Arc)
-- 主导情绪: 紧张/温馨/悲伤/激昂/平静等
-- 情感强度(1-10)
-- 情绪变化轨迹描述
+### 5. Character States
+对本章主要角色逐个分析：
+- character_name
+- state_before
+- state_after
+- psychological_change
+- key_event
+- relationship_changes: {{ "对方角色名": "变化描述" }}
 
-### 5. 角色状态追踪 (Character Development)
-对每个出场角色分析:
-- 心理状态变化(前→后)
-- 关系变化
-- 关键行动和决策
-- 成长或退步
+### 6. Plot Points
+列出 3-5 个关键剧情点：
+- content
+- type: revelation / conflict / resolution / transition
+- importance: 0.0-1.0
+- impact
+- keyword: 必须从原文逐字复制 8-25 字
 
-### 6. 关键情节点 (Plot Points)
-列出3-5个核心情节点:
-- 情节内容
-- 类型(revelation/conflict/resolution/transition)
-- 重要性(0.0-1.0)
-- 对故事的影响
-- **关键词**: 【必填】从章节原文中逐字复制一段关键文本(8-25字)，必须是原文中真实存在的连续文字，用于在文本中精确定位。不要概括或改写，必须原样复制！
+### 7. Scenes
+- location
+- atmosphere
+- duration
 
-### 7. 场景与节奏
-- 主要场景
-- 叙事节奏(快/中/慢)
-- 对话与描写的比例
+### 8. Quality Scores
+- pacing / engagement / coherence / overall: 1-10
 
-### 8. 质量评分
-- 节奏把控: 1-10分
-- 吸引力: 1-10分  
-- 连贯性: 1-10分
-- 整体质量: 1-10分
+### 9. Suggestions
+给出 3-5 条具体建议。
 
-### 9. 改进建议
-提供3-5条具体的改进建议
+### 10. Summary
+输出 100-200 字章节摘要。
 
-### 10. 章节概要 (Summary)
-用100-200字概括本章核心内容，要求：
-- 概括主要事件和情节发展
-- 点明关键转折点或冲突
-- 体现与前文的关联（如有）
-- 语言简洁流畅，便于快速了解章节大意
+### 11. Causal Links
+提取 1-5 条关键因果链，每条必须包含：
+- cause
+- event
+- effect
+- decision
+- actor_names: 角色名数组
+- target_names: 受影响角色名数组
+- plot_line_hint: 若能判断属于哪条剧情线，写标题，否则留空
+- importance: 0.0-1.0
+- reversible: true / false
+- evidence: 必须尽量引用原文关键短句
+
+### 12. Narrative Promises
+提取本章新增或推进的叙事承诺，类型仅允许：
+- foreshadow / promise / mystery / conflict
+每条包含：
+- promise_type
+- title
+- content
+- owner_character_name
+- target_character_name
+- plot_line_hint
+- priority: low / medium / high / critical
+- status: open / progressing / resolved / broken
+- deadline_chapter: 可为空
+- reference_chapter: 若是回收/解决旧承诺，尽量给出起始章节号
+- resolves_title: 若能判断回收的是哪一个承诺，写标题，否则留空
+- evidence
+
+### 13. Relationship Deltas
+提取本章明确推动的人物关系变化：
+- from_character_name
+- to_character_name
+- delta: -100 到 100 的整数
+- reason_type: rescue / betrayal / alliance / misunderstanding / confession / rivalry / respect / hostility / other
+- reason
+- new_status: active / broken / past / complicated
+- evidence
+
+### 14. Timeline Events
+提取 1-5 个可写入全局时间轴的事件：
+- event_type: action / reveal / battle / meeting / departure / arrival / promise / mystery / conflict / death / other
+- title
+- description
+- location
+- time_marker
+- actor_names
+- target_names
+- plot_line_hints
+- public_visibility: public / private / secret
+
+### 15. Knowledge Changes
+提取角色在本章新增获得的信息：
+- character_name
+- info_key
+- content
+- source: witnessed / hearsay / deduced / document
+- confidence: 0.0-1.0
+- secret_level: public / private / secret
+
+### 16. Continuity Signals
+为了做硬规则连续性审计，请额外提取以下结构化信号：
+
+- life_state_changes: 仅在人物生死/失踪/复活被明确提及时填写
+  - character_name
+  - status: dead / missing / revived / survived
+  - evidence
+
+- ability_updates: 仅在人物明确学会、掌握、失去、忘记、使用某项能力时填写
+  - character_name
+  - ability_name
+  - change: learned / mastered / used / lost / forgotten
+  - evidence
+
+- location_updates: 仅在人物明确抵达、离开、当前所处地点时填写
+  - character_name
+  - location
+  - status: arrived / left / current
+  - evidence
 
 ---
 
-**输出格式(纯JSON,不要markdown标记):**
+仅输出 JSON，不要输出 Markdown，不要输出解释文字。
 
+JSON 结构如下：
 {{
-  "summary": "100-200字的章节内容概要，概括主要事件、人物行动和情节发展，语言简洁流畅",
+  "summary": "章节摘要",
   "hooks": [
     {{
-      "type": "悬念",
-      "content": "具体描述",
+      "type": "suspense",
+      "content": "钩子内容",
       "strength": 8,
-      "position": "中段",
-      "keyword": "必须从原文逐字复制的文本片段"
+      "position": "ending",
+      "keyword": "原文关键短句"
     }}
   ],
   "foreshadows": [
@@ -116,46 +193,46 @@ class PlotAnalyzer:
       "strength": 7,
       "subtlety": 8,
       "reference_chapter": null,
-      "keyword": "必须从原文逐字复制的文本片段"
+      "keyword": "原文关键短句"
     }}
   ],
   "conflict": {{
-    "types": ["人与人", "人与己"],
-    "parties": ["主角-复仇", "反派-维护现状"],
+    "types": ["人与人"],
+    "parties": ["甲", "乙"],
     "level": 8,
-    "description": "冲突描述",
-    "resolution_progress": 0.3
+    "description": "冲突说明",
+    "resolution_progress": 0.2
   }},
   "emotional_arc": {{
-    "primary_emotion": "紧张",
+    "primary_emotion": "愤怒",
     "intensity": 8,
-    "curve": "平静→紧张→高潮→释放",
-    "secondary_emotions": ["期待", "焦虑"]
+    "curve": "压抑→爆发→坚定",
+    "secondary_emotions": ["屈辱", "决绝"]
   }},
   "character_states": [
     {{
-      "character_name": "张三",
-      "state_before": "犹豫",
-      "state_after": "坚定",
-      "psychological_change": "心理变化描述",
+      "character_name": "林尘",
+      "state_before": "隐忍",
+      "state_after": "决绝",
+      "psychological_change": "心态变化",
       "key_event": "触发事件",
-      "relationship_changes": {{"李四": "关系改善"}}
+      "relationship_changes": {{"慕雪": "关系恶化"}}
     }}
   ],
   "plot_points": [
     {{
-      "content": "情节点描述",
-      "type": "revelation",
+      "content": "剧情点",
+      "type": "conflict",
       "importance": 0.9,
-      "impact": "推动故事发展",
-      "keyword": "必须从原文逐字复制的文本片段"
+      "impact": "推动主线",
+      "keyword": "原文关键短句"
     }}
   ],
   "scenes": [
     {{
-      "location": "地点",
-      "atmosphere": "氛围",
-      "duration": "时长估计"
+      "location": "慕家大堂",
+      "atmosphere": "压抑",
+      "duration": "短"
     }}
   ],
   "pacing": "varied",
@@ -168,429 +245,534 @@ class PlotAnalyzer:
     "overall": 8.5
   }},
   "plot_stage": "发展",
-  "suggestions": [
-    "具体建议1",
-    "具体建议2"
+  "suggestions": ["建议1", "建议2"],
+  "causal_links": [
+    {{
+      "cause": "因",
+      "event": "事",
+      "effect": "果",
+      "decision": "决",
+      "actor_names": ["林尘"],
+      "target_names": ["慕雪"],
+      "plot_line_hint": "主线逆袭",
+      "importance": 0.9,
+      "reversible": false,
+      "evidence": "原文关键短句"
+    }}
+  ],
+  "narrative_promises": [
+    {{
+      "promise_type": "promise",
+      "title": "三年之约",
+      "content": "林尘立下三年之约",
+      "owner_character_name": "林尘",
+      "target_character_name": "慕雪",
+      "plot_line_hint": "主线逆袭",
+      "priority": "critical",
+      "status": "open",
+      "deadline_chapter": null,
+      "reference_chapter": null,
+      "resolves_title": "",
+      "evidence": "原文关键短句"
+    }}
+  ],
+  "relationship_deltas": [
+    {{
+      "from_character_name": "林尘",
+      "to_character_name": "慕雪",
+      "delta": -40,
+      "reason_type": "hostility",
+      "reason": "当众退婚导致关系恶化",
+      "new_status": "complicated",
+      "evidence": "原文关键短句"
+    }}
+  ],
+  "timeline_events": [
+    {{
+      "event_type": "promise",
+      "title": "三年之约成立",
+      "description": "林尘在退婚羞辱后立下三年之约",
+      "location": "慕家大堂",
+      "time_marker": "当日",
+      "actor_names": ["林尘"],
+      "target_names": ["慕雪"],
+      "plot_line_hints": ["主线逆袭"],
+      "public_visibility": "public"
+    }}
+  ],
+  "knowledge_changes": [
+    {{
+      "character_name": "林尘",
+      "info_key": "mu_family_attitude",
+      "content": "慕家彻底看不起自己并公开切割婚约",
+      "source": "witnessed",
+      "confidence": 1.0,
+      "secret_level": "private"
+    }}
+  ],
+  "continuity_signals": {{
+    "life_state_changes": [
+      {{
+        "character_name": "林长老",
+        "status": "dead",
+        "evidence": "原文关键短句"
+      }}
+    ],
+    "ability_updates": [
+      {{
+        "character_name": "林尘",
+        "ability_name": "御风步",
+        "change": "learned",
+        "evidence": "原文关键短句"
+      }}
+    ],
+    "location_updates": [
+      {{
+        "character_name": "林尘",
+        "location": "青峰山",
+        "status": "current",
+        "evidence": "原文关键短句"
+      }}
+    ]
+  }}
+}}
+"""
+
+    ENTITY_EXTRACTION_PROMPT = """你是一个小说实体提取器。从以下章节正文中提取所有出场的**人物**和**组织/机构/势力**。
+
+## 第{chapter_number}章: {title}
+
+{content}
+
+## 关键分类规则（严格遵守）
+
+**characters（人物）**= 有血有肉的自然人，能说话、能行动的个体。
+示例：林尘、慕雪、许长老、张三
+
+**organizations（组织）**= 机构、团体、建筑、部门、地方势力，不是个体自然人。
+包含但不限于：
+- 宗门/门派：青云宗、太一仙宗
+- 宗门下属机构/部门：外门、内门、戒律堂、藏经阁、执法殿、丹药阁
+- 家族/氏族：慕家、林家、王氏
+- 势力/帮会：黑风盗、天机阁
+- 建筑/场所（如果作为势力单位出现）：演武场、议事大殿
+
+**绝对禁止**：把宗门、门派、堂、殿、阁、院、门、家族、帮、盟、会等放入 characters。
+如果一个名字以"宗/派/门/堂/殿/阁/院/府/家/帮/盟/会/楼/馆/谷/洞"结尾，它几乎一定是 organization。
+
+## 其他提取规则
+- 只提取正文中**明确出现名字**的实体，不要推测
+- 每个字段**只填本章正文中有明确依据的信息**，没有提到的字段填 null
+- 严格输出 JSON，不要任何其他文字
+
+## 输出格式
+```json
+{{
+  "characters": [
+    {{
+      "name": "角色名",
+      "gender": "男/女/未知",
+      "age": "年龄或年龄段，如'十六岁'、'中年'，无法判断填null",
+      "role_type": "protagonist/major/supporting/minor 之一",
+      "personality": "性格特征，如'沉稳冷静'，本章无法判断填null",
+      "appearance": "外貌描写，如'身穿白袍，剑眉星目'，本章无描写填null",
+      "background": "一句话背景，如'青云宗外门弟子，被退婚'",
+      "traits": ["特征标签1", "特征标签2"],
+      "affiliations": [
+        {{
+          "org_name": "所属组织名（必须与 organizations 中的 name 一致）",
+          "position": "职位，如'外门弟子'、'长老'、'帮主'，无法判断填null",
+          "change": "joined/left/promoted/expelled/active 之一",
+          "reason": "变化原因，如'通过考核晋升'、'因叛变被逐'、'主动退出宗门'，无变化或无法判断填null"
+        }}
+      ]
+    }}
+  ],
+  "organizations": [
+    {{
+      "name": "组织名",
+      "organization_type": "类型，如'宗门'、'家族'、'商会'、'势力'，无法判断填null",
+      "organization_purpose": "组织宗旨或性质，一句话，无法判断填null",
+      "personality": "组织风格/氛围，如'纪律严明'、'唯利是图'，无法判断填null",
+      "appearance": "外在特征，如'统一白袍、佩剑'，无描写填null",
+      "location": "所在地点，如'青云山'，无法判断填null",
+      "known_members": ["本章明确提到的成员名字"],
+      "traits": ["特征标签1", "特征标签2"],
+      "background": "一句话描述其在本章的作用"
+    }}
   ]
 }}
+```"""
 
-**重要提示:**
-1. 每个钩子、伏笔、情节点的keyword字段是必填的，不能为空
-2. keyword必须是从章节原文中逐字复制的文本，长度8-25字
-3. keyword用于在前端标注文本位置，所以必须能在原文中精确找到
-4. 不要使用概括性语句或改写后的文字作为keyword
-
-只返回JSON,不要其他说明。"""
-    
     def __init__(self, ai_service: AIService):
-        """
-        初始化剧情分析器
-        
-        Args:
-            ai_service: AI服务实例
-        """
         self.ai_service = ai_service
-        logger.info("✅ PlotAnalyzer初始化成功")
-    
+        logger.info("✅ PlotAnalyzer initialized")
+
+    async def extract_entities(
+        self,
+        chapter_number: int,
+        title: str,
+        content: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Extract characters and organizations from chapter text (lightweight, parallel-safe)."""
+        try:
+            logger.info("👥 开始提取第%s章实体...", chapter_number)
+            extraction_content = content[:6000] if len(content) > 6000 else content
+            prompt = self.ENTITY_EXTRACTION_PROMPT.format(
+                chapter_number=chapter_number,
+                title=title,
+                content=extraction_content,
+            )
+
+            chunks: list[str] = []
+            async for chunk in self.ai_service.generate_text_stream(
+                prompt=prompt,
+                temperature=0.1,
+                max_tokens=2000,
+            ):
+                chunks.append(chunk)
+
+            response_text = "".join(chunks)
+            if not response_text:
+                logger.warning("⚠️ 实体提取返回为空")
+                return None
+
+            from app.utils.json_cleaner import safe_parse_json
+            result = safe_parse_json(response_text, default=None)
+            if not result:
+                logger.warning("⚠️ 实体提取JSON解析失败")
+                return None
+
+            chars = result.get("characters", [])
+            orgs = result.get("organizations", [])
+            logger.info("✅ 第%s章实体提取完成: %s个人物, %s个组织", chapter_number, len(chars), len(orgs))
+            return result
+        except Exception as exc:
+            logger.error("⚠️ 实体提取异常(非致命): %s", exc)
+            return None
+
     async def analyze_chapter(
         self,
         chapter_number: int,
         title: str,
         content: str,
-        word_count: int
+        word_count: int,
     ) -> Optional[Dict[str, Any]]:
-        """
-        分析单章内容
-        
-        Args:
-            chapter_number: 章节号
-            title: 章节标题
-            content: 章节内容
-            word_count: 字数
-        
-        Returns:
-            分析结果字典,失败返回None
-        """
+        """Analyze one chapter and return normalized JSON payload."""
         try:
-            logger.info(f"🔍 开始分析第{chapter_number}章: {title}")
-            
-            # 如果内容过长,截取前8000字(避免超token)
+            logger.info("📳 开始分析第%s章: %s", chapter_number, title)
             analysis_content = content[:8000] if len(content) > 8000 else content
-            
-            # 构建提示词
             prompt = self.ANALYSIS_PROMPT.format(
                 chapter_number=chapter_number,
                 title=title,
                 word_count=word_count,
-                content=analysis_content
+                content=analysis_content,
             )
-            
-            # 调用AI进行分析
-            # 注意：不指定max_tokens，使用用户在设置中配置的值
-            logger.info(f"  调用AI分析(内容长度: {len(analysis_content)}字)...")
-            response = await self.ai_service.generate_text(
+
+            logger.info("  调用 AI 分析(内容长度: %s字, 流式模式)...", len(analysis_content))
+            chunks: list[str] = []
+            async for chunk in self.ai_service.generate_text_stream(
                 prompt=prompt,
-                temperature=0.3  # 降低温度以获得更稳定的JSON输出
-            )
-            
-            # 🔍 添加调试日志：查看AI返回的原始内容
-            # logger.info(f"🔍 AI返回类型: {type(response)}")
-            # logger.info(f"🔍 AI返回内容(前500字符): {str(response)}")
-            
-            # 从返回的字典中提取content字段
-            if isinstance(response, dict):
-                response_text = response.get('content', '')
-                if not response_text:
-                    logger.error("❌ AI返回的字典中没有content字段或content为空")
-                    return None
-            else:
-                # 兼容旧的字符串返回格式
-                response_text = response
-            
-            # 解析JSON结果
-            analysis_result = self._parse_analysis_response(response_text)
-            
-            if analysis_result:
-                logger.info(f"✅ 第{chapter_number}章分析完成")
-                logger.info(f"  - 钩子: {len(analysis_result.get('hooks', []))}个")
-                logger.info(f"  - 伏笔: {len(analysis_result.get('foreshadows', []))}个")
-                logger.info(f"  - 情节点: {len(analysis_result.get('plot_points', []))}个")
-                logger.info(f"  - 整体评分: {analysis_result.get('scores', {}).get('overall', 'N/A')}")
-                return analysis_result
-            else:
-                logger.error(f"❌ 第{chapter_number}章分析失败: JSON解析错误")
+                temperature=0.3,
+            ):
+                chunks.append(chunk)
+
+            response_text = "".join(chunks)
+            if not response_text:
+                logger.error("❌ AI 返回为空")
                 return None
-                
-        except Exception as e:
-            logger.error(f"❌ 章节分析异常: {str(e)}")
+
+            analysis_result = self._parse_analysis_response(response_text)
+            if not analysis_result:
+                logger.error("❌ 分析结果解析失败")
+                return None
+
+            logger.info(
+                "✅ 第%s章分析完成: hooks=%s foreshadows=%s plot_points=%s causal=%s promises=%s",
+                chapter_number,
+                len(analysis_result.get("hooks", [])),
+                len(analysis_result.get("foreshadows", [])),
+                len(analysis_result.get("plot_points", [])),
+                len(analysis_result.get("causal_links", [])),
+                len(analysis_result.get("narrative_promises", [])),
+            )
+            return analysis_result
+        except Exception as exc:
+            logger.error("❌ 章节分析异常: %s", exc)
             return None
-    
+
     def _parse_analysis_response(self, response: str) -> Optional[Dict[str, Any]]:
-        """
-        解析AI返回的分析结果
-
-        Args:
-            response: AI返回的文本
-
-        Returns:
-            解析后的字典,失败返回None
-        """
+        """Parse and normalize LLM JSON output."""
         from app.utils.json_cleaner import safe_parse_json
 
-        # 使用安全解析，失败时返回 None
         result = safe_parse_json(
             response,
             default=None,
-            expected_type='object',
-            log_prefix="[章节分析]"
+            expected_type="object",
+            log_prefix="[章节分析]",
         )
-
         if result is None:
             return None
 
-        # 验证必要字段
-        required_fields = ['hooks', 'plot_points', 'scores']
-        for field in required_fields:
-            if field not in result:
-                logger.warning(f"⚠️ 分析结果缺少字段: {field}")
-                result[field] = [] if field != 'scores' else {}
+        result.setdefault("summary", "")
+        result.setdefault("hooks", [])
+        result.setdefault("foreshadows", [])
+        result.setdefault("conflict", {})
+        result.setdefault("emotional_arc", {})
+        result.setdefault("character_states", [])
+        result.setdefault("plot_points", [])
+        result.setdefault("scenes", [])
+        result.setdefault("pacing", "moderate")
+        result.setdefault("dialogue_ratio", 0.0)
+        result.setdefault("description_ratio", 0.0)
+        result.setdefault("scores", {})
+        result.setdefault("plot_stage", "发展")
+        result.setdefault("suggestions", [])
+        result.setdefault("causal_links", [])
+        result.setdefault("narrative_promises", [])
+        result.setdefault("relationship_deltas", [])
+        result.setdefault("timeline_events", [])
+        result.setdefault("knowledge_changes", [])
+        result.setdefault(
+            "continuity_signals",
+            {
+                "life_state_changes": [],
+                "ability_updates": [],
+                "location_updates": [],
+            },
+        )
+
+        for field in ("pacing", "engagement", "coherence", "overall"):
+            result["scores"].setdefault(field, 0)
 
         return result
-    
+
     def extract_memories_from_analysis(
         self,
         analysis: Dict[str, Any],
         chapter_id: str,
         chapter_number: int,
         chapter_content: str = "",
-        chapter_title: str = ""
+        chapter_title: str = "",
     ) -> List[Dict[str, Any]]:
-        """
-        从分析结果中提取记忆片段
-        
-        Args:
-            analysis: 分析结果
-            chapter_id: 章节ID
-            chapter_number: 章节号
-            chapter_content: 章节完整内容(用于计算位置)
-            chapter_title: 章节标题
-        
-        Returns:
-            记忆片段列表
-        """
-        memories = []
-        
+        """Extract searchable memory fragments from analysis result."""
+        memories: List[Dict[str, Any]] = []
+
         try:
-            # 【新增】0. 提取章节摘要作为记忆（用于语义检索相关章节）
             chapter_summary = ""
-            
-            # 尝试从分析结果获取摘要
-            if analysis.get('summary'):
-                chapter_summary = analysis.get('summary')
-            # 或者从情节点组合生成摘要
-            elif analysis.get('plot_points'):
-                plot_summaries = [p.get('content', '') for p in analysis.get('plot_points', [])[:3]]
-                chapter_summary = "；".join(plot_summaries)
-            # 或者使用内容前300字
+            if analysis.get("summary"):
+                chapter_summary = analysis["summary"]
+            elif analysis.get("plot_points"):
+                plot_summaries = [item.get("content", "") for item in analysis["plot_points"][:3]]
+                chapter_summary = "；".join([item for item in plot_summaries if item])
             elif chapter_content:
                 chapter_summary = chapter_content[:300] + ("..." if len(chapter_content) > 300 else "")
-            
-            # 如果有摘要，添加到记忆中
+
             if chapter_summary:
-                memories.append({
-                    'type': 'chapter_summary',
-                    'content': chapter_summary,
-                    'title': f"第{chapter_number}章《{chapter_title}》摘要",
-                    'metadata': {
-                        'chapter_id': chapter_id,
-                        'chapter_number': chapter_number,
-                        'importance_score': 0.6,  # 中等重要性
-                        'tags': ['摘要', '章节概览', chapter_title],
-                        'is_foreshadow': 0,
-                        'text_position': 0,
-                        'text_length': len(chapter_summary)
+                memories.append(
+                    {
+                        "type": "chapter_summary",
+                        "content": chapter_summary,
+                        "title": f"第{chapter_number}章《{chapter_title}》摘要",
+                        "metadata": {
+                            "chapter_id": chapter_id,
+                            "chapter_number": chapter_number,
+                            "importance_score": 0.6,
+                            "tags": ["摘要", "章节概览", chapter_title],
+                            "is_foreshadow": 0,
+                            "text_position": 0,
+                            "text_length": len(chapter_summary),
+                        },
                     }
-                })
-                logger.info(f"  ✅ 添加章节摘要记忆: {len(chapter_summary)}字")
-            
-            # 1. 提取钩子作为记忆
-            for i, hook in enumerate(analysis.get('hooks', [])):
-                if hook.get('strength', 0) >= 6:  # 只保存强度>=6的钩子
-                    keyword = hook.get('keyword', '')
-                    position, length = self._find_text_position(chapter_content, keyword)
-                    
-                    logger.info(f"  钩子位置: keyword='{keyword[:30]}...', pos={position}, len={length}")
-                    
-                    memories.append({
-                        'type': 'hook',
-                        'content': f"[{hook.get('type', '未知')}钩子] {hook.get('content', '')}",
-                        'title': f"{hook.get('type', '钩子')} - {hook.get('position', '')}",
-                        'metadata': {
-                            'chapter_id': chapter_id,
-                            'chapter_number': chapter_number,
-                            'importance_score': min(hook.get('strength', 5) / 10, 1.0),
-                            'tags': [hook.get('type', '钩子'), hook.get('position', '')],
-                            'is_foreshadow': 0,
-                            'keyword': keyword,
-                            'text_position': position,
-                            'text_length': length,
-                            'strength': hook.get('strength', 5),
-                            'position_desc': hook.get('position', '')
-                        }
-                    })
-            
-            # 2. 提取伏笔作为记忆
-            for i, foreshadow in enumerate(analysis.get('foreshadows', [])):
-                is_planted = foreshadow.get('type') == 'planted'
-                keyword = foreshadow.get('keyword', '')
+                )
+
+            for hook in analysis.get("hooks", []):
+                if int(hook.get("strength", 0) or 0) < 6:
+                    continue
+
+                keyword = hook.get("keyword", "")
                 position, length = self._find_text_position(chapter_content, keyword)
-                
-                logger.info(f"  伏笔位置: keyword='{keyword[:30]}...', pos={position}, len={length}")
-                
-                memories.append({
-                    'type': 'foreshadow',
-                    'content': foreshadow.get('content', ''),
-                    'title': f"{'埋下伏笔' if is_planted else '回收伏笔'}",
-                    'metadata': {
-                        'chapter_id': chapter_id,
-                        'chapter_number': chapter_number,
-                        'importance_score': min(foreshadow.get('strength', 5) / 10, 1.0),
-                        'tags': ['伏笔', foreshadow.get('type', 'planted')],
-                        'is_foreshadow': 1 if is_planted else 2,
-                        'reference_chapter': foreshadow.get('reference_chapter'),
-                        'keyword': keyword,
-                        'text_position': position,
-                        'text_length': length,
-                        'foreshadow_type': foreshadow.get('type', 'planted'),
-                        'strength': foreshadow.get('strength', 5)
+                memories.append(
+                    {
+                        "type": "hook",
+                        "content": f"[{hook.get('type', 'unknown')}] {hook.get('content', '')}",
+                        "title": f"{hook.get('type', 'hook')} - {hook.get('position', '')}",
+                        "metadata": {
+                            "chapter_id": chapter_id,
+                            "chapter_number": chapter_number,
+                            "importance_score": min(float(hook.get("strength", 5) or 5) / 10.0, 1.0),
+                            "tags": [hook.get("type", "hook"), hook.get("position", "")],
+                            "is_foreshadow": 0,
+                            "keyword": keyword,
+                            "text_position": position,
+                            "text_length": length,
+                            "strength": hook.get("strength", 5),
+                            "position_desc": hook.get("position", ""),
+                        },
                     }
-                })
-            
-            # 3. 提取关键情节点
-            for i, plot_point in enumerate(analysis.get('plot_points', [])):
-                if plot_point.get('importance', 0) >= 0.6:  # 只保存重要性>=0.6的情节点
-                    keyword = plot_point.get('keyword', '')
-                    position, length = self._find_text_position(chapter_content, keyword)
-                    
-                    logger.info(f"  情节点位置: keyword='{keyword[:30]}...', pos={position}, len={length}")
-                    
-                    memories.append({
-                        'type': 'plot_point',
-                        'content': f"{plot_point.get('content', '')}。影响: {plot_point.get('impact', '')}",
-                        'title': f"情节点 - {plot_point.get('type', '未知')}",
-                        'metadata': {
-                            'chapter_id': chapter_id,
-                            'chapter_number': chapter_number,
-                            'importance_score': plot_point.get('importance', 0.5),
-                            'tags': ['情节点', plot_point.get('type', '未知')],
-                            'is_foreshadow': 0,
-                            'keyword': keyword,
-                            'text_position': position,
-                            'text_length': length
-                        }
-                    })
-            
-            # 4. 提取角色状态变化
-            for i, char_state in enumerate(analysis.get('character_states', [])):
-                char_name = char_state.get('character_name', '未知角色')
-                memories.append({
-                    'type': 'character_event',
-                    'content': f"{char_name}的状态变化: {char_state.get('state_before', '')} → {char_state.get('state_after', '')}。{char_state.get('psychological_change', '')}",
-                    'title': f"{char_name}的变化",
-                    'metadata': {
-                        'chapter_id': chapter_id,
-                        'chapter_number': chapter_number,
-                        'importance_score': 0.7,
-                        'tags': ['角色', char_name, '状态变化'],
-                        'related_characters': [char_name],
-                        'is_foreshadow': 0
+                )
+
+            for foreshadow in analysis.get("foreshadows", []):
+                is_planted = foreshadow.get("type") == "planted"
+                keyword = foreshadow.get("keyword", "")
+                position, length = self._find_text_position(chapter_content, keyword)
+                memories.append(
+                    {
+                        "type": "foreshadow",
+                        "content": foreshadow.get("content", ""),
+                        "title": "埋下伏笔" if is_planted else "回收伏笔",
+                        "metadata": {
+                            "chapter_id": chapter_id,
+                            "chapter_number": chapter_number,
+                            "importance_score": min(float(foreshadow.get("strength", 5) or 5) / 10.0, 1.0),
+                            "tags": ["伏笔", foreshadow.get("type", "planted")],
+                            "is_foreshadow": 1 if is_planted else 2,
+                            "reference_chapter": foreshadow.get("reference_chapter"),
+                            "keyword": keyword,
+                            "text_position": position,
+                            "text_length": length,
+                            "foreshadow_type": foreshadow.get("type", "planted"),
+                            "strength": foreshadow.get("strength", 5),
+                        },
                     }
-                })
-            
-            # 5. 如果有重要冲突,也记录下来
-            conflict = analysis.get('conflict', {})
-            
-            if conflict and conflict.get('level', 0) >= 7:
-                # 确保 parties 和 types 都是字符串列表
-                parties = conflict.get('parties', [])
-                if parties and isinstance(parties, list):
-                    parties = [str(p) for p in parties]
-                
-                types = conflict.get('types', [])
-                if types and isinstance(types, list):
-                    types = [str(t) for t in types]
-                
-                memories.append({
-                    'type': 'plot_point',
-                    'content': f"重要冲突: {conflict.get('description', '')}。冲突各方: {', '.join(parties)}",
-                    'title': f"冲突 - 强度{conflict.get('level', 0)}",
-                    'metadata': {
-                        'chapter_id': chapter_id,
-                        'chapter_number': chapter_number,
-                        'importance_score': min(conflict.get('level', 5) / 10, 1.0),
-                        'tags': ['冲突'] + types,
-                        'is_foreshadow': 0
+                )
+
+            for plot_point in analysis.get("plot_points", []):
+                if float(plot_point.get("importance", 0) or 0) < 0.6:
+                    continue
+
+                keyword = plot_point.get("keyword", "")
+                position, length = self._find_text_position(chapter_content, keyword)
+                memories.append(
+                    {
+                        "type": "plot_point",
+                        "content": f"{plot_point.get('content', '')}。影响: {plot_point.get('impact', '')}",
+                        "title": f"剧情点 - {plot_point.get('type', 'unknown')}",
+                        "metadata": {
+                            "chapter_id": chapter_id,
+                            "chapter_number": chapter_number,
+                            "importance_score": float(plot_point.get("importance", 0.5) or 0.5),
+                            "tags": ["剧情点", plot_point.get("type", "unknown")],
+                            "is_foreshadow": 0,
+                            "keyword": keyword,
+                            "text_position": position,
+                            "text_length": length,
+                        },
                     }
-                })
-            
-            logger.info(f"📝 从分析中提取了{len(memories)}条记忆")
+                )
+
+            for char_state in analysis.get("character_states", []):
+                char_name = char_state.get("character_name", "未知角色")
+                memories.append(
+                    {
+                        "type": "character_event",
+                        "content": (
+                            f"{char_name}的状态变化: {char_state.get('state_before', '')} → "
+                            f"{char_state.get('state_after', '')}。{char_state.get('psychological_change', '')}"
+                        ),
+                        "title": f"{char_name}的变化",
+                        "metadata": {
+                            "chapter_id": chapter_id,
+                            "chapter_number": chapter_number,
+                            "importance_score": 0.7,
+                            "tags": ["角色", char_name, "状态变化"],
+                            "related_characters": [char_name],
+                            "is_foreshadow": 0,
+                        },
+                    }
+                )
+
+            conflict = analysis.get("conflict", {}) or {}
+            if int(conflict.get("level", 0) or 0) >= 7:
+                memories.append(
+                    {
+                        "type": "plot_point",
+                        "content": f"重要冲突: {conflict.get('description', '')}",
+                        "title": f"冲突 - 强度{conflict.get('level', 0)}",
+                        "metadata": {
+                            "chapter_id": chapter_id,
+                            "chapter_number": chapter_number,
+                            "importance_score": min(float(conflict.get("level", 5) or 5) / 10.0, 1.0),
+                            "tags": ["冲突"] + [str(item) for item in (conflict.get("types", []) or [])],
+                            "is_foreshadow": 0,
+                        },
+                    }
+                )
+
+            logger.info("📝 从分析中提取 %s 条记忆", len(memories))
             return memories
-            
-        except Exception as e:
-            logger.error(f"❌ 提取记忆失败: {str(e)}")
+        except Exception as exc:
+            logger.error("❌ 提取记忆失败: %s", exc)
             return []
-    
+
     def _find_text_position(self, full_text: str, keyword: str) -> tuple[int, int]:
-        """
-        在全文中查找关键词位置
-        
-        Args:
-            full_text: 完整文本
-            keyword: 关键词
-        
-        Returns:
-            (起始位置, 长度) 如果未找到返回(-1, 0)
-        """
+        """Find keyword position in chapter text."""
         if not keyword or not full_text:
             return (-1, 0)
-        
+
         try:
-            # 1. 精确匹配
-            pos = full_text.find(keyword)
-            if pos != -1:
-                return (pos, len(keyword))
-            
-            # 2. 去除标点符号后匹配
-            import re
-            clean_keyword = re.sub(r'[，。！？、；：""''（）《》【】]', '', keyword)
-            clean_text = re.sub(r'[，。！？、；：""''（）《》【】]', '', full_text)
-            pos = clean_text.find(clean_keyword)
-            
-            if pos != -1:
-                # 反向映射到原文位置（简化处理）
-                return (pos, len(clean_keyword))
-            
-            # 3. 模糊匹配：查找关键词的前半部分
+            position = full_text.find(keyword)
+            if position != -1:
+                return (position, len(keyword))
+
+            clean_keyword = re.sub(r"[，。！？、；：\"'（）《》【】]", "", keyword)
+            clean_text = re.sub(r"[，。！？、；：\"'（）《》【】]", "", full_text)
+            position = clean_text.find(clean_keyword)
+            if position != -1:
+                return (position, len(clean_keyword))
+
             if len(keyword) > 10:
-                partial = keyword[:min(15, len(keyword))]
-                pos = full_text.find(partial)
-                if pos != -1:
-                    return (pos, len(partial))
-            
-            # 4. 未找到
-            logger.debug(f"未找到关键词位置: {keyword[:30]}...")
+                partial = keyword[: min(15, len(keyword))]
+                position = full_text.find(partial)
+                if position != -1:
+                    return (position, len(partial))
+
             return (-1, 0)
-            
-        except Exception as e:
-            logger.error(f"查找位置失败: {str(e)}")
+        except Exception as exc:
+            logger.error("查找位置失败: %s", exc)
             return (-1, 0)
-    
+
     def generate_analysis_summary(self, analysis: Dict[str, Any]) -> str:
-        """
-        生成分析摘要文本
-        
-        Args:
-            analysis: 分析结果
-        
-        Returns:
-            格式化的摘要文本
-        """
+        """Generate a compact human-readable report."""
         try:
-            lines = ["=== 章节分析报告 ===\n"]
-            
-            # 整体评分
-            scores = analysis.get('scores', {})
-            lines.append(f"【整体评分】")
+            scores = analysis.get("scores", {}) or {}
+            hooks = analysis.get("hooks", []) or []
+            foreshadows = analysis.get("foreshadows", []) or []
+            causal_links = analysis.get("causal_links", []) or []
+            promises = analysis.get("narrative_promises", []) or []
+
+            lines = ["=== 章节分析报告 ===", ""]
+            lines.append("【整体评分】")
             lines.append(f"  整体质量: {scores.get('overall', 'N/A')}/10")
             lines.append(f"  节奏把控: {scores.get('pacing', 'N/A')}/10")
             lines.append(f"  吸引力: {scores.get('engagement', 'N/A')}/10")
-            lines.append(f"  连贯性: {scores.get('coherence', 'N/A')}/10\n")
-            
-            # 剧情阶段
-            lines.append(f"【剧情阶段】{analysis.get('plot_stage', '未知')}\n")
-            
-            # 钩子统计
-            hooks = analysis.get('hooks', [])
-            if hooks:
-                lines.append(f"【钩子分析】共{len(hooks)}个")
-                for hook in hooks[:3]:  # 只显示前3个
-                    lines.append(f"  • [{hook.get('type')}] {hook.get('content', '')[:50]}... (强度:{hook.get('strength', 0)})")
-                lines.append("")
-            
-            # 伏笔统计
-            foreshadows = analysis.get('foreshadows', [])
-            if foreshadows:
-                planted = sum(1 for f in foreshadows if f.get('type') == 'planted')
-                resolved = sum(1 for f in foreshadows if f.get('type') == 'resolved')
-                lines.append(f"【伏笔分析】埋下{planted}个, 回收{resolved}个\n")
-            
-            # 冲突分析
-            conflict = analysis.get('conflict', {})
-            if conflict:
-                lines.append(f"【冲突分析】")
-                lines.append(f"  类型: {', '.join(conflict.get('types', []))}")
-                lines.append(f"  强度: {conflict.get('level', 0)}/10")
-                lines.append(f"  进度: {int(conflict.get('resolution_progress', 0) * 100)}%\n")
-            
-            # 改进建议
-            suggestions = analysis.get('suggestions', [])
+            lines.append(f"  连贯性: {scores.get('coherence', 'N/A')}/10")
+            lines.append("")
+
+            lines.append(f"【剧情阶段】{analysis.get('plot_stage', '未知')}")
+            lines.append(f"【钩子数量】{len(hooks)}")
+            lines.append(f"【伏笔数量】埋下 {sum(1 for item in foreshadows if item.get('type') == 'planted')} / 回收 {sum(1 for item in foreshadows if item.get('type') == 'resolved')}")
+            lines.append(f"【因果链】{len(causal_links)}")
+            lines.append(f"【叙事承诺】{len(promises)}")
+            lines.append("")
+
+            suggestions = analysis.get("suggestions", []) or []
             if suggestions:
-                lines.append(f"【改进建议】")
-                for i, sug in enumerate(suggestions, 1):
-                    lines.append(f"  {i}. {sug}")
-            
+                lines.append("【改进建议】")
+                for index, suggestion in enumerate(suggestions, start=1):
+                    lines.append(f"  {index}. {suggestion}")
+
             return "\n".join(lines)
-            
-        except Exception as e:
-            logger.error(f"❌ 生成摘要失败: {str(e)}")
+        except Exception as exc:
+            logger.error("❌ 生成分析摘要失败: %s", exc)
             return "分析摘要生成失败"
 
 
-# 创建全局实例(需要时手动初始化)
-_plot_analyzer_instance = None
+_plot_analyzer_instance: Optional[PlotAnalyzer] = None
+
 
 def get_plot_analyzer(ai_service: AIService) -> PlotAnalyzer:
-    """获取剧情分析器实例"""
+    """Get singleton-style analyzer for compatibility."""
     global _plot_analyzer_instance
     if _plot_analyzer_instance is None:
         _plot_analyzer_instance = PlotAnalyzer(ai_service)
