@@ -285,7 +285,7 @@ cat backup.sql | docker exec -i mumuainovel-postgres psql -U "$POSTGRES_USER" -d
 - 欢迎加入QQ交流群，反馈问题和建议！
 
 ## 🙏 致谢
-
+感谢 https://linux.do/社区的支持
 感谢所有贡献者和开源社区的支持！
 
 ---
