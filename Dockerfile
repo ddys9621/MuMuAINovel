@@ -40,13 +40,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制后端依赖文件
-COPY backend/requirements.txt ./
+COPY backend/requirements*.txt ./
 
 # 先从PyTorch官方源安装CPU版本的torch（避免GPU依赖）
 RUN pip install --no-cache-dir torch==2.7.0 --index-url https://download.pytorch.org/whl/cpu
 
 # 再安装其他Python依赖（使用阿里云镜像加速）
-RUN pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
+RUN pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ \
+    && if [ -f requirements_utf8.txt ]; then pip install --no-cache-dir -r requirements_utf8.txt -i https://mirrors.aliyun.com/pypi/simple/; fi
 
 # 复制后端代码
 COPY backend/ ./
@@ -54,13 +55,13 @@ COPY backend/ ./
 # 从前端构建阶段复制构建好的静态文件
 COPY --from=frontend-builder /frontend/dist ./static
 
+# 容器入口负责 secrets 注入、DATABASE_URL 生成和前置校验
+COPY docker-entrypoint.sh ./docker-entrypoint.sh
+
 # 创建必要的目录并授权
 RUN mkdir -p /app/data /app/logs /app/embedding \
+    && chmod +x /app/docker-entrypoint.sh \
     && chown -R appuser:appgroup /app
-
-# 复制预下载的Embedding模型到独立目录（避免被docker-compose的data挂载覆盖）
-# 这样可以避免首次运行时联网下载约420MB的模型文件
-COPY --chown=appuser:appgroup backend/embedding /app/embedding
 
 # 设置环境变量
 ENV PYTHONUNBUFFERED=1 \
@@ -79,7 +80,8 @@ EXPOSE 8000
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')" || exit 1
 
 # 启动命令
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

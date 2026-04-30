@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { CommunityAnnouncement } from '@/components/CommunityAnnouncement'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { PageLoading } from '@/components/ui/PageLoading'
@@ -62,6 +63,7 @@ export default function App() {
           <Route path="/create/inspiration" element={<ProtectedRoute><Navigate to="/projects?panel=inspiration" replace /></ProtectedRoute>} />
         </Routes>
       </Suspense>
+      <CommunityAnnouncement />
     </BrowserRouter>
   )
 }

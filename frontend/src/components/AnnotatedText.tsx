@@ -15,7 +15,7 @@ export interface MemoryAnnotation {
     strength?: number;
     foreshadowType?: 'planted' | 'resolved';
     relatedCharacters?: string[];
-    [key: string]: any;
+    [key: string]: unknown;
   };
 }
 

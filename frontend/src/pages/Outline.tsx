@@ -12,7 +12,9 @@ import type {
   PlotCard, PlotCardCreate, PlotCardUpdate,
   PlotLine, PlotLineCreate, PlotLineUpdate,
   PlotLineProgress, TimelineData, TimelineBeat,
+  PlotCardGenerateRequest, PlotLineGenerateRequest,
   ChapterOutline, ChapterOutlineCreate, ChapterOutlineUpdate,
+  ChapterOutlineBatchCreateRequest, ChapterOutlineGenerateRequest,
 } from '@/types'
 
 type TabKey = 'outlines' | 'plotCards' | 'plotLines' | 'chapterOutlines' | 'overview'
@@ -93,7 +95,7 @@ export default function OutlinePage() {
       refreshPlotLines(projectId),
       refreshChapterOutlines(projectId),
     ]).finally(() => setLoading(false))
-  }, [projectId])
+  }, [projectId, refreshChapterOutlines, refreshOutlines, refreshPlotCards, refreshPlotLines])
 
   // ==================== Tab 容器 ====================
   return (
@@ -148,11 +150,11 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 function OutlinesView({ outlines, projectId, createOutline, updateOutline, deleteOutline, activateOutline, refreshOutlines }: {
   outlines: Outline[]
   projectId?: string
-  createOutline: (data: OutlineCreate) => Promise<any>
-  updateOutline: (id: string, data: OutlineUpdate) => Promise<any>
+  createOutline: (data: OutlineCreate) => Promise<Outline>
+  updateOutline: (id: string, data: OutlineUpdate) => Promise<Outline>
   deleteOutline: (id: string) => Promise<void>
-  activateOutline: (id: string) => Promise<any>
-  refreshOutlines: () => Promise<any>
+  activateOutline: (id: string) => Promise<Outline>
+  refreshOutlines: () => Promise<Outline[]>
 }) {
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<Outline | null>(null)
@@ -175,13 +177,13 @@ function OutlinesView({ outlines, projectId, createOutline, updateOutline, delet
     try {
       const lines = await outlineApi.getPlotLines(outlineId)
       setLinkedPlotLines(prev => ({ ...prev, [outlineId]: lines }))
-    } catch { /* ignore */ }
+    } catch { /* ignore failed relation preview */ }
     finally { setLoadingLinks(null) }
   }
 
   const openCreate = () => { setEditing(null); setForm({ title: '', premise: '', golden_finger: '', selling_points: '', power_system: '', main_tropes: '', ultimate_goal: '', opening_hook: '' }); setShowModal(true) }
   const openEdit = (o: Outline) => {
-    let f = { title: o.title, premise: o.content, golden_finger: '', selling_points: '', power_system: '', main_tropes: '', ultimate_goal: '', opening_hook: '' };
+    const f = { title: o.title, premise: o.content, golden_finger: '', selling_points: '', power_system: '', main_tropes: '', ultimate_goal: '', opening_hook: '' };
     try {
       const parsed = JSON.parse(o.content);
       if (typeof parsed === 'object') {
@@ -193,7 +195,7 @@ function OutlinesView({ outlines, projectId, createOutline, updateOutline, delet
         f.ultimate_goal = parsed.ultimate_goal || '';
         f.opening_hook = parsed.opening_hook || '';
       }
-    } catch {}
+    } catch { /* keep raw outline content when it is not JSON */ }
     setEditing(o); setForm(f); setShowModal(true);
   }
 
@@ -246,11 +248,11 @@ function OutlinesView({ outlines, projectId, createOutline, updateOutline, delet
 
   const handleDelete = async (o: Outline) => {
     if (!confirm(`确定删除「${o.title}」？`)) return
-    try { await deleteOutline(o.id); toast.success('大纲已删除') } catch {}
+    try { await deleteOutline(o.id); toast.success('大纲已删除') } catch { /* hook 已 toast */ }
   }
 
   const handleActivate = async (o: Outline) => {
-    try { await activateOutline(o.id); toast.success('已设为活跃版本'); refreshOutlines() } catch {}
+    try { await activateOutline(o.id); toast.success('已设为活跃版本'); refreshOutlines() } catch { /* hook 已 toast */ }
   }
 
   return (
@@ -413,7 +415,7 @@ function OutlinesView({ outlines, projectId, createOutline, updateOutline, delet
 
       {viewingOutline && (() => {
         let parsed: Record<string, unknown> | null = null;
-        try { const p = JSON.parse(viewingOutline.content); if (typeof p === 'object' && p !== null) parsed = p as Record<string, unknown>; } catch {}
+        try { const p = JSON.parse(viewingOutline.content); if (typeof p === 'object' && p !== null) parsed = p as Record<string, unknown>; } catch { /* render raw outline content */ }
         const labels: Array<[string, string]> = [
           ['premise', '故事梗概'],
           ['golden_finger', '金手指设定'],
@@ -470,10 +472,10 @@ function PlotCardsView({ plotCards, projectId, outlines, createPlotCard, updateP
   plotCards: PlotCard[]
   projectId?: string
   outlines: Outline[]
-  createPlotCard: (data: PlotCardCreate) => Promise<any>
-  updatePlotCard: (id: string, data: PlotCardUpdate) => Promise<any>
+  createPlotCard: (data: PlotCardCreate) => Promise<PlotCard>
+  updatePlotCard: (id: string, data: PlotCardUpdate) => Promise<PlotCard>
   deletePlotCard: (id: string) => Promise<void>
-  generatePlotCards: (data: any) => Promise<any>
+  generatePlotCards: (data: PlotCardGenerateRequest) => Promise<PlotCard[]>
 }) {
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<PlotCard | null>(null)
@@ -499,7 +501,7 @@ function PlotCardsView({ plotCards, projectId, outlines, createPlotCard, updateP
         await createPlotCard({ project_id: projectId, title: form.title, content: form.content, card_type: form.card_type, order_index: form.order_index })
       }
       setShowModal(false)
-    } catch {}
+    } catch { /* hook 已 toast */ }
   }
 
   const handleGenerate = async () => {
@@ -519,12 +521,12 @@ function PlotCardsView({ plotCards, projectId, outlines, createPlotCard, updateP
         enable_mcp: genEnableMcp,
         selected_plugins: genPlugins,
       })
-    } catch {} finally { setGenerating(false) }
+    } catch { /* hook 已 toast */ } finally { setGenerating(false) }
   }
 
   const handleDelete = async (c: PlotCard) => {
     if (!confirm(`确定删除「${c.title}」？`)) return
-    try { await deletePlotCard(c.id) } catch {}
+    try { await deletePlotCard(c.id) } catch { /* hook 已 toast */ }
   }
 
   const typeColor = (t: string) => {
@@ -652,10 +654,10 @@ function PlotLinesView({ plotLines, projectId, outlines, plotCards, createPlotLi
   projectId?: string
   outlines: Outline[]
   plotCards: PlotCard[]
-  createPlotLine: (data: PlotLineCreate) => Promise<any>
-  updatePlotLine: (id: string, data: PlotLineUpdate) => Promise<any>
+  createPlotLine: (data: PlotLineCreate) => Promise<PlotLine>
+  updatePlotLine: (id: string, data: PlotLineUpdate) => Promise<PlotLine>
   deletePlotLine: (id: string) => Promise<void>
-  generatePlotLines: (data: any) => Promise<any>
+  generatePlotLines: (data: PlotLineGenerateRequest) => Promise<PlotLine[]>
 }) {
   const defaultLineType = normalizePlotLineType(plotLines[0]?.line_type)
   const [showModal, setShowModal] = useState(false)
@@ -810,7 +812,7 @@ function PlotLinesView({ plotLines, projectId, outlines, plotCards, createPlotLi
         })
       }
       setShowModal(false)
-    } catch {}
+    } catch { /* hook 已 toast */ }
   }
 
   const handleGenerate = async () => {
@@ -831,12 +833,12 @@ function PlotLinesView({ plotLines, projectId, outlines, plotCards, createPlotLi
         enable_mcp: genEnableMcp,
         selected_plugins: genPlugins,
       })
-    } catch {} finally { setGenerating(false) }
+    } catch { /* hook 已 toast */ } finally { setGenerating(false) }
   }
 
   const handleDelete = async (l: PlotLine) => {
     if (!confirm(`确定删除「${l.title}」？`)) return
-    try { await deletePlotLine(l.id) } catch {}
+    try { await deletePlotLine(l.id) } catch { /* hook 已 toast */ }
   }
 
   return (
@@ -1164,11 +1166,11 @@ function PlotLinesView({ plotLines, projectId, outlines, plotCards, createPlotLi
 function ChapterOutlinesView({ chapterOutlines, projectId, createChapterOutline, updateChapterOutline, deleteChapterOutline, batchCreateChapterOutlines, generateChapterOutlines, plotLines }: {
   chapterOutlines: ChapterOutline[]
   projectId?: string
-  createChapterOutline: (data: ChapterOutlineCreate) => Promise<any>
-  updateChapterOutline: (id: string, data: ChapterOutlineUpdate) => Promise<any>
+  createChapterOutline: (data: ChapterOutlineCreate) => Promise<ChapterOutline>
+  updateChapterOutline: (id: string, data: ChapterOutlineUpdate) => Promise<ChapterOutline>
   deleteChapterOutline: (id: string) => Promise<void>
-  batchCreateChapterOutlines: (data: any) => Promise<any>
-  generateChapterOutlines: (data: any) => Promise<any>
+  batchCreateChapterOutlines: (data: ChapterOutlineBatchCreateRequest) => Promise<ChapterOutline[]>
+  generateChapterOutlines: (data: ChapterOutlineGenerateRequest) => Promise<ChapterOutline[]>
   plotLines: PlotLine[]
 }) {
   const [showModal, setShowModal] = useState(false)
@@ -1200,7 +1202,7 @@ function ChapterOutlinesView({ chapterOutlines, projectId, createChapterOutline,
     try {
       const lines = await chapterOutlineLinkApi.getPlotLines(coId)
       setLinkedLines(prev => ({ ...prev, [coId]: lines.map(l => ({ id: l.id, title: l.title, line_type: l.line_type })) }))
-    } catch { /* ignore */ }
+    } catch { /* ignore failed relation preview */ }
     finally { setLoadingLink(null) }
   }
 
@@ -1254,7 +1256,7 @@ function ChapterOutlinesView({ chapterOutlines, projectId, createChapterOutline,
         await createChapterOutline({ project_id: projectId, chapter_number: form.chapter_number, title: form.title, plot_points: form.plot_points || undefined, scene: form.scene || undefined, pov: form.pov || undefined, target_word_count: form.target_word_count })
       }
       setShowModal(false)
-    } catch {}
+    } catch { /* hook 已 toast */ }
   }
 
   const handleBatchCreate = async () => {
@@ -1270,7 +1272,7 @@ function ChapterOutlinesView({ chapterOutlines, projectId, createChapterOutline,
       }))
       await batchCreateChapterOutlines({ project_id: projectId, outlines })
       setShowBatchModal(false)
-    } catch {} finally { setBatchCreating(false) }
+    } catch { /* hook 已 toast */ } finally { setBatchCreating(false) }
   }
 
   const handleGenerate = async () => {
@@ -1291,7 +1293,7 @@ function ChapterOutlinesView({ chapterOutlines, projectId, createChapterOutline,
         enable_mcp: genEnableMcp,
         selected_plugins: genPlugins,
       })
-    } catch {} finally { setGenerating(false) }
+    } catch { /* hook 已 toast */ } finally { setGenerating(false) }
   }
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -1299,7 +1301,15 @@ function ChapterOutlinesView({ chapterOutlines, projectId, createChapterOutline,
   const [deleting, setDeleting] = useState(false)
 
   const toggleSelect = (id: string) => {
-    setSelectedIds(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; })
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
   }
   const toggleSelectAll = () => {
     setSelectedIds(prev => prev.size === chapterOutlines.length ? new Set() : new Set(chapterOutlines.map(co => co.id)))

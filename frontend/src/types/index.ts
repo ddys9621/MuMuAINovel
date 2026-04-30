@@ -787,7 +787,7 @@ export interface PlotLine {
   line_type: string;
   order_index?: number;
   plot_cards?: string[];
-  timeline_data?: Record<string, any>;
+  timeline_data?: TimelineData;
   estimated_chapters?: number;  // 预计章节数
   created_at: string;
   updated_at: string;
@@ -806,7 +806,7 @@ export interface PlotLineCreate {
   line_type: string;
   order_index?: number;
   plot_cards?: string[];
-  timeline_data?: Record<string, any>;
+  timeline_data?: TimelineData;
   estimated_chapters?: number;  // 预计章节数
 }
 
@@ -816,7 +816,7 @@ export interface PlotLineUpdate {
   line_type?: string;
   order_index?: number;
   plot_cards?: string[];
-  timeline_data?: Record<string, any>;
+  timeline_data?: TimelineData;
   estimated_chapters?: number;  // 预计章节数
 }
 

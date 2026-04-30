@@ -129,7 +129,7 @@ cat backup.sql | docker exec -i mumuainovel-postgres psql -U "$POSTGRES_USER" -d
 2. `docker compose logs -f` 查看报错栈。
 3. 检查 `secrets/*.txt` 是否仍是 `CHANGE_ME` 占位值。
 4. 检查 `.env` 中端口是否冲突（`APP_PORT` / `POSTGRES_PORT`）。
-5. 验证健康检查：`http://localhost:8000/health`。
+5. 验证就绪检查：`http://localhost:8000/health/ready`。
 
 ## 📋 详细安装步骤
 
@@ -192,17 +192,17 @@ cat backup.sql | docker exec -i mumuainovel-postgres psql -U "$POSTGRES_USER" -d
      POSTGRES_DB=mumuai_novel
      POSTGRES_USER=mumuai
      POSTGRES_PORT=5432
-     DATABASE_URL=postgresql+asyncpg://mumuai:URL_ENCODED_PASSWORD@postgres:5432/mumuai_novel
+     DATABASE_URL=
      ```
-   - 密码若包含 `@`、`:`、`/`、`#` 等特殊字符，必须先做 URL 编码。
-   - 本项目 Docker 部署密码请通过 `secrets/*.txt` 管理，不建议在 `.env` 明文保存真实密码。
+   - 本项目 Docker 部署密码请通过 `secrets/*.txt` 管理。`DATABASE_URL` 可留空，容器入口会用 `secrets/postgres_password.txt` 自动生成连接串。
+   - 如需手动填写 `DATABASE_URL`，密码若包含 `@`、`:`、`/`、`#` 等特殊字符，必须先做 URL 编码。
 
 
 7. **常见故障排查**
-   - **认证失败**：确认 `secrets/*.txt` 与 `.env` 配置一致，且不是 `CHANGE_ME` 占位值。
+   - **认证失败**：确认 `secrets/*.txt` 不是 `CHANGE_ME` 占位值。
    - **连接被拒绝**：检查 PostgreSQL 服务是否启动、端口是否被占用或防火墙阻断。
    - **权限不足**：确保数据库所有者为目标用户，或重新执行第 4 步的 GRANT 语句。
-   - **`DATABASE_URL` 格式错误**：必须以 `postgresql+asyncpg://用户:密码@主机:端口/数据库` 形式书写，且密码需 URL 编码。
+   - **`DATABASE_URL` 格式错误**：优先留空让容器自动生成；手动填写时必须以 `postgresql+asyncpg://用户:密码@主机:端口/数据库` 形式书写，且密码需 URL 编码。
 
 
 ### Q: Python 或 Node.js 命令不识别
