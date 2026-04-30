@@ -14,6 +14,7 @@ require_cmd() {
 
 log "检查 Docker 环境"
 require_cmd docker
+require_cmd curl
 if ! docker compose version >/dev/null 2>&1; then
   echo "未检测到 docker compose 插件" >&2
   exit 1
@@ -47,19 +48,17 @@ if [[ "$postgres_pwd" == CHANGE_ME* || "$local_pwd" == CHANGE_ME* ]]; then
   exit 1
 fi
 
-database_url="$(grep -E '^DATABASE_URL=' .env | tail -n 1 | cut -d'=' -f2- | tr -d '\r\n')"
-if [[ -z "$database_url" || "$database_url" == *REPLACE_WITH_URLENCODED_PASSWORD* ]]; then
-  echo "检测到无效 DATABASE_URL，请在 .env 中配置有效连接串（并将密码做 URL 编码）" >&2
-  exit 1
-fi
+app_port="$(grep -E '^APP_PORT=' .env | tail -n 1 | cut -d'=' -f2- | tr -d '\r\n\"' || true)"
+app_port="${app_port:-8000}"
+health_url="http://localhost:${app_port}/health/ready"
 
 log "启动容器"
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 
-log "等待服务健康检查"
+log "等待服务就绪检查"
 for _ in {1..30}; do
-  if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
-    echo "部署成功，访问地址: http://localhost:8000"
+  if curl -fsS "$health_url" >/dev/null 2>&1; then
+    echo "部署成功，访问地址: http://localhost:${app_port}"
     exit 0
   fi
   sleep 2
@@ -67,4 +66,3 @@ done
 
 echo "服务未在预期时间内就绪，请执行 docker compose logs -f 查看日志" >&2
 exit 1
-

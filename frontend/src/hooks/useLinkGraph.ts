@@ -132,7 +132,7 @@ export function useLinkGraph(options?: UseLinkGraphOptions): UseLinkGraphResult 
     });
   }, []);
 
-  const resolveLineStats = (line: PlotLine | PlotLineWithLinks) => {
+  const resolveLineStats = useCallback((line: PlotLine | PlotLineWithLinks) => {
     const directChapterCount =
       'chapter_count' in line && typeof line.chapter_count === 'number'
         ? line.chapter_count
@@ -158,9 +158,9 @@ export function useLinkGraph(options?: UseLinkGraphOptions): UseLinkGraphResult 
         : 0);
 
     return { chapterCount, cardCount };
-  };
+  }, []);
 
-  const buildPlotLineNode = (line: PlotLine | PlotLineWithLinks): LinkGraphNode => {
+  const buildPlotLineNode = useCallback((line: PlotLine | PlotLineWithLinks): LinkGraphNode => {
     const { chapterCount, cardCount } = resolveLineStats(line);
     return {
       id: line.id,
@@ -174,9 +174,9 @@ export function useLinkGraph(options?: UseLinkGraphOptions): UseLinkGraphResult 
       },
       expandable: chapterCount + cardCount > 0,
     };
-  };
+  }, [resolveLineStats]);
 
-  const resolveOutlineStats = (outline: ChapterOutline | ChapterOutlineWithLinks) => {
+  const resolveOutlineStats = useCallback((outline: ChapterOutline | ChapterOutlineWithLinks) => {
     const directLineCount =
       'plot_line_count' in outline && typeof outline.plot_line_count === 'number'
         ? outline.plot_line_count
@@ -200,9 +200,9 @@ export function useLinkGraph(options?: UseLinkGraphOptions): UseLinkGraphResult 
         : 0);
 
     return { plotLineCount, cardCount };
-  };
+  }, []);
 
-  const buildOutlineNode = (outline: ChapterOutline | ChapterOutlineWithLinks): LinkGraphNode => {
+  const buildOutlineNode = useCallback((outline: ChapterOutline | ChapterOutlineWithLinks): LinkGraphNode => {
     const { plotLineCount, cardCount } = resolveOutlineStats(outline);
     return {
       id: outline.id,
@@ -216,9 +216,9 @@ export function useLinkGraph(options?: UseLinkGraphOptions): UseLinkGraphResult 
       },
       expandable: cardCount > 0,
     };
-  };
+  }, [resolveOutlineStats]);
 
-  const resolveCardStats = (card: PlotCard | PlotCardWithLinks) => {
+  const resolveCardStats = useCallback((card: PlotCard | PlotCardWithLinks) => {
     const directLineCount =
       'plot_line_count' in card && typeof card.plot_line_count === 'number'
         ? card.plot_line_count
@@ -242,9 +242,9 @@ export function useLinkGraph(options?: UseLinkGraphOptions): UseLinkGraphResult 
         : 0);
 
     return { plotLineCount, chapterCount };
-  };
+  }, []);
 
-  const buildPlotCardNode = (card: PlotCard | PlotCardWithLinks): LinkGraphNode => {
+  const buildPlotCardNode = useCallback((card: PlotCard | PlotCardWithLinks): LinkGraphNode => {
     const { plotLineCount, chapterCount } = resolveCardStats(card);
     return {
       id: card.id,
@@ -258,7 +258,7 @@ export function useLinkGraph(options?: UseLinkGraphOptions): UseLinkGraphResult 
       },
       expandable: plotLineCount + chapterCount > 0,
     };
-  };
+  }, [resolveCardStats]);
 
   const initializeGraph = useCallback(async (projectId: string, opts?: { limit?: number }) => {
     if (!projectId) return;
@@ -295,7 +295,7 @@ export function useLinkGraph(options?: UseLinkGraphOptions): UseLinkGraphResult 
     } finally {
       setLoading(false);
     }
-  }, [initialLimit]);
+  }, [buildPlotLineNode, initialLimit]);
 
   const fetchLineChildren = useCallback(async (lineId: string) => {
     const [outlines, cards] = await Promise.all([
@@ -350,7 +350,7 @@ export function useLinkGraph(options?: UseLinkGraphOptions): UseLinkGraphResult 
       });
     });
     upsertEdges(edges);
-  }, [fetchLineChildren, upsertEdges, upsertNodes]);
+  }, [buildOutlineNode, buildPlotCardNode, fetchLineChildren, upsertEdges, upsertNodes]);
 
   const handleExpandOutline = useCallback(async (nodeId: string) => {
     const { lines, cards } = await fetchOutlineChildren(nodeId);
@@ -379,7 +379,7 @@ export function useLinkGraph(options?: UseLinkGraphOptions): UseLinkGraphResult 
       });
     });
     upsertEdges(edges);
-  }, [fetchOutlineChildren, upsertEdges, upsertNodes]);
+  }, [buildPlotCardNode, buildPlotLineNode, fetchOutlineChildren, upsertEdges, upsertNodes]);
 
   const handleExpandCard = useCallback(async (nodeId: string) => {
     const { lines, outlines } = await fetchCardChildren(nodeId);
@@ -408,7 +408,7 @@ export function useLinkGraph(options?: UseLinkGraphOptions): UseLinkGraphResult 
       });
     });
     upsertEdges(edges);
-  }, [fetchCardChildren, upsertEdges, upsertNodes]);
+  }, [buildOutlineNode, buildPlotLineNode, fetchCardChildren, upsertEdges, upsertNodes]);
 
   const expandNode = useCallback(async (nodeId: string, type: LinkGraphEntityType) => {
     if (expandedRef.current.has(nodeId)) {

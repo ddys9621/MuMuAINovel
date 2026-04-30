@@ -73,6 +73,8 @@ import type {
   ChapterAnalysisResponse,
 } from '../types';
 
+type ChapterListApiResponse = Chapter[] | { items?: Chapter[] };
+
 const api = axios.create({
   baseURL: '/api',
   timeout: 180000, // 3分钟超时
@@ -386,7 +388,7 @@ export const characterApi = {
 
 export const chapterApi = {
   getChapters: (projectId: string) =>
-    api.get<unknown, any>(`/chapters/project/${projectId}`)
+    api.get<unknown, ChapterListApiResponse>(`/chapters/project/${projectId}`)
        .then(res => Array.isArray(res) ? res : (res.items || [])),
   
   getChapter: (id: string) => api.get<unknown, Chapter>(`/chapters/${id}`),
@@ -580,7 +582,7 @@ export const wizardStreamApi = {
       enable_mcp?: boolean;
       selected_plugins?: string[];
     },
-    options?: SSEClientOptions
+    options?: SSEClientOptions<WorldBuildingResponse>
   ) => ssePost<WorldBuildingResponse>(
     '/api/wizard-stream/world-building',
     data,
@@ -600,7 +602,7 @@ export const wizardStreamApi = {
       enable_mcp?: boolean;
       selected_plugins?: string[];
     },
-    options?: SSEClientOptions
+    options?: SSEClientOptions<GenerateCharactersResponse>
   ) => ssePost<GenerateCharactersResponse>(
     '/api/wizard-stream/characters',
     data,
@@ -633,7 +635,7 @@ export const wizardStreamApi = {
       enable_mcp?: boolean;  // 新增：是否启用MCP
       selected_plugins?: string[];  // 新增：选择的插件列表
     },
-    options?: SSEClientOptions
+    options?: SSEClientOptions<GenerateOutlineResponse>
   ) => ssePost<GenerateOutlineResponse>(
     '/api/wizard-stream/outline',
     data,
@@ -648,7 +650,7 @@ export const wizardStreamApi = {
       atmosphere?: string;
       rules?: string;
     },
-    options?: SSEClientOptions
+    options?: SSEClientOptions<WorldBuildingResponse>
   ) => ssePost<WorldBuildingResponse>(
     '/api/wizard-stream/world-building',
     { ...data, project_id: projectId, mode: 'update' },
@@ -663,7 +665,7 @@ export const wizardStreamApi = {
       enable_mcp?: boolean;
       selected_plugins?: string[];
     },
-    options?: SSEClientOptions
+    options?: SSEClientOptions<WorldBuildingResponse>
   ) => ssePost<WorldBuildingResponse>(
     '/api/wizard-stream/world-building',
     { ...(data || {}), project_id: projectId, mode: 'regenerate' },
@@ -672,7 +674,7 @@ export const wizardStreamApi = {
 
   cleanupWizardDataStream: (
     projectId: string,
-    options?: SSEClientOptions
+    options?: SSEClientOptions<{ message: string; deleted: { characters: number; outlines: number; chapters: number } }>
   ) => ssePost<{ message: string; deleted: { characters: number; outlines: number; chapters: number } }>(
     `/api/wizard-stream/cleanup/${projectId}`,
     {},

@@ -14,7 +14,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./backend/scripts/init_postgres.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mumuai} -d ${POSTGRES_DB:-mumuai_novel}"]
@@ -29,7 +29,7 @@ services:
     command:
       - postgres
       - -c
-      - max_connections=${POSTGRES_MAX_CONNECTIONS:-200}
+      - max_connections=${POSTGRES_MAX_CONNECTIONS:-100}
       - -c
       - shared_buffers=${POSTGRES_SHARED_BUFFERS:-256MB}
       - -c
@@ -67,7 +67,7 @@ services:
     ports:
       - "${APP_PORT:-8000}:8000"
     volumes:
-      - ./logs:/app/logs
+      - app_logs:/app/logs
       - app_data:/app/data
     environment:
       APP_NAME: ${APP_NAME:-MuMuAINovel}
@@ -117,13 +117,9 @@ services:
 
       SESSION_EXPIRE_MINUTES: ${SESSION_EXPIRE_MINUTES:-120}
       SESSION_REFRESH_THRESHOLD_MINUTES: ${SESSION_REFRESH_THRESHOLD_MINUTES:-30}
-    command: >
-      /bin/sh -c "set -e;
-      if [ -n \"$${LOCAL_AUTH_PASSWORD_FILE:-}\" ] && [ -f \"$${LOCAL_AUTH_PASSWORD_FILE}\" ]; then export LOCAL_AUTH_PASSWORD=$$(cat $${LOCAL_AUTH_PASSWORD_FILE}); fi;
-      exec python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -139,6 +135,8 @@ volumes:
     driver: local
   app_data:
     driver: local
+  app_logs:
+    driver: local
 
 networks:
   ai-story-network:
@@ -149,4 +147,3 @@ secrets:
     file: ./secrets/postgres_password.txt
   local_auth_password:
     file: ./secrets/local_auth_password.txt
-

@@ -16,6 +16,20 @@ function Test-CommandAvailable($name, $checkArgs = '--version') {
   }
 }
 
+function Get-EnvValue($name, $defaultValue) {
+  $line = Get-Content '.env' | Where-Object { $_ -match "^$name=" } | Select-Object -Last 1
+  if (-not $line) {
+    return $defaultValue
+  }
+
+  $value = $line.Substring($name.Length + 1).Trim().Trim('"').Trim("'")
+  if ([string]::IsNullOrWhiteSpace($value)) {
+    return $defaultValue
+  }
+
+  return $value
+}
+
 Write-Step "Checking Docker environment"
 Test-CommandAvailable docker
 
@@ -52,11 +66,8 @@ if ($postgresPwd -like 'CHANGE_ME*' -or $localPwd -like 'CHANGE_ME*') {
   throw "Placeholder passwords detected. Update secrets/*.txt before deployment."
 }
 
-$databaseUrlLine = (Get-Content '.env' | Where-Object { $_ -match '^DATABASE_URL=' } | Select-Object -Last 1)
-$databaseUrl = if ($databaseUrlLine) { $databaseUrlLine.Substring('DATABASE_URL='.Length).Trim() } else { '' }
-if ([string]::IsNullOrWhiteSpace($databaseUrl) -or $databaseUrl -like '*REPLACE_WITH_URLENCODED_PASSWORD*') {
-  throw "Invalid DATABASE_URL detected. Configure a valid DSN in .env with URL-encoded password."
-}
+$appPort = Get-EnvValue 'APP_PORT' '8000'
+$healthUrl = "http://localhost:$appPort/health/ready"
 
 $composeArgs = @('-f', 'docker-compose.yml', '-f', 'docker-compose.prod.yml', 'up', '-d')
 if (-not $NoBuild) {
@@ -66,13 +77,13 @@ if (-not $NoBuild) {
 Write-Step "Starting containers"
 docker compose @composeArgs
 
-Write-Step "Waiting for health endpoint"
+Write-Step "Waiting for readiness endpoint"
 $maxRetry = 30
 for ($i = 1; $i -le $maxRetry; $i++) {
   try {
-    $resp = Invoke-WebRequest -Uri 'http://localhost:8000/health' -UseBasicParsing -TimeoutSec 3
+    $resp = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 3
     if ($resp.StatusCode -eq 200) {
-      Write-Host "Deployment succeeded: http://localhost:8000" -ForegroundColor Green
+      Write-Host "Deployment succeeded: http://localhost:$appPort" -ForegroundColor Green
       exit 0
     }
   } catch {
@@ -82,4 +93,3 @@ for ($i = 1; $i -le $maxRetry; $i++) {
 
 Write-Host "Service not ready in time. Run: docker compose logs -f" -ForegroundColor Yellow
 exit 1
-

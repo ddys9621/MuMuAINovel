@@ -18,7 +18,7 @@ from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
 
 from app.config import settings as config_settings
-from app.database import close_db, _session_stats
+from app.database import close_db, _session_stats, check_database_health
 from app.logger import setup_logging, get_logger
 from app.middleware import RequestIDMiddleware
 from app.middleware.auth_middleware import AuthMiddleware
@@ -33,6 +33,11 @@ setup_logging(
     backup_count=config_settings.log_backup_count
 )
 logger = get_logger(__name__)
+
+_startup_state = {
+    "database_ready": False,
+    "database_error": None,
+}
 
 
 @asynccontextmanager
@@ -52,8 +57,12 @@ async def lifespan(app: FastAPI):
         # 自动执行需要的迁移（幂等）
         await run_auto_migrations(engine)
 
+        _startup_state["database_ready"] = True
+        _startup_state["database_error"] = None
         logger.info("✅ 数据库表结构初始化成功")
     except Exception as e:
+        _startup_state["database_ready"] = False
+        _startup_state["database_error"] = str(e)
         logger.error(f"❌ 数据库表结构初始化失败: {str(e)}", exc_info=True)
         # 不阻止应用启动，允许在后续操作中重试
 
@@ -141,8 +150,47 @@ else:
 
 @app.get("/health")
 async def health_check():
-    """健康检查"""
+    """进程存活检查：只表示 HTTP 服务还在响应。"""
     return {"status": "ok"}
+
+
+@app.get("/health/ready")
+async def readiness_check():
+    """服务就绪检查：部署和容器健康检查必须走这里。"""
+    if not _startup_state["database_ready"]:
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "status": "error",
+                "checks": {
+                    "startup_database": {
+                        "healthy": False,
+                        "error": _startup_state["database_error"] or "database initialization not completed",
+                    }
+                },
+            },
+        )
+
+    db_health = await check_database_health()
+    if not db_health.get("healthy"):
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "status": "error",
+                "checks": {
+                    "startup_database": {"healthy": True},
+                    "database": db_health,
+                },
+            },
+        )
+
+    return {
+        "status": "ok",
+        "checks": {
+            "startup_database": {"healthy": True},
+            "database": db_health,
+        },
+    }
 
 
 @app.get("/health/db-sessions")

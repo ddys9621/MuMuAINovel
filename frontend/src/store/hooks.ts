@@ -190,11 +190,12 @@ export function useOutlineSync() {
       updateOutline(id, updated);
       toast.success('大纲更新成功');
       return updated;
-    } catch (error: any) {
+    } catch (error) {
       console.error('更新大纲失败:', error);
+      const status = (error as { response?: { status?: number } }).response?.status;
       
       // 处理版本冲突
-      if (error?.response?.status === 409) {
+      if (status === 409) {
         toast.error('版本冲突：大纲已被其他用户修改，请刷新后重试');
       } else {
         toast.error('更新大纲失败');

@@ -27,6 +27,8 @@ export function usePlotLineLinks(lineId: string, options?: UseLinkManagementOpti
   const [chapterOutlines, setChapterOutlines] = useState<ChapterOutlineWithLinks[]>([]);
   const [plotCards, setPlotCards] = useState<PlotCardWithLinks[]>([]);
   const [loading, setLoading] = useState(false);
+  const onSuccess = options?.onSuccess;
+  const onError = options?.onError;
 
   // 加载关联的章纲
   const loadChapterOutlines = useCallback(async () => {
@@ -37,11 +39,11 @@ export function usePlotLineLinks(lineId: string, options?: UseLinkManagementOpti
       setChapterOutlines(data);
     } catch (error) {
       toast.error('加载关联章纲失败');
-      options?.onError?.(error as Error);
+      onError?.(error as Error);
     } finally {
       setLoading(false);
     }
-  }, [lineId, options]);
+  }, [lineId, onError]);
 
   // 加载关联的剧情卡片
   const loadPlotCards = useCallback(async () => {
@@ -52,11 +54,11 @@ export function usePlotLineLinks(lineId: string, options?: UseLinkManagementOpti
       setPlotCards(data);
     } catch (error) {
       toast.error('加载关联剧情卡片失败');
-      options?.onError?.(error as Error);
+      onError?.(error as Error);
     } finally {
       setLoading(false);
     }
-  }, [lineId, options]);
+  }, [lineId, onError]);
 
   // 自动加载关联数据
   useEffect(() => {
@@ -64,7 +66,7 @@ export function usePlotLineLinks(lineId: string, options?: UseLinkManagementOpti
       loadChapterOutlines();
       loadPlotCards();
     }
-  }, [lineId]); // 只依赖lineId，避免无限循环
+  }, [lineId, loadChapterOutlines, loadPlotCards]);
 
   // 关联章纲
   const linkChapterOutlines = useCallback(async (
@@ -76,14 +78,14 @@ export function usePlotLineLinks(lineId: string, options?: UseLinkManagementOpti
       await plotLineLinkApi.linkChapterOutlines(lineId, { chapter_outline_ids: chapterOutlineIds, role });
       toast.success('关联章纲成功');
       await loadChapterOutlines();
-      options?.onSuccess?.();
+      onSuccess?.();
     } catch (error) {
       toast.error('关联章纲失败');
-      options?.onError?.(error as Error);
+      onError?.(error as Error);
     } finally {
       setLoading(false);
     }
-  }, [lineId, loadChapterOutlines, options]);
+  }, [lineId, loadChapterOutlines, onError, onSuccess]);
 
   // 取消章纲关联
   const unlinkChapterOutlines = useCallback(async (chapterOutlineIds: string[]) => {
@@ -92,14 +94,14 @@ export function usePlotLineLinks(lineId: string, options?: UseLinkManagementOpti
       await plotLineLinkApi.unlinkChapterOutlines(lineId, chapterOutlineIds);
       toast.success('取消关联成功');
       await loadChapterOutlines();
-      options?.onSuccess?.();
+      onSuccess?.();
     } catch (error) {
       toast.error('取消关联失败');
-      options?.onError?.(error as Error);
+      onError?.(error as Error);
     } finally {
       setLoading(false);
     }
-  }, [lineId, loadChapterOutlines, options]);
+  }, [lineId, loadChapterOutlines, onError, onSuccess]);
 
   // 关联剧情卡片
   const linkPlotCards = useCallback(async (plotCardIds: string[]) => {
@@ -108,14 +110,14 @@ export function usePlotLineLinks(lineId: string, options?: UseLinkManagementOpti
       await plotLineLinkApi.linkPlotCards(lineId, plotCardIds);
       toast.success('关联剧情卡片成功');
       await loadPlotCards();
-      options?.onSuccess?.();
+      onSuccess?.();
     } catch (error) {
       toast.error('关联剧情卡片失败');
-      options?.onError?.(error as Error);
+      onError?.(error as Error);
     } finally {
       setLoading(false);
     }
-  }, [lineId, loadPlotCards, options]);
+  }, [lineId, loadPlotCards, onError, onSuccess]);
 
   // 取消剧情卡片关联
   const unlinkPlotCards = useCallback(async (plotCardIds: string[]) => {
@@ -124,14 +126,14 @@ export function usePlotLineLinks(lineId: string, options?: UseLinkManagementOpti
       await plotLineLinkApi.unlinkPlotCards(lineId, plotCardIds);
       toast.success('取消关联成功');
       await loadPlotCards();
-      options?.onSuccess?.();
+      onSuccess?.();
     } catch (error) {
       toast.error('取消关联失败');
-      options?.onError?.(error as Error);
+      onError?.(error as Error);
     } finally {
       setLoading(false);
     }
-  }, [lineId, loadPlotCards, options]);
+  }, [lineId, loadPlotCards, onError, onSuccess]);
 
   return {
     chapterOutlines,
@@ -153,6 +155,8 @@ export function useChapterOutlineLinks(outlineId: string, options?: UseLinkManag
   const [plotLines, setPlotLines] = useState<PlotLineWithLinks[]>([]);
   const [plotCards, setPlotCards] = useState<PlotCardWithLinks[]>([]);
   const [loading, setLoading] = useState(false);
+  const onSuccess = options?.onSuccess;
+  const onError = options?.onError;
 
   // 加载关联的剧情线
   const loadPlotLines = useCallback(async () => {
@@ -163,11 +167,11 @@ export function useChapterOutlineLinks(outlineId: string, options?: UseLinkManag
       setPlotLines(data);
     } catch (error) {
       toast.error('加载关联剧情线失败');
-      options?.onError?.(error as Error);
+      onError?.(error as Error);
     } finally {
       setLoading(false);
     }
-  }, [outlineId, options]);
+  }, [outlineId, onError]);
 
   // 加载关联的剧情卡片
   const loadPlotCards = useCallback(async () => {
@@ -178,11 +182,11 @@ export function useChapterOutlineLinks(outlineId: string, options?: UseLinkManag
       setPlotCards(data);
     } catch (error) {
       toast.error('加载关联剧情卡片失败');
-      options?.onError?.(error as Error);
+      onError?.(error as Error);
     } finally {
       setLoading(false);
     }
-  }, [outlineId, options]);
+  }, [outlineId, onError]);
 
   // 自动加载关联数据
   useEffect(() => {
@@ -190,7 +194,7 @@ export function useChapterOutlineLinks(outlineId: string, options?: UseLinkManag
       loadPlotLines();
       loadPlotCards();
     }
-  }, [outlineId]); // 只依赖outlineId，避免无限循环
+  }, [outlineId, loadPlotCards, loadPlotLines]);
 
   // 关联剧情线
   const linkPlotLines = useCallback(async (
@@ -207,14 +211,14 @@ export function useChapterOutlineLinks(outlineId: string, options?: UseLinkManag
       toast.success('关联剧情线成功');
       await loadPlotLines();
       
-      options?.onSuccess?.();
+      onSuccess?.();
     } catch (error) {
       toast.error('关联剧情线失败');
-      options?.onError?.(error as Error);
+      onError?.(error as Error);
     } finally {
       setLoading(false);
     }
-  }, [outlineId, loadPlotLines, options]);
+  }, [outlineId, loadPlotLines, onError, onSuccess]);
 
   // 取消剧情线关联
   const unlinkPlotLines = useCallback(async (plotLineIds: string[]) => {
@@ -223,14 +227,14 @@ export function useChapterOutlineLinks(outlineId: string, options?: UseLinkManag
       await chapterOutlineLinkApi.unlinkPlotLines(outlineId, plotLineIds);
       toast.success('取消关联成功');
       await loadPlotLines();
-      options?.onSuccess?.();
+      onSuccess?.();
     } catch (error) {
       toast.error('取消关联失败');
-      options?.onError?.(error as Error);
+      onError?.(error as Error);
     } finally {
       setLoading(false);
     }
-  }, [outlineId, loadPlotLines, options]);
+  }, [outlineId, loadPlotLines, onError, onSuccess]);
 
   // 关联剧情卡片
   const linkPlotCards = useCallback(async (
@@ -242,14 +246,14 @@ export function useChapterOutlineLinks(outlineId: string, options?: UseLinkManag
       await chapterOutlineLinkApi.linkPlotCards(outlineId, { plot_card_ids: plotCardIds, usage_type: usageType });
       toast.success('关联剧情卡片成功');
       await loadPlotCards();
-      options?.onSuccess?.();
+      onSuccess?.();
     } catch (error) {
       toast.error('关联剧情卡片失败');
-      options?.onError?.(error as Error);
+      onError?.(error as Error);
     } finally {
       setLoading(false);
     }
-  }, [outlineId, loadPlotCards, options]);
+  }, [outlineId, loadPlotCards, onError, onSuccess]);
 
   // 取消剧情卡片关联
   const unlinkPlotCards = useCallback(async (plotCardIds: string[]) => {
@@ -258,14 +262,14 @@ export function useChapterOutlineLinks(outlineId: string, options?: UseLinkManag
       await chapterOutlineLinkApi.unlinkPlotCards(outlineId, plotCardIds);
       toast.success('取消关联成功');
       await loadPlotCards();
-      options?.onSuccess?.();
+      onSuccess?.();
     } catch (error) {
       toast.error('取消关联失败');
-      options?.onError?.(error as Error);
+      onError?.(error as Error);
     } finally {
       setLoading(false);
     }
-  }, [outlineId, loadPlotCards, options]);
+  }, [outlineId, loadPlotCards, onError, onSuccess]);
 
   // 更新剧情卡片使用状态
   const updatePlotCardUsage = useCallback(async (
@@ -278,14 +282,14 @@ export function useChapterOutlineLinks(outlineId: string, options?: UseLinkManag
       await chapterOutlineLinkApi.updatePlotCardUsage(outlineId, cardId, { usage_type: usageType, usage_notes: usageNotes });
       toast.success('更新使用状态成功');
       await loadPlotCards();
-      options?.onSuccess?.();
+      onSuccess?.();
     } catch (error) {
       toast.error('更新使用状态失败');
-      options?.onError?.(error as Error);
+      onError?.(error as Error);
     } finally {
       setLoading(false);
     }
-  }, [outlineId, loadPlotCards, options]);
+  }, [outlineId, loadPlotCards, onError, onSuccess]);
 
   return {
     plotLines,
@@ -308,6 +312,8 @@ export function usePlotCardLinks(cardId: string, options?: UseLinkManagementOpti
   const [plotLines, setPlotLines] = useState<PlotLineWithLinks[]>([]);
   const [chapterOutlines, setChapterOutlines] = useState<ChapterOutlineWithLinks[]>([]);
   const [loading, setLoading] = useState(false);
+  const onSuccess = options?.onSuccess;
+  const onError = options?.onError;
 
   // 加载关联的剧情线
   const loadPlotLines = useCallback(async () => {
@@ -318,11 +324,11 @@ export function usePlotCardLinks(cardId: string, options?: UseLinkManagementOpti
       setPlotLines(data);
     } catch (error) {
       toast.error('加载关联剧情线失败');
-      options?.onError?.(error as Error);
+      onError?.(error as Error);
     } finally {
       setLoading(false);
     }
-  }, [cardId, options]);
+  }, [cardId, onError]);
 
   // 加载关联的章纲
   const loadChapterOutlines = useCallback(async () => {
@@ -333,11 +339,11 @@ export function usePlotCardLinks(cardId: string, options?: UseLinkManagementOpti
       setChapterOutlines(data);
     } catch (error) {
       toast.error('加载关联章纲失败');
-      options?.onError?.(error as Error);
+      onError?.(error as Error);
     } finally {
       setLoading(false);
     }
-  }, [cardId, options]);
+  }, [cardId, onError]);
 
   // 自动加载关联数据
   useEffect(() => {
@@ -345,7 +351,7 @@ export function usePlotCardLinks(cardId: string, options?: UseLinkManagementOpti
       loadPlotLines();
       loadChapterOutlines();
     }
-  }, [cardId]); // 只依赖cardId，避免无限循环
+  }, [cardId, loadChapterOutlines, loadPlotLines]);
 
   // 关联剧情线
   const linkPlotLines = useCallback(async (plotLineIds: string[]) => {
@@ -354,14 +360,14 @@ export function usePlotCardLinks(cardId: string, options?: UseLinkManagementOpti
       await plotCardLinkApi.linkPlotLines(cardId, plotLineIds);
       toast.success('关联剧情线成功');
       await loadPlotLines();
-      options?.onSuccess?.();
+      onSuccess?.();
     } catch (error) {
       toast.error('关联剧情线失败');
-      options?.onError?.(error as Error);
+      onError?.(error as Error);
     } finally {
       setLoading(false);
     }
-  }, [cardId, loadPlotLines, options]);
+  }, [cardId, loadPlotLines, onError, onSuccess]);
 
   // 取消剧情线关联
   const unlinkPlotLines = useCallback(async (plotLineIds: string[]) => {
@@ -370,14 +376,14 @@ export function usePlotCardLinks(cardId: string, options?: UseLinkManagementOpti
       await plotCardLinkApi.unlinkPlotLines(cardId, plotLineIds);
       toast.success('取消关联成功');
       await loadPlotLines();
-      options?.onSuccess?.();
+      onSuccess?.();
     } catch (error) {
       toast.error('取消关联失败');
-      options?.onError?.(error as Error);
+      onError?.(error as Error);
     } finally {
       setLoading(false);
     }
-  }, [cardId, loadPlotLines, options]);
+  }, [cardId, loadPlotLines, onError, onSuccess]);
 
   // 关联章纲
   const linkChapterOutlines = useCallback(async (
@@ -388,14 +394,14 @@ export function usePlotCardLinks(cardId: string, options?: UseLinkManagementOpti
       await plotCardLinkApi.linkChapterOutlines(cardId, links);
       toast.success('关联章纲成功');
       await loadChapterOutlines();
-      options?.onSuccess?.();
+      onSuccess?.();
     } catch (error) {
       toast.error('关联章纲失败');
-      options?.onError?.(error as Error);
+      onError?.(error as Error);
     } finally {
       setLoading(false);
     }
-  }, [cardId, loadChapterOutlines, options]);
+  }, [cardId, loadChapterOutlines, onError, onSuccess]);
 
   // 取消章纲关联
   const unlinkChapterOutlines = useCallback(async (chapterOutlineIds: string[]) => {
@@ -404,14 +410,14 @@ export function usePlotCardLinks(cardId: string, options?: UseLinkManagementOpti
       await plotCardLinkApi.unlinkChapterOutlines(cardId, chapterOutlineIds);
       toast.success('取消关联成功');
       await loadChapterOutlines();
-      options?.onSuccess?.();
+      onSuccess?.();
     } catch (error) {
       toast.error('取消关联失败');
-      options?.onError?.(error as Error);
+      onError?.(error as Error);
     } finally {
       setLoading(false);
     }
-  }, [cardId, loadChapterOutlines, options]);
+  }, [cardId, loadChapterOutlines, onError, onSuccess]);
 
   return {
     plotLines,

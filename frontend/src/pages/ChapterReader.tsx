@@ -74,8 +74,6 @@ function AnalysisSidebar({
       .finally(() => setLoading(false))
   }, [open, chapterId])
 
-  if (!open) return null
-
   const plotAnalysis = analysis?.plot_analysis
   const characterStatus = analysis?.character_status
   const emotionCurve = analysis?.emotion_curve
@@ -92,6 +90,8 @@ function AnalysisSidebar({
 
   const [expandedSection, setExpandedSection] = useState<string | null>(null)
   const toggleSection = (key: string) => setExpandedSection(prev => prev === key ? null : key)
+
+  if (!open) return null
 
   const severityStyle: Record<string, string> = {
     critical: 'bg-red-100 text-red-700 border-red-200',

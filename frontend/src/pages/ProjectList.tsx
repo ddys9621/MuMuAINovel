@@ -115,12 +115,12 @@ function getDisplayTitle(title: string) {
 }
 
 function getCoverLetter(title: string) {
-  const displayTitle = getDisplayTitle(title).replace(/^[《》「」『』【】〈〉（）()\[\]{}“”‘’"'`\s]+/, '')
+  const displayTitle = getDisplayTitle(title).replace(/^[《》「」『』【】〈〉（）()[\]{}“”‘’"'`\s]+/, '')
   const chars = Array.from(displayTitle)
 
   return (
     chars.find((char) => /[A-Za-z0-9\u4e00-\u9fa5]/.test(char)) ??
-    chars.find((char) => !/[\s《》「」『』【】〈〉（）()\[\]{}“”‘’"'`~!@#$%^&*+=|\\/:;,.!?，。！？；：、-]/.test(char)) ??
+    chars.find((char) => !/[\s《》「」『』【】〈〉（）()[\]{}“”‘’"'`~!@#$%^&*+=|\\/:;,.!?，。！？；：、-]/.test(char)) ??
     '书'
   )
 }
@@ -1054,12 +1054,13 @@ function WizardModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
       setProgressMsg('项目创建完成！')
       setPhase('done')
       toast.success('项目创建成功！')
-    } catch (err: any) {
-      if (err?.name === 'AbortError') {
+    } catch (err) {
+      const error = err as { name?: string; message?: string }
+      if (error.name === 'AbortError') {
         return
       }
-      setError(err.message || 'Creation failed')
-      toast.error('Project creation failed: ' + (err.message || 'Unknown error'))
+      setError(error.message || 'Creation failed')
+      toast.error('Project creation failed: ' + (error.message || 'Unknown error'))
     }
   }
 

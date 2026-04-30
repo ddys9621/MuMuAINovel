@@ -5,40 +5,44 @@ export interface SSEMessage {
   word_count?: number;
   status?: 'processing' | 'success' | 'error' | 'warning';
   content?: string;
-  data?: any;
+  data?: unknown;
   error?: string;
   code?: number;
 }
 
-export interface SSEClientOptions {
+export interface SSEClientOptions<TResult = unknown> {
   onProgress?: (message: string, progress: number, status: string, wordCount?: number) => void;
   onChunk?: (content: string) => void;
-  onResult?: (data: any) => void;
+  onResult?: (data: TResult) => void;
   onError?: (error: string, code?: number) => void;
   onComplete?: () => void;
   onConnectionError?: (error: Event) => void;
   signal?: AbortSignal;
 }
 
-export class SSEClient {
+type ResolveSSE = (value: unknown) => void;
+type RejectSSE = (reason?: unknown) => void;
+
+export class SSEClient<TResult = unknown> {
   private eventSource: EventSource | null = null;
   private url: string;
-  private options: SSEClientOptions;
-  private accumulatedContent: string = '';
+  private options: SSEClientOptions<TResult>;
+  private accumulatedContent = '';
+  private resultData: TResult | undefined;
 
-  constructor(url: string, options: SSEClientOptions = {}) {
+  constructor(url: string, options: SSEClientOptions<TResult> = {}) {
     this.url = url;
     this.options = options;
   }
 
-  connect(): Promise<any> {
+  connect(): Promise<unknown> {
     return new Promise((resolve, reject) => {
       try {
         this.eventSource = new EventSource(this.url);
-        
+
         this.eventSource.onmessage = (event) => {
           try {
-            const message: SSEMessage = JSON.parse(event.data);
+            const message = JSON.parse(event.data) as SSEMessage;
             this.handleMessage(message, resolve, reject);
           } catch (error) {
             console.error('解析SSE消息失败:', error);
@@ -47,20 +51,17 @@ export class SSEClient {
 
         this.eventSource.onerror = (error) => {
           console.error('SSE连接错误:', error);
-          if (this.options.onConnectionError) {
-            this.options.onConnectionError(error);
-          }
+          this.options.onConnectionError?.(error);
           this.close();
           reject(new Error('SSE连接失败'));
         };
-
       } catch (error) {
         reject(error);
       }
     });
   }
 
-  private handleMessage(message: SSEMessage, resolve: Function, reject: Function) {
+  private handleMessage(message: SSEMessage, resolve: ResolveSSE, reject: RejectSSE) {
     switch (message.type) {
       case 'progress':
         if (this.options.onProgress && message.progress !== undefined) {
@@ -74,46 +75,33 @@ export class SSEClient {
         break;
 
       case 'chunk':
+      case 'content':
         if (message.content) {
           this.accumulatedContent += message.content;
-          if (this.options.onChunk) {
-            this.options.onChunk(message.content);
-          }
+          this.options.onChunk?.(message.content);
         }
         break;
 
       case 'result':
-        if (this.options.onResult && message.data) {
-          this.options.onResult(message.data);
+        if (message.data !== undefined) {
+          this.resultData = message.data as TResult;
+          this.options.onResult?.(this.resultData);
         }
         break;
 
       case 'error':
-        if (this.options.onError) {
-          this.options.onError(message.error || '未知错误', message.code);
-        }
+        this.options.onError?.(message.error || '未知错误', message.code);
         this.close();
         reject(new Error(message.error || '未知错误'));
         break;
 
       case 'done':
-        if (this.options.onComplete) {
-          this.options.onComplete();
-        }
+        this.options.onComplete?.();
         this.close();
-        if (!this.options.onResult && this.accumulatedContent) {
-          resolve({ content: this.accumulatedContent });
+        if (this.resultData !== undefined) {
+          resolve(this.resultData);
         } else {
-          resolve(true);
-        }
-        break;
-
-      case 'content':
-        if (message.content) {
-          this.accumulatedContent += message.content;
-          if (this.options.onChunk) {
-            this.options.onChunk(message.content);
-          }
+          resolve(this.accumulatedContent ? { content: this.accumulatedContent } : true);
         }
         break;
 
@@ -122,7 +110,6 @@ export class SSEClient {
         break;
 
       default:
-        // 记录未知消息类型，便于调试
         console.debug(`[SSE] 收到未处理的消息类型: ${message.type}`, message);
         break;
     }
@@ -140,126 +127,122 @@ export class SSEClient {
   }
 }
 
-export class SSEPostClient {
+export class SSEPostClient<TResult = unknown, TRequest = unknown> {
   private url: string;
-  private data: any;
-  private options: SSEClientOptions;
+  private data: TRequest;
+  private options: SSEClientOptions<TResult>;
   private abortController: AbortController | null = null;
-  private accumulatedContent: string = '';
+  private accumulatedContent = '';
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-  private isAborted: boolean = false;
+  private isAborted = false;
+  private resultData: TResult | undefined;
 
-  constructor(url: string, data: any, options: SSEClientOptions = {}) {
+  constructor(url: string, data: TRequest, options: SSEClientOptions<TResult> = {}) {
     this.url = url;
     this.data = data;
     this.options = options;
   }
 
-  async connect(): Promise<any> {
-    return new Promise(async (resolve, reject) => {
-      const externalSignal = this.options.signal;
-      const abortHandler = () => this.abort();
-
-      try {
-        this.abortController = new AbortController();
-        this.isAborted = false;
-
-        if (externalSignal?.aborted) {
-          this.abort();
-          reject(new DOMException('Request aborted', 'AbortError'));
-          return;
-        }
-
-        externalSignal?.addEventListener('abort', abortHandler, { once: true });
-
-        const response = await fetch(this.url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(this.data),
-          signal: this.abortController.signal,
-        });
-
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        this.reader = response.body?.getReader() || null;
-        const decoder = new TextDecoder();
-
-        if (!this.reader) {
-          throw new Error('无法获取响应流');
-        }
-
-        let buffer = '';
-
-        while (true) {
-          // 检查是否已中止
-          if (this.isAborted) {
-            break;
-          }
-
-          const { done, value } = await this.reader.read();
-
-          if (done) {
-            break;
-          }
-
-          buffer += decoder.decode(value, { stream: true });
-
-          const lines = buffer.split('\n\n');
-          buffer = lines.pop() || '';
-
-          for (const line of lines) {
-            if (line.trim() === '' || line.startsWith(':')) {
-              continue;
-            }
-
-            try {
-              const dataMatch = line.match(/^data: (.+)$/m);
-              if (dataMatch) {
-                const message: SSEMessage = JSON.parse(dataMatch[1]);
-                await this.handleMessage(message, resolve, reject);
-              }
-            } catch (error) {
-              console.error('解析SSE消息失败:', error, line);
-            }
-          }
-        }
-
-      } catch (error: any) {
-        if (error.name === 'AbortError') {
-          console.log('Request aborted');
-          reject(error);
-        } else {
-          console.error('SSE POST request failed:', error);
-          if (this.options.onError) {
-            this.options.onError(error.message || 'Request failed');
-          }
-          reject(error);
-        }
-      } finally {
-        externalSignal?.removeEventListener('abort', abortHandler);
-        // Ensure the reader is closed to avoid leaks
-        await this.closeReader();
-      }
+  connect(): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      void this.connectStream(resolve, reject);
     });
+  }
+
+  private async connectStream(resolve: ResolveSSE, reject: RejectSSE): Promise<void> {
+    const externalSignal = this.options.signal;
+    const abortHandler = () => this.abort();
+
+    try {
+      this.abortController = new AbortController();
+      this.isAborted = false;
+
+      if (externalSignal?.aborted) {
+        this.abort();
+        reject(new DOMException('Request aborted', 'AbortError'));
+        return;
+      }
+
+      externalSignal?.addEventListener('abort', abortHandler, { once: true });
+
+      const response = await fetch(this.url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(this.data),
+        signal: this.abortController.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      this.reader = response.body?.getReader() || null;
+      const decoder = new TextDecoder();
+
+      if (!this.reader) {
+        throw new Error('无法获取响应流');
+      }
+
+      let buffer = '';
+
+      while (!this.isAborted) {
+        const { done, value } = await this.reader.read();
+
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.trim() === '' || line.startsWith(':')) {
+            continue;
+          }
+
+          try {
+            const dataMatch = line.match(/^data: (.+)$/m);
+            if (dataMatch) {
+              const message = JSON.parse(dataMatch[1]) as SSEMessage;
+              this.handleMessage(message, resolve, reject);
+            }
+          } catch (error) {
+            console.error('解析SSE消息失败:', error, line);
+          }
+        }
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        console.log('Request aborted');
+        reject(error);
+      } else {
+        const message = error instanceof Error ? error.message : 'Request failed';
+        console.error('SSE POST request failed:', error);
+        this.options.onError?.(message);
+        reject(error);
+      }
+    } finally {
+      externalSignal?.removeEventListener('abort', abortHandler);
+      await this.closeReader();
+    }
   }
 
   private async closeReader(): Promise<void> {
     if (this.reader) {
       try {
         await this.reader.cancel();
-      } catch (e) {
-        // 忽略关闭时的错误
-        console.debug('关闭 reader 时出错:', e);
+      } catch (error) {
+        console.debug('关闭 reader 时出错:', error);
       }
       this.reader = null;
     }
   }
 
-  private async handleMessage(message: SSEMessage, resolve: Function, reject: Function) {
+  private handleMessage(message: SSEMessage, resolve: ResolveSSE, reject: RejectSSE) {
     switch (message.type) {
       case 'progress':
         if (this.options.onProgress && message.progress !== undefined) {
@@ -276,37 +259,39 @@ export class SSEPostClient {
       case 'content':
         if (message.content) {
           this.accumulatedContent += message.content;
-          if (this.options.onChunk) {
-            this.options.onChunk(message.content);
-          }
+          this.options.onChunk?.(message.content);
         }
         break;
 
       case 'result':
-        if (this.options.onResult && message.data) {
-          this.options.onResult(message.data);
+        if (message.data !== undefined) {
+          this.resultData = message.data as TResult;
+          this.options.onResult?.(this.resultData);
         }
-        (this as any).resultData = message.data;
         break;
 
       case 'error':
-        if (this.options.onError) {
-          this.options.onError(message.error || '未知错误', message.code);
-        }
+        this.options.onError?.(message.error || '未知错误', message.code);
         reject(new Error(message.error || '未知错误'));
         break;
 
       case 'done':
-        if (this.options.onComplete) {
-          this.options.onComplete();
-        }
-        if ((this as any).resultData) {
-          resolve((this as any).resultData);
+        this.options.onComplete?.();
+        if (this.resultData !== undefined) {
+          resolve(this.resultData);
         } else if (this.accumulatedContent) {
           resolve({ content: this.accumulatedContent });
         } else {
           resolve(true);
         }
+        break;
+
+      case 'start':
+        console.debug(`[SSE] 收到消息类型: ${message.type}`, message);
+        break;
+
+      default:
+        console.debug(`[SSE] 收到未处理的消息类型: ${message.type}`, message);
         break;
     }
   }
@@ -316,9 +301,10 @@ export class SSEPostClient {
     if (this.abortController) {
       this.abortController.abort();
     }
-    // 同步关闭 reader
     if (this.reader) {
-      this.reader.cancel().catch(() => {});
+      this.reader.cancel().catch((error) => {
+        console.debug('取消 reader 失败:', error);
+      });
       this.reader = null;
     }
   }
@@ -328,14 +314,14 @@ export class SSEPostClient {
   }
 }
 
-export async function ssePost<T = any>(
+export async function ssePost<TResult = unknown, TRequest = unknown>(
   url: string,
-  data: any,
-  options: SSEClientOptions = {}
-): Promise<T> {
-  const client = new SSEPostClient(url, data, options);
+  data: TRequest,
+  options: SSEClientOptions<TResult> = {}
+): Promise<TResult> {
+  const client = new SSEPostClient<TResult, TRequest>(url, data, options);
   try {
-    return await client.connect();
+    return await client.connect() as TResult;
   } finally {
     client.abort();
   }

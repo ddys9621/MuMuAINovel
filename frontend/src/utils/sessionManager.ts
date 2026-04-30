@@ -119,7 +119,7 @@ class SessionManager {
           await this.refreshSession();
         }
       }
-    } catch (error) {
+    } catch {
       // 静默处理错误
     }
   }
@@ -235,7 +235,7 @@ class SessionManager {
     try {
       await this.refreshSession();
       return true;
-    } catch (error) {
+    } catch {
       return false;
     }
   }
