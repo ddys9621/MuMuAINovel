@@ -5,11 +5,13 @@ import {
   ChevronDown,
   ChevronUp,
   Clock,
+  Globe,
   Loader2,
   RefreshCw,
   RotateCcw,
   Send,
   Sparkles,
+  Users,
   Wand2,
   X,
   XCircle,
@@ -334,7 +336,7 @@ export default function InspirationDrawer({
         aria-modal="true"
         aria-labelledby="inspiration-drawer-title"
         className={cn(
-          'absolute right-0 top-0 flex h-full w-full max-w-[680px] flex-col border-l border-slate-200 bg-[#fcfbf8] shadow-[0_20px_80px_-36px_rgba(15,23,42,0.35)] transition-transform duration-300',
+          'absolute right-0 top-0 flex h-full w-full max-w-[840px] flex-col border-l border-slate-200 bg-[#fcfbf8] shadow-[0_20px_80px_-36px_rgba(15,23,42,0.35)] transition-transform duration-300',
           open ? 'translate-x-0' : 'translate-x-full',
         )}
       >
@@ -397,7 +399,7 @@ export default function InspirationDrawer({
 
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="space-y-4 px-4 py-4 md:px-5 md:py-5">
-            {hasCollectedSummary && (
+            {hasCollectedSummary && !isComplete && (
               <CollectedSummary
                 originalBrief={originalBrief}
                 wizardData={wizardData}
@@ -790,65 +792,81 @@ function ConfirmStageCard({
     state.progressMessage && state.progress > 0 && state.progressMessage !== '项目创建完成！',
   );
 
+  const fields = [
+    { label: '书名', value: wizardData.title },
+    { label: '简介', value: wizardData.description },
+    { label: '主题', value: wizardData.theme },
+    { label: '类型', value: wizardData.genre?.join('、') },
+    { label: '视角', value: wizardData.narrative_perspective },
+  ];
+
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       {hasGenerationError && (
         <div className="mb-5 rounded-[22px] border border-amber-200/80 bg-amber-50/90 px-4 py-3 text-sm leading-7 text-amber-700">
           上一次创建没有完整结束：{state.progressMessage}
         </div>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
-        <div className="rounded-xl border border-slate-200 bg-[#faf7f2] p-4">
-          <div className="text-xs uppercase tracking-[0.18em] text-content-tertiary">设定总览</div>
-          <h3 className="mt-2 text-xl font-semibold text-content">确认后才进入创建</h3>
-          <p className="mt-3 text-sm leading-7 text-content-secondary">
-            这一步不再显示输入框。你现在只需要审一遍设定，再决定开始创建还是回头重做。
-          </p>
+      <h3 className="text-xl font-semibold text-content">
+        一切就绪，准备创建《{wizardData.title || '项目'}》
+      </h3>
+      <p className="mt-1 text-sm leading-7 text-content-secondary">
+        检查一遍设定，确认后 AI 将依次生成世界观、角色和故事大纲。
+      </p>
 
-          {originalBrief && (
-            <div className="mt-5 rounded-xl border border-slate-200 bg-white p-4">
-              <div className="text-xs uppercase tracking-[0.18em] text-content-tertiary">原始灵感</div>
-              <p className="mt-2 text-sm leading-7 text-content-secondary">{originalBrief}</p>
-            </div>
-          )}
-
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            <SummaryField label="书名" value={wizardData.title} />
-            <SummaryField label="简介" value={wizardData.description} />
-            <SummaryField label="主题" value={wizardData.theme} />
-            <SummaryField label="类型" value={wizardData.genre?.join('、')} />
-            <SummaryField label="视角" value={wizardData.narrative_perspective} />
-          </div>
+      {originalBrief && (
+        <div className="mt-4 rounded-xl border border-slate-200 bg-[#faf7f2] p-3">
+          <div className="text-xs uppercase tracking-[0.14em] text-content-tertiary">原始灵感</div>
+          <p className="mt-2 text-sm leading-7 text-content-secondary line-clamp-2">{originalBrief}</p>
         </div>
+      )}
 
-        <div className="rounded-xl border border-slate-200 bg-[#faf7f2] p-4">
-          <div className="text-xs uppercase tracking-[0.18em] text-content-tertiary">确认后马上执行</div>
-          <div className="mt-4 space-y-3">
-            {NODE_META.map((node, index) => (
-              <div key={node.key} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-                <div className="text-sm font-medium text-content">
-                  {index + 1}. {node.label}
-                </div>
-                <p className="mt-1 text-xs leading-6 text-content-secondary">{node.hint}</p>
-              </div>
-            ))}
-          </div>
+      <div className="mt-4 rounded-xl border border-slate-200 bg-[#faf7f2] p-4">
+        <div className="divide-y divide-slate-200/80">
+          {fields.map((f) => (
+            <div key={f.label} className="flex items-baseline gap-3 px-1 py-2.5 first:pt-0 last:pb-0">
+              <span className="w-10 shrink-0 text-xs font-medium uppercase tracking-[0.14em] text-content-tertiary">
+                {f.label}
+              </span>
+              <span className="min-w-0 text-sm leading-7 text-content">
+                {f.value || <span className="text-content-tertiary">待补充</span>}
+              </span>
+            </div>
+          ))}
         </div>
       </div>
 
-      <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+      <div className="mt-4 grid grid-cols-3 gap-3">
+        {NODE_META.map((node, index) => (
+          <div key={node.key} className="flex items-center gap-2.5 rounded-xl border border-slate-200 bg-[#faf7f2] px-4 py-3">
+            {node.key === 'worldBuilding' ? (
+              <Globe className="h-4 w-4 shrink-0 text-brand" />
+            ) : node.key === 'characters' ? (
+              <Users className="h-4 w-4 shrink-0 text-brand" />
+            ) : (
+              <BookOpenText className="h-4 w-4 shrink-0 text-brand" />
+            )}
+            <span className="text-sm font-medium text-content">{node.label}</span>
+            <span className="ml-auto text-xs text-content-tertiary">
+              {index === 0 ? '先' : index === 1 ? '再' : '最后'}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-5 flex items-center justify-center gap-3">
         <button
           onClick={onReset}
-          className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-content-secondary transition hover:text-content"
+          className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-medium text-content-secondary transition hover:text-content"
         >
           重新开始
         </button>
         <button
           onClick={onConfirm}
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand px-5 py-3 text-sm font-medium text-white transition hover:bg-brand-600"
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand px-8 py-3.5 text-base font-medium text-white shadow-lg shadow-brand/20 transition hover:bg-brand-600 active:scale-[0.98]"
         >
-          <Wand2 className="h-4 w-4" />
+          <Wand2 className="h-5 w-5" />
           {hasGenerationError ? '重新创建项目' : '开始创建项目'}
         </button>
       </div>
@@ -869,32 +887,60 @@ function GenerationStageCard({
 }) {
   const isComplete = state.currentStep === 'complete';
 
-  return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <div className="text-xs uppercase tracking-[0.18em] text-content-tertiary">
-            {isComplete ? '完成状态' : '生成看板'}
+  if (isComplete) {
+    return (
+      <section className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50/40 to-white p-5 shadow-sm">
+        <div className="text-center">
+          <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-100">
+            <CheckCircle2 className="h-7 w-7 text-emerald-600" />
           </div>
-          <h3 className="mt-2 text-xl font-semibold text-content">
-            {isComplete
-              ? `《${wizardData.title || state.projectTitle || '项目'}》已经准备就绪`
-              : `正在为《${wizardData.title || state.projectTitle || '项目'}》搭建内容资产`}
+          <h3 className="mt-4 text-xl font-semibold text-content">
+            《{wizardData.title || state.projectTitle || '项目'}》创建完成
           </h3>
-          <p className="mt-3 text-sm leading-7 text-content-secondary">
-            {state.progressMessage ||
-              (isComplete ? '核心节点已经完成，可以直接进入项目继续写作。' : '主舞台现在只表达生成状态，不再混入聊天式 loading。')}
+          <p className="mt-2 text-sm leading-7 text-content-secondary">
+            世界观、角色和故事大纲都已生成完毕，可以进入项目开始创作了。
           </p>
+          {state.projectId && (
+            <button
+              onClick={onEnterProject}
+              className="mt-5 inline-flex items-center gap-2 rounded-xl bg-brand px-8 py-3.5 text-base font-medium text-white shadow-lg shadow-brand/20 transition hover:bg-brand-600 active:scale-[0.98]"
+            >
+              <Sparkles className="h-5 w-5" />
+              进入项目开始写作
+            </button>
+          )}
         </div>
 
-        {isComplete && state.projectId && (
-          <button
-            onClick={onEnterProject}
-            className="inline-flex items-center justify-center rounded-xl bg-brand px-5 py-3 text-sm font-medium text-white transition hover:bg-brand-600"
-          >
-            进入项目
-          </button>
-        )}
+        <div className="mt-6 rounded-xl border border-slate-200 bg-[#faf7f2] p-4">
+          <div className="text-xs uppercase tracking-[0.18em] text-content-tertiary">项目摘要</div>
+          {originalBrief && (
+            <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+              <div className="text-xs uppercase tracking-[0.18em] text-content-tertiary">原始灵感</div>
+              <p className="mt-2 text-sm leading-7 text-content-secondary">{originalBrief}</p>
+            </div>
+          )}
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <SummaryField label="书名" value={wizardData.title || state.projectTitle} />
+            <SummaryField label="简介" value={wizardData.description} />
+            <SummaryField label="主题" value={wizardData.theme} />
+            <SummaryField label="类型" value={wizardData.genre?.join('、')} />
+            <SummaryField label="视角" value={wizardData.narrative_perspective} />
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div>
+        <div className="text-xs uppercase tracking-[0.18em] text-content-tertiary">生成看板</div>
+        <h3 className="mt-2 text-xl font-semibold text-content">
+          正在为《{wizardData.title || state.projectTitle || '项目'}》搭建内容资产
+        </h3>
+        <p className="mt-3 text-sm leading-7 text-content-secondary">
+          {state.progressMessage || '世界观 / 角色 / 大纲依次生成中。'}
+        </p>
       </div>
 
       <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
@@ -919,7 +965,7 @@ function GenerationStageCard({
           <div className="text-xs uppercase tracking-[0.18em] text-content-tertiary">执行状态</div>
           <div className="mt-4 text-3xl font-semibold text-content">{Math.round(state.progress)}%</div>
           <p className="mt-2 text-sm leading-7 text-content-secondary">
-            {state.progressMessage || (isComplete ? '全部节点完成。' : '正在等待流式进度返回。')}
+            {state.progressMessage || '正在等待流式进度返回。'}
           </p>
           <div className="mt-4 h-2 rounded-full bg-surface-border">
             <div
@@ -928,7 +974,7 @@ function GenerationStageCard({
             />
           </div>
           <div className="mt-4 flex items-center justify-between text-xs text-content-tertiary">
-            <span>{isComplete ? '可以进入项目继续写作' : '世界观 / 角色 / 大纲依次生成'}</span>
+            <span>世界观 / 角色 / 大纲依次生成</span>
             <span>{state.projectId ? '项目已创建' : '创建中'}</span>
           </div>
         </div>
