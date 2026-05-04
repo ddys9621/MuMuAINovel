@@ -31,19 +31,13 @@ fi
 
 mkdir -p secrets
 
-if [ ! -f secrets/postgres_password.txt ]; then
-  echo "CHANGE_ME_POSTGRES_PASSWORD" > secrets/postgres_password.txt
-  echo "请编辑 secrets/postgres_password.txt 为强密码"
-fi
-
 if [ ! -f secrets/local_auth_password.txt ]; then
   echo "CHANGE_ME_LOCAL_AUTH_PASSWORD" > secrets/local_auth_password.txt
   echo "请编辑 secrets/local_auth_password.txt 为强密码"
 fi
 
-postgres_pwd="$(tr -d '\r\n' < secrets/postgres_password.txt)"
 local_pwd="$(tr -d '\r\n' < secrets/local_auth_password.txt)"
-if [[ "$postgres_pwd" == CHANGE_ME* || "$local_pwd" == CHANGE_ME* ]]; then
+if [[ "$local_pwd" == CHANGE_ME* ]]; then
   echo "检测到默认占位密码，请先修改 secrets/*.txt 后再部署" >&2
   exit 1
 fi

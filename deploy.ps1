@@ -50,19 +50,13 @@ if (-not (Test-Path 'secrets')) {
   New-Item -ItemType Directory -Path 'secrets' | Out-Null
 }
 
-if (-not (Test-Path 'secrets/postgres_password.txt')) {
-  Set-Content -Path 'secrets/postgres_password.txt' -Value 'CHANGE_ME_POSTGRES_PASSWORD'
-  Write-Host "Please edit secrets/postgres_password.txt with a strong password" -ForegroundColor Yellow
-}
-
 if (-not (Test-Path 'secrets/local_auth_password.txt')) {
   Set-Content -Path 'secrets/local_auth_password.txt' -Value 'CHANGE_ME_LOCAL_AUTH_PASSWORD'
   Write-Host "Please edit secrets/local_auth_password.txt with a strong password" -ForegroundColor Yellow
 }
 
-$postgresPwd = (Get-Content 'secrets/postgres_password.txt' -Raw).Trim()
 $localPwd = (Get-Content 'secrets/local_auth_password.txt' -Raw).Trim()
-if ($postgresPwd -like 'CHANGE_ME*' -or $localPwd -like 'CHANGE_ME*') {
+if ($localPwd -like 'CHANGE_ME*') {
   throw "Placeholder passwords detected. Update secrets/*.txt before deployment."
 }
 

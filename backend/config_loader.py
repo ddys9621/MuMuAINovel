@@ -26,7 +26,7 @@ def create_default_config():
     config = configparser.ConfigParser()
     
     config['database'] = {
-        'url': 'postgresql+asyncpg://aaaa:962106@localhost:5432/6666',
+        'url': 'sqlite+aiosqlite:///./data/mumuai.db',
     }
     
     config['app'] = {

@@ -18,8 +18,7 @@ async def upgrade(db: AsyncSession):
         ADD COLUMN IF NOT EXISTS timeline_coverage TEXT;
     """))
     
-    # 添加字段注释（PostgreSQL）
-    # 注意：SQLite 不支持 COMMENT，如果使用 SQLite 可以注释掉这部分
+    # 添加字段注释（仅 PostgreSQL 支持，SQLite 静默跳过）
     try:
         await db.execute(text("""
             COMMENT ON COLUMN chapter_outline_plot_line_links.timeline_coverage 

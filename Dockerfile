@@ -55,7 +55,7 @@ COPY backend/ ./
 # 从前端构建阶段复制构建好的静态文件
 COPY --from=frontend-builder /frontend/dist ./static
 
-# 容器入口负责 secrets 注入、DATABASE_URL 生成和前置校验
+# 容器入口负责 secrets 注入、前置校验和默认配置
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
 
 # 创建必要的目录并授权

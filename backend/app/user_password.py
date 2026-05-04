@@ -11,17 +11,16 @@ from app.config import settings
 
 
 class UserPasswordManager:
-    """用户密码管理器 - 使用数据库存储（PostgreSQL共享库）"""
-    
+    """用户密码管理器 - 使用数据库存储（SQLite嵌入式数据库）"""
+
     def __init__(self):
         """初始化密码管理器"""
         pass
-    
+
     async def _get_session(self) -> AsyncSession:
-        """获取数据库会话 - 使用共享的PostgreSQL引擎"""
+        """获取数据库会话"""
         from app.database import get_engine
-        
-        # 使用共享的PostgreSQL引擎（user_id使用特殊标识）
+
         engine = await get_engine("_global_users_")
         
         session_maker = async_sessionmaker(

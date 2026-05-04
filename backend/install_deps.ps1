@@ -16,7 +16,7 @@ pip install --default-timeout=100 fastapi==0.121.0 uvicorn[standard]==0.38.0 pyt
 
 # 第二批：数据库相关
 Write-Host "`n[3/5] 安装数据库驱动..." -ForegroundColor Cyan
-pip install --default-timeout=100 sqlalchemy==2.0.25 asyncpg==0.29.0 psycopg2-binary==2.9.9
+pip install --default-timeout=100 sqlalchemy==2.0.25 aiosqlite==0.20.0
 
 # 第三批：数据验证和 AI 服务
 Write-Host "`n[4/5] 安装 AI 服务..." -ForegroundColor Cyan

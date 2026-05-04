@@ -91,6 +91,7 @@ class AIService:
                 logger.warning("⚠️ OpenAI API key未配置，但被设置为当前AI提供商")
         
         # 初始化Anthropic客户端
+        self.anthropic_http_client = None
         anthropic_key = api_key if api_provider == "anthropic" else app_settings.anthropic_api_key
         if anthropic_key:
             try:
@@ -118,10 +119,12 @@ class AIService:
                     client_kwargs["base_url"] = base_url
                 
                 self.anthropic_client = AsyncAnthropic(**client_kwargs)
+                self.anthropic_http_client = http_client
                 logger.info("✅ Anthropic客户端初始化成功")
             except Exception as e:
                 logger.error(f"Anthropic客户端初始化失败: {e}")
                 self.anthropic_client = None
+                self.anthropic_http_client = None
         else:
             self.anthropic_client = None
             # 只有当用户明确选择Anthropic作为提供商时才警告

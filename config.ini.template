@@ -2,10 +2,9 @@
 # 修改后需要重启应用才能生效
 
 [database]
-# PostgreSQL 数据库连接
-# 格式：postgresql+asyncpg://用户名:密码@主机:端口/数据库名
-# 示例：postgresql+asyncpg://mumuai:mumuai123@localhost:5432/mumuai_novel
-url = postgresql+asyncpg://mumuai:mumuai123@localhost:5432/mumuai_novel
+# SQLite 数据库（嵌入式，无需独立服务器）
+# 格式：sqlite+aiosqlite:///数据库文件路径
+url = sqlite+aiosqlite:///./data/mumuai.db
 
 [app]
 # 应用配置
