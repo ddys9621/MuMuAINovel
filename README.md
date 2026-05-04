@@ -21,7 +21,6 @@
 - **必备软件**: 
   - Python 3.8+ ([下载地址](https://www.python.org/downloads/))
   - Node.js 16+ ([下载地址](https://nodejs.org/))
-  - PostgreSQL 12+ ([下载地址](https://www.postgresql.org/download/windows/))
 
 ### 快速开始
 
@@ -52,8 +51,6 @@
 ```bash
 cp .env.example .env
 mkdir -p secrets
-# 写入强密码（仅一行）
-echo "请替换为强密码" > secrets/postgres_password.txt
 echo "请替换为强密码" > secrets/local_auth_password.txt
 ```
 
@@ -86,7 +83,6 @@ docker compose ps
 
 # 查看实时日志
 docker compose logs -f mumuainovel
-docker compose logs -f postgres
 
 # 重启服务
 docker compose restart mumuainovel
@@ -109,18 +105,18 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 - 使用上一版本代码目录重新执行同样的 `compose up -d --build`。
 - 若需回滚数据，请先恢复数据库备份后再启动应用。
 
-### 6) 备份与恢复（PostgreSQL）
+### 6) 备份与恢复（SQLite）
 
-备份：
+备份（直接复制数据库文件）：
 
 ```bash
-docker exec -t mumuainovel-postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup.sql
+cp data/mumuai.db backup/mumuai_$(date +%Y%m%d).db
 ```
 
 恢复：
 
 ```bash
-cat backup.sql | docker exec -i mumuainovel-postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+cp backup/mumuai_20250101.db data/mumuai.db
 ```
 
 ### 7) 排障清单
@@ -128,7 +124,7 @@ cat backup.sql | docker exec -i mumuainovel-postgres psql -U "$POSTGRES_USER" -d
 1. `docker compose ps` 查看是否有容器退出。
 2. `docker compose logs -f` 查看报错栈。
 3. 检查 `secrets/*.txt` 是否仍是 `CHANGE_ME` 占位值。
-4. 检查 `.env` 中端口是否冲突（`APP_PORT` / `POSTGRES_PORT`）。
+4. 检查 `.env` 中端口是否冲突（`APP_PORT`）。
 5. 验证就绪检查：`http://localhost:8000/health/ready`。
 
 ## 📋 详细安装步骤
@@ -149,60 +145,13 @@ cat backup.sql | docker exec -i mumuainovel-postgres psql -U "$POSTGRES_USER" -d
 3. 默认安装即可
 4. 验证安装：打开命令行输入 `node --version`
 
-#### PostgreSQL 12+
-1. 访问 https://www.postgresql.org/download/windows/
-2. 下载并安装PostgreSQL
-3. 记住设置的超级用户密码
-4. 确保安装后 `psql` 命令可用
-
-找到 PostgreSQL 的安装路径（默认类似 C:\Program Files\PostgreSQL\16\bin），将该路径添加到系统环境变量 PATH。
-设置方法：开始菜单搜索“环境变量” → 编辑系统环境变量 → 环境变量 → 在“系统变量”里找到 PATH → 编辑 → 新增 PostgreSQL 的 bin 路径 → 保存。
-
 ### 2. 配置环境
 
-### 📘 使用 pgAdmin 图形界面创建数据库并配置 `.env`
+本项目使用 SQLite 嵌入式数据库，无需单独安装数据库服务。首次启动时会自动创建 `backend/data/mumuai.db` 数据库文件。
 
-如果更习惯图形界面，可按以下步骤操作（默认示例：数据库 `mumuai_novel`、用户 `mumuai`、密码 `mumuai123`，可替换成你自己的值）：
+#### 配置文件（顶层 `config.ini`）
 
-1. **准备工作**
-   - 确认 PostgreSQL 服务已启动，并能在 pgAdmin 左侧看到本地服务器。
-   - 记住超级用户（例如 `postgres`）的登录密码。
-
-2. **创建登录/角色**
-   - 在 `Servers -> PostgreSQL 16 -> Login/Group Roles` 上右键，选择 **Create > Login/Group Role...**。
-   - `General` 页签填入 `Name = mumuai`。
-   - `Definition` 页签设置密码（如 `mumuai123`）。
-   - 在 `Privileges` 勾选 `Can login?`，其余保持默认后保存。
-
-3. **创建数据库并指定所有者**
-   - 右键 `Servers -> PostgreSQL 16 -> Databases` 选择 **Create > Database...**。
-   - `Database = mumuai_novel`，`Owner = mumuai`，`Encoding = UTF8`，保存即可。
-
-4. **授予 schema 权限（推荐）**
-   - 右键新数据库选择 **Query Tool**，执行：
-     ```sql
-     GRANT ALL ON SCHEMA public TO mumuai;
-     ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO mumuai;
-     ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO mumuai;
-     ```
-
-5. **容器部署配置（顶层 `.env`）**
-   - 复制根目录 `.env.example` 为 `.env`，并至少设置：
-     ```env
-     POSTGRES_DB=mumuai_novel
-     POSTGRES_USER=mumuai
-     POSTGRES_PORT=5432
-     DATABASE_URL=
-     ```
-   - 本项目 Docker 部署密码请通过 `secrets/*.txt` 管理。`DATABASE_URL` 可留空，容器入口会用 `secrets/postgres_password.txt` 自动生成连接串。
-   - 如需手动填写 `DATABASE_URL`，密码若包含 `@`、`:`、`/`、`#` 等特殊字符，必须先做 URL 编码。
-
-
-7. **常见故障排查**
-   - **认证失败**：确认 `secrets/*.txt` 不是 `CHANGE_ME` 占位值。
-   - **连接被拒绝**：检查 PostgreSQL 服务是否启动、端口是否被占用或防火墙阻断。
-   - **权限不足**：确保数据库所有者为目标用户，或重新执行第 4 步的 GRANT 语句。
-   - **`DATABASE_URL` 格式错误**：优先留空让容器自动生成；手动填写时必须以 `postgresql+asyncpg://用户:密码@主机:端口/数据库` 形式书写，且密码需 URL 编码。
+打包版用户编辑 exe 同目录下的 `config.ini`；Docker 部署用户编辑 `.env` 文件。
 
 
 ### Q: Python 或 Node.js 命令不识别
@@ -210,12 +159,6 @@ cat backup.sql | docker exec -i mumuainovel-postgres psql -U "$POSTGRES_USER" -d
 1. 确认软件已正确安装
 2. 重启命令行窗口
 3. 检查环境变量PATH设置
-
-### Q: PostgreSQL 连接失败
-**A**: 
-1. 确认PostgreSQL服务已启动
-2. 检查端口5432是否被占用
-3. 验证用户名密码是否正确
 
 ### Q: 前端页面无法访问
 **A**: 
@@ -231,12 +174,9 @@ cat backup.sql | docker exec -i mumuainovel-postgres psql -U "$POSTGRES_USER" -d
 
 ### Q: 数据库初始化失败
 **A**: 
-1. 确认PostgreSQL超级用户密码
-2. 检查数据库服务是否正常运行
-3. 手动创建数据库：
-   ```sql
-   CREATE DATABASE mumuai_novel;
-   CREATE USER mumuai WITH PASSWORD 'your-password';
+1. 确认 `backend/data/` 目录有写入权限
+2. 删除 `backend/data/mumuai.db` 后重新启动应用
+3. 检查 `DATABASE_URL` 配置是否正确
    GRANT ALL PRIVILEGES ON DATABASE mumuai_novel TO mumuai;
    ```
 

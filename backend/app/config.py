@@ -43,16 +43,17 @@ class Settings(BaseSettings):
     # CORS配置
     cors_origins: list[str] = ["http://localhost:8000", "http://127.0.0.1:8000"]
     
-    # 数据库配置 - PostgreSQL（从 .env 的 DATABASE_URL 读取，无默认值，必须配置）
-    database_url: str
-    
-    # PostgreSQL连接池配置（优化后支持80-150并发用户）
-    database_pool_size: int = 30  # 核心连接池大小（从20提升到30）
-    database_max_overflow: int = 20  # 最大溢出连接数（从10提升到20）
-    database_pool_timeout: int = 60  # 连接池超时秒数（从30提升到60）
-    database_pool_recycle: int = 1800  # 连接回收时间秒数（从3600降低到1800，30分钟）
-    database_pool_pre_ping: bool = True  # 连接前ping检测，确保连接有效
-    database_pool_use_lifo: bool = True  # 使用LIFO策略提高连接复用率
+    # 数据库配置 - SQLite（嵌入式数据库，无需独立服务器）
+    database_url: str = "sqlite+aiosqlite:///./data/mumuai.db"
+    database_path: str = "./data/mumuai.db"
+
+    # SQLite 连接池配置（SQLite 为单写者模式，仅需少量连接）
+    database_pool_size: int = 5  # 核心连接池大小
+    database_max_overflow: int = 5  # 最大溢出连接数
+    database_pool_timeout: int = 30  # 连接池超时秒数
+    database_pool_recycle: int = 3600  # 连接回收时间秒数
+    database_pool_pre_ping: bool = True  # 连接前ping检测
+    database_pool_use_lifo: bool = True  # 使用LIFO策略
     
     # 会话监控配置
     database_session_max_active: int = 50  # 活跃会话警告阈值（从100降低到50）

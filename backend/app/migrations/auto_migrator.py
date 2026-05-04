@@ -12,21 +12,12 @@ from app.logger import get_logger
 logger = get_logger(__name__)
 
 
-CHECK_COLUMN_SQL = """\
-SELECT 1
-FROM information_schema.columns
-WHERE table_name = :table
-  AND column_name = :column
-LIMIT 1
-"""
-
-
 async def column_exists(conn, table: str, column: str) -> bool:
     result = await conn.execute(
-        text(CHECK_COLUMN_SQL),
-        {"table": table, "column": column}
+        text(f"PRAGMA table_info({table})")
     )
-    return result.scalar_one_or_none() is not None
+    rows = result.fetchall()
+    return any(row.name == column for row in rows)
 
 
 async def apply_sql(conn, statements: Iterable[str]):
@@ -44,14 +35,19 @@ async def ensure_chapter_outline_columns(engine: AsyncEngine):
             await apply_sql(conn, [
                 """ALTER TABLE chapters
                 ADD COLUMN chapter_outline_id VARCHAR(36) NULL""",
-                """ALTER TABLE chapters
-                ADD CONSTRAINT fk_chapters_chapter_outline
-                FOREIGN KEY (chapter_outline_id)
-                REFERENCES chapter_outlines (id)
-                ON DELETE SET NULL""",
                 """CREATE INDEX IF NOT EXISTS idx_chapters_chapter_outline_id
                 ON chapters (chapter_outline_id)""",
             ])
+            try:
+                await conn.execute(text(
+                    """ALTER TABLE chapters
+                    ADD CONSTRAINT fk_chapters_chapter_outline
+                    FOREIGN KEY (chapter_outline_id)
+                    REFERENCES chapter_outlines (id)
+                    ON DELETE SET NULL"""
+                ))
+            except Exception:
+                pass  # SQLite does not support ADD CONSTRAINT in ALTER TABLE
         else:
             logger.info("✅ chapters.chapter_outline_id already exists")
 
@@ -61,14 +57,19 @@ async def ensure_chapter_outline_columns(engine: AsyncEngine):
             await apply_sql(conn, [
                 """ALTER TABLE plot_cards
                 ADD COLUMN chapter_outline_id VARCHAR(36) NULL""",
-                """ALTER TABLE plot_cards
-                ADD CONSTRAINT fk_plot_cards_chapter_outline
-                FOREIGN KEY (chapter_outline_id)
-                REFERENCES chapter_outlines (id)
-                ON DELETE SET NULL""",
                 """CREATE INDEX IF NOT EXISTS idx_plot_cards_chapter_outline_id
                 ON plot_cards (chapter_outline_id)""",
             ])
+            try:
+                await conn.execute(text(
+                    """ALTER TABLE plot_cards
+                    ADD CONSTRAINT fk_plot_cards_chapter_outline
+                    FOREIGN KEY (chapter_outline_id)
+                    REFERENCES chapter_outlines (id)
+                    ON DELETE SET NULL"""
+                ))
+            except Exception:
+                pass  # SQLite does not support ADD CONSTRAINT in ALTER TABLE
         else:
             logger.info("✅ plot_cards.chapter_outline_id already exists")
 
@@ -120,8 +121,13 @@ async def ensure_plot_line_columns(engine: AsyncEngine):
             await apply_sql(conn, [
                 """ALTER TABLE plot_lines
                 ADD COLUMN estimated_chapters INTEGER""",
-                """COMMENT ON COLUMN plot_lines.estimated_chapters IS '预计章节数：完成这条剧情线预计需要的章节数量'""",
             ])
+            try:
+                await conn.execute(text(
+                    """COMMENT ON COLUMN plot_lines.estimated_chapters IS '预计章节数：完成这条剧情线预计需要的章节数量'"""
+                ))
+            except Exception:
+                pass  # SQLite does not support COMMENT ON COLUMN
             # 为已有数据设置默认值
             logger.info("🔧 Setting default values for existing plot_lines")
             await apply_sql(conn, [
@@ -146,8 +152,13 @@ async def ensure_chapter_outline_scene_pov_columns(engine: AsyncEngine):
             await apply_sql(conn, [
                 """ALTER TABLE chapter_outlines
                 ADD COLUMN scene VARCHAR(200)""",
-                """COMMENT ON COLUMN chapter_outlines.scene IS '场景地点，如拳击场→后台'""",
             ])
+            try:
+                await conn.execute(text(
+                    """COMMENT ON COLUMN chapter_outlines.scene IS '场景地点，如拳击场→后台'"""
+                ))
+            except Exception:
+                pass  # SQLite does not support COMMENT ON COLUMN
         else:
             logger.info("✅ chapter_outlines.scene already exists")
 
@@ -157,8 +168,13 @@ async def ensure_chapter_outline_scene_pov_columns(engine: AsyncEngine):
             await apply_sql(conn, [
                 """ALTER TABLE chapter_outlines
                 ADD COLUMN pov VARCHAR(100)""",
-                """COMMENT ON COLUMN chapter_outlines.pov IS '视角角色名'""",
             ])
+            try:
+                await conn.execute(text(
+                    """COMMENT ON COLUMN chapter_outlines.pov IS '视角角色名'"""
+                ))
+            except Exception:
+                pass  # SQLite does not support COMMENT ON COLUMN
         else:
             logger.info("✅ chapter_outlines.pov already exists")
 

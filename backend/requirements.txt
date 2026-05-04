@@ -9,7 +9,7 @@ python-multipart==0.0.20
 
 # 数据库
 sqlalchemy==2.0.25
-asyncpg==0.29.0    # PostgreSQL异步驱动
+aiosqlite==0.20.0    # SQLite异步驱动（嵌入式数据库，无需独立服务器）
 
 # 数据验证
 pydantic==2.12.4

@@ -18,7 +18,7 @@ async def upgrade(db: AsyncSession):
         ADD COLUMN IF NOT EXISTS estimated_chapters INTEGER;
     """))
     
-    # 添加字段注释（PostgreSQL）
+    # 添加字段注释（仅 PostgreSQL 支持，SQLite 静默跳过）
     try:
         await db.execute(text("""
             COMMENT ON COLUMN plot_lines.estimated_chapters 

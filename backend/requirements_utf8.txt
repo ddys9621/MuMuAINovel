@@ -5,8 +5,7 @@ python-multipart==0.0.20
 
 # 数据库
 sqlalchemy==2.0.25
-asyncpg==0.29.0    # PostgreSQL异步驱动
-psycopg2-binary==2.9.9  # PostgreSQL同步驱动（用于迁移脚本）
+aiosqlite==0.20.0    # SQLite异步驱动（嵌入式数据库）
 
 # 数据验证
 pydantic==2.12.4

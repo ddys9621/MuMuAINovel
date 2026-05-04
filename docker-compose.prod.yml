@@ -1,15 +1,4 @@
 services:
-  postgres:
-    restart: always
-    mem_limit: 1g
-    cpus: 1.0
-    pids_limit: 200
-    logging:
-      driver: json-file
-      options:
-        max-size: "20m"
-        max-file: "5"
-
   mumuainovel:
     restart: always
     mem_limit: 2g

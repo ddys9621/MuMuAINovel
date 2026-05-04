@@ -1,9 +1,10 @@
-"""数据库连接和会话管理 - PostgreSQL 多用户数据隔离"""
+"""数据库连接和会话管理 - SQLite 嵌入式数据库"""
 import asyncio
 from typing import Dict, Any
 from datetime import datetime
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.pool import StaticPool
 from fastapi import Request, HTTPException
 from app.config import settings
 from app.db_base import Base
@@ -64,55 +65,41 @@ _session_stats = {
 
 
 async def get_engine(user_id: str):
-    """获取或创建用户专属的数据库引擎（线程安全）
-    
-    PostgreSQL: 所有用户共享一个数据库，通过user_id字段隔离数据
-    
+    """获取或创建数据库引擎（线程安全）
+
+    SQLite: 所有用户共享一个数据库文件，数据通过user_id字段隔离
+
     Args:
         user_id: 用户ID
-        
+
     Returns:
-        用户专属的异步引擎
+        异步引擎
     """
-    # PostgreSQL模式：所有用户共享同一个引擎
-    cache_key = "shared_postgres"
+    cache_key = "shared_sqlite"
     if cache_key in _engine_cache:
         return _engine_cache[cache_key]
-    
+
     async with _cache_lock:
         if cache_key not in _engine_cache:
-            # 优化后的PostgreSQL连接配置
+            # SQLite 连接配置（桌面应用使用 StaticPool 避免并发写入冲突）
             connect_args = {
-                "server_settings": {
-                    "application_name": settings.app_name,
-                    "jit": "off",  # 关闭JIT以提高短查询性能
-                },
-                "command_timeout": 60,  # 命令超时60秒
-                "statement_cache_size": 500,  # 启用语句缓存，提升重复查询性能
+                "check_same_thread": False,
             }
-            
+
             engine = create_async_engine(
                 settings.database_url,
-                echo=False,  # 生产环境关闭SQL日志
+                echo=False,
                 future=True,
-                pool_size=settings.database_pool_size,  # 核心连接数：30
-                max_overflow=settings.database_max_overflow,  # 溢出连接数：20
-                pool_timeout=settings.database_pool_timeout,  # 连接超时：60秒
-                pool_pre_ping=settings.database_pool_pre_ping,  # 连接前检测
-                pool_recycle=settings.database_pool_recycle,  # 连接回收：1800秒
-                pool_use_lifo=settings.database_pool_use_lifo,  # LIFO策略提高复用
+                poolclass=StaticPool,
                 connect_args=connect_args
             )
             _engine_cache[cache_key] = engine
             logger.info(
-                f"✅ PostgreSQL引擎已创建（优化配置）\n"
-                f"   ├─ 连接池: {settings.database_pool_size} 核心 + {settings.database_max_overflow} 溢出 = {settings.database_pool_size + settings.database_max_overflow} 总连接\n"
-                f"   ├─ 超时: {settings.database_pool_timeout}秒\n"
-                f"   ├─ 回收: {settings.database_pool_recycle}秒\n"
-                f"   ├─ 策略: LIFO（提高复用率）\n"
-                f"   └─ 预估并发: 80-150用户"
+                f"SQLite引擎已创建\n"
+                f"   ├─ 数据库文件: {settings.database_path}\n"
+                f"   └─ 嵌入式数据库，无需独立服务器"
             )
-        
+
         return _engine_cache[cache_key]
 
 
@@ -399,7 +386,7 @@ async def get_database_stats():
             "engine_keys": list(_engine_cache.keys()),
         },
         "config": {
-            "database_type": "PostgreSQL",
+            "database_type": "SQLite",
             "pool_size": settings.database_pool_size,
             "max_overflow": settings.database_max_overflow,
             "total_connections": settings.database_pool_size + settings.database_max_overflow,
@@ -457,7 +444,7 @@ async def check_database_health(user_id: str = None) -> dict:
     
     try:
         # 检查引擎是否存在
-        cache_key = "shared_postgres"
+        cache_key = "shared_sqlite"
         if user_id:
             engine = await get_engine(user_id)
         else:
@@ -478,7 +465,7 @@ async def check_database_health(user_id: str = None) -> dict:
             await session.execute(text("SELECT 1"))
             result["checks"]["connection"] = {"status": "ok", "healthy": True}
             
-        # 检查连接池状态（仅PostgreSQL）
+        # 检查连接池状态
         if hasattr(engine.pool, 'size'):
             pool_status = {
                 "size": engine.pool.size(),

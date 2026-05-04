@@ -39,7 +39,7 @@ Thumbs.db
 # 数据库文件（不包含在镜像中）
 data/*.db
 backend/data/*.db
-postgres_data/
+# 数据库文件
 
 # ChromaDB数据库（不包含在镜像中，会在运行时生成）
 backend/data/chroma_db/
