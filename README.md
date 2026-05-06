@@ -29,8 +29,8 @@
 ### 系统要求
 - **操作系统**: Windows 10/11
 - **必备软件**: 
-  - Python 3.8+ ([下载地址](https://www.python.org/downloads/))
-  - Node.js 16+ ([下载地址](https://nodejs.org/))
+  - Python 3.10+ ([下载地址](https://www.python.org/downloads/))
+  - Node.js 18+ ([下载地址](https://nodejs.org/))
 
 ### 快速开始
 
@@ -42,16 +42,16 @@
 2. **运行一键脚本**
    
    **方法一：双击批处理文件（最简单）**
-   - 双击 `双击启动.bat` 文件
+   - 双击 `一键启动.bat` 文件
    - 系统会自动调用 PowerShell 脚本
    - 无需任何额外设置
    
-4. **开始使用**
-   - 脚本会自动启动前后端服务
-   - 前端地址：http://localhost:5173
+3. **开始使用**
+   - 脚本会自动构建前端并启动应用服务
+   - 应用地址：http://127.0.0.1:8000
    - 后端API：http://localhost:8000
    - API文档：http://localhost:8000/docs
-   - 如需配置AI功能，请编辑根目录 `.env` 文件（容器部署）或 `backend/.env` 文件（本地开发）
+   - 如需配置AI功能，一键启动/打包版请编辑根目录 `config.ini`，容器部署请编辑根目录 `.env`
 
 
 ## 🐳 Docker 生产部署（推荐服务器）
@@ -117,16 +117,21 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 
 ### 6) 备份与恢复（SQLite）
 
-备份（直接复制数据库文件）：
+备份（从容器内复制数据库文件）：
 
 ```bash
-cp data/mumuai.db backup/mumuai_$(date +%Y%m%d).db
+docker compose stop mumuainovel
+mkdir -p backup
+docker compose cp mumuainovel:/app/data/mumuai.db backup/mumuai_$(date +%Y%m%d).db
+docker compose start mumuainovel
 ```
 
 恢复：
 
 ```bash
-cp backup/mumuai_20250101.db data/mumuai.db
+docker compose stop mumuainovel
+docker compose cp backup/mumuai_20250101.db mumuainovel:/app/data/mumuai.db
+docker compose start mumuainovel
 ```
 
 ### 7) 排障清单
@@ -143,13 +148,13 @@ cp backup/mumuai_20250101.db data/mumuai.db
 
 ### 1. 安装必备软件
 
-#### Python 3.8+
+#### Python 3.10+
 1. 访问 https://www.python.org/downloads/
 2. 下载最新版本的Python
 3. 安装时勾选"Add Python to PATH"
 4. 验证安装：打开命令行输入 `python --version`
 
-#### Node.js 16+
+#### Node.js 18+
 1. 访问 https://nodejs.org/
 2. 下载LTS版本
 3. 默认安装即可
@@ -161,7 +166,7 @@ cp backup/mumuai_20250101.db data/mumuai.db
 
 #### 配置文件（顶层 `config.ini`）
 
-打包版用户编辑 exe 同目录下的 `config.ini`；Docker 部署用户编辑 `.env` 文件。
+一键启动和打包版用户编辑 `config.ini`；Docker 部署用户编辑 `.env` 文件。直接运行后端开发服务时，可使用 `backend/.env`。
 
 
 ### Q: Python 或 Node.js 命令不识别
@@ -173,8 +178,9 @@ cp backup/mumuai_20250101.db data/mumuai.db
 ### Q: 前端页面无法访问
 **A**: 
 1. 确认后端服务正常运行
-2. 检查防火墙是否阻止8000端口
-3. 尝试访问 http://127.0.0.1:8000
+2. 一键启动或 Docker 部署访问 http://127.0.0.1:8000
+3. 只有手动运行 `npm run dev` 时才访问 http://localhost:5173
+4. 检查防火墙是否阻止对应端口
 
 ### Q: AI功能不可用
 **A**: 
@@ -187,8 +193,6 @@ cp backup/mumuai_20250101.db data/mumuai.db
 1. 确认 `backend/data/` 目录有写入权限
 2. 删除 `backend/data/mumuai.db` 后重新启动应用
 3. 检查 `DATABASE_URL` 配置是否正确
-   GRANT ALL PRIVILEGES ON DATABASE mumuai_novel TO mumuai;
-   ```
 
 
 ### API文档
@@ -212,17 +216,17 @@ cp backup/mumuai_20250101.db data/mumuai.db
    - 前端控制台：浏览器F12开发者工具
 
 2. **重置环境**
-   ```bash
-   # 删除虚拟环境重新安装
-   rmdir /s backend\.venv
-   rmdir /s frontend\node_modules
-   # 重新运行一键脚本
+   ```powershell
+   Remove-Item backend\.venv -Recurse -Force
+   Remove-Item frontend\node_modules -Recurse -Force
+   .\一键启动.bat
    ```
 
 3. **数据库重置**
-   ```sql
-   DROP DATABASE IF EXISTS mumuai_novel;
-   # 重新运行数据库初始化脚本
+   ```powershell
+   Remove-Item backend\data\mumuai.db -Force
+   Remove-Item backend\data\chroma_db -Recurse -Force
+   .\一键启动.bat
    ```
 
 ## 📄 许可证
