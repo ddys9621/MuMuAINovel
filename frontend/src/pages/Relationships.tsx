@@ -3,6 +3,7 @@ import { GitBranch, Plus, Pencil, Trash2, Loader2, Heart, Swords, Users, Handsha
 import { toast } from 'sonner'
 import { useStore } from '@/store/index'
 import { relationshipApi, characterApi } from '@/services/api'
+import { Modal } from '@/components/ui/Modal'
 import type { Character } from '@/types'
 
 /** 后端 RelationshipTypeResponse */
@@ -268,121 +269,12 @@ export default function Relationships() {
 
       {/* 添加/编辑弹窗 */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={closeModal}>
-          <div className="bg-white rounded-modal shadow-xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <h2 className="text-lg font-semibold text-content mb-4">{editingId ? '编辑关系' : '添加关系'}</h2>
-            <div className="space-y-4">
-              {/* 角色A */}
-              <div>
-                <label className="block text-sm font-medium text-content mb-1">角色A</label>
-                <select
-                  value={form.character_from_id}
-                  onChange={e => setForm(f => ({ ...f, character_from_id: e.target.value }))}
-                  disabled={!!editingId}
-                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <option value="">请选择角色</option>
-                  {selectableChars.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* 角色B */}
-              <div>
-                <label className="block text-sm font-medium text-content mb-1">角色B</label>
-                <select
-                  value={form.character_to_id}
-                  onChange={e => setForm(f => ({ ...f, character_to_id: e.target.value }))}
-                  disabled={!!editingId}
-                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <option value="">请选择角色</option>
-                  {selectableChars.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* 关系类型 */}
-              <div>
-                <label className="block text-sm font-medium text-content mb-1">关系类型</label>
-                <select
-                  value={form.relationship_type_id}
-                  onChange={e => {
-                    const val = e.target.value
-                    setForm(f => ({ ...f, relationship_type_id: val === '' ? '' : Number(val) }))
-                  }}
-                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none"
-                >
-                  <option value="">请选择关系类型</option>
-                  {types.map(t => (
-                    <option key={t.id} value={t.id}>{t.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* 自定义关系名称 */}
-              <div>
-                <label className="block text-sm font-medium text-content mb-1">自定义关系名称（可选）</label>
-                <input
-                  type="text"
-                  value={form.relationship_name}
-                  onChange={e => setForm(f => ({ ...f, relationship_name: e.target.value }))}
-                  placeholder="如不填则使用关系类型名称"
-                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none"
-                />
-              </div>
-
-              {/* 亲密度 */}
-              <div>
-                <label className="block text-sm font-medium text-content mb-1">
-                  亲密度: {form.intimacy_level}
-                </label>
-                <input
-                  type="range"
-                  min={-100}
-                  max={100}
-                  value={form.intimacy_level}
-                  onChange={e => setForm(f => ({ ...f, intimacy_level: Number(e.target.value) }))}
-                  className="w-full"
-                />
-                <div className="flex justify-between text-xs text-content-secondary">
-                  <span>-100 (敌对)</span>
-                  <span>0</span>
-                  <span>100 (亲密)</span>
-                </div>
-              </div>
-
-              {/* 状态 */}
-              <div>
-                <label className="block text-sm font-medium text-content mb-1">状态</label>
-                <select
-                  value={form.status}
-                  onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
-                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none"
-                >
-                  {STATUS_OPTIONS.map(o => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* 关系描述 */}
-              <div>
-                <label className="block text-sm font-medium text-content mb-1">关系描述</label>
-                <textarea
-                  value={form.description}
-                  onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-                  placeholder="描述两个角色之间的关系..."
-                  rows={3}
-                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none resize-none"
-                />
-              </div>
-            </div>
-
-            {/* 按钮 */}
-            <div className="flex justify-end gap-2 mt-6">
+        <Modal
+          title={editingId ? '编辑关系' : '添加关系'}
+          onClose={closeModal}
+          size="xl"
+          footer={(
+            <>
               <button onClick={closeModal} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm transition-colors">
                 取消
               </button>
@@ -390,9 +282,119 @@ export default function Relationships() {
                 {saving && <Loader2 className="w-4 h-4 animate-spin" />}
                 {editingId ? '保存' : '创建'}
               </button>
+            </>
+          )}
+        >
+          <div className="space-y-4">
+            {/* 角色A */}
+            <div>
+              <label className="block text-sm font-medium text-content mb-1">角色A</label>
+              <select
+                value={form.character_from_id}
+                onChange={e => setForm(f => ({ ...f, character_from_id: e.target.value }))}
+                disabled={!!editingId}
+                className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <option value="">请选择角色</option>
+                {selectableChars.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* 角色B */}
+            <div>
+              <label className="block text-sm font-medium text-content mb-1">角色B</label>
+              <select
+                value={form.character_to_id}
+                onChange={e => setForm(f => ({ ...f, character_to_id: e.target.value }))}
+                disabled={!!editingId}
+                className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <option value="">请选择角色</option>
+                {selectableChars.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* 关系类型 */}
+            <div>
+              <label className="block text-sm font-medium text-content mb-1">关系类型</label>
+              <select
+                value={form.relationship_type_id}
+                onChange={e => {
+                  const val = e.target.value
+                  setForm(f => ({ ...f, relationship_type_id: val === '' ? '' : Number(val) }))
+                }}
+                className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none"
+              >
+                <option value="">请选择关系类型</option>
+                {types.map(t => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* 自定义关系名称 */}
+            <div>
+              <label className="block text-sm font-medium text-content mb-1">自定义关系名称（可选）</label>
+              <input
+                type="text"
+                value={form.relationship_name}
+                onChange={e => setForm(f => ({ ...f, relationship_name: e.target.value }))}
+                placeholder="如不填则使用关系类型名称"
+                className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none"
+              />
+            </div>
+
+            {/* 亲密度 */}
+            <div>
+              <label className="block text-sm font-medium text-content mb-1">
+                亲密度: {form.intimacy_level}
+              </label>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={form.intimacy_level}
+                onChange={e => setForm(f => ({ ...f, intimacy_level: Number(e.target.value) }))}
+                className="w-full"
+              />
+              <div className="flex justify-between text-xs text-content-secondary">
+                <span>-100 (敌对)</span>
+                <span>0</span>
+                <span>100 (亲密)</span>
+              </div>
+            </div>
+
+            {/* 状态 */}
+            <div>
+              <label className="block text-sm font-medium text-content mb-1">状态</label>
+              <select
+                value={form.status}
+                onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
+                className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none"
+              >
+                {STATUS_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* 关系描述 */}
+            <div>
+              <label className="block text-sm font-medium text-content mb-1">关系描述</label>
+              <textarea
+                value={form.description}
+                onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                placeholder="描述两个角色之间的关系..."
+                rows={3}
+                className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none resize-none"
+              />
             </div>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   )

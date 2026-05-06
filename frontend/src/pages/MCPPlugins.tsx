@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Plus, Pencil, Trash2, Power, TestTube, Loader2, Plug, Wrench, ChevronDown, ChevronUp, X } from 'lucide-react'
+import { Plus, Pencil, Trash2, Power, TestTube, Loader2, Plug, Wrench, ChevronDown, ChevronUp } from 'lucide-react'
 import { toast } from 'sonner'
 import { mcpPluginApi } from '@/services/api'
+import { Modal } from '@/components/ui/Modal'
 import type { MCPPlugin, MCPPluginCreate, MCPPluginUpdate, MCPTool } from '@/types'
 
 type ModalMode = 'simple' | 'full' | 'edit'
@@ -330,105 +331,102 @@ export default function MCPPlugins() {
 
       {/* 弹窗 */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={closeModal}>
-          <div className="bg-white rounded-modal shadow-xl p-6 w-full max-w-lg mx-4 max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-content">
-                {modalMode === 'edit' ? '编辑插件' : modalMode === 'full' ? '创建 MCP 插件' : '快速添加 MCP 插件'}
-              </h2>
-              <button onClick={closeModal} className="p-1 rounded hover:bg-surface-hover text-content-secondary"><X className="w-4 h-4" /></button>
+        <Modal
+          title={modalMode === 'edit' ? '编辑插件' : modalMode === 'full' ? '创建 MCP 插件' : '快速添加 MCP 插件'}
+          onClose={closeModal}
+          size="xl"
+          footer={modalMode === 'simple' ? (
+            <>
+              <button onClick={closeModal} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
+              <button onClick={handleCreateSimple} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">创建</button>
+            </>
+          ) : (
+            <>
+              <button onClick={closeModal} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
+              <button
+                onClick={modalMode === 'edit' ? handleUpdate : handleCreateFull}
+                className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors"
+              >
+                {modalMode === 'edit' ? '保存' : '创建'}
+              </button>
+            </>
+          )}
+        >
+          {modalMode === 'simple' ? (
+            <div className="space-y-4">
+              <p className="text-xs text-content-secondary">粘贴标准 MCP 配置 JSON（如 Claude Desktop 格式）</p>
+              <textarea
+                value={configJson}
+                onChange={e => setConfigJson(e.target.value)}
+                rows={10}
+                placeholder='{"mcpServers":{"name":{"command":"...","args":[...]}}}'
+                className={`${inputCls} resize-none font-mono`}
+              />
             </div>
-
-            {modalMode === 'simple' ? (
-              <div className="space-y-4">
-                <p className="text-xs text-content-secondary">粘贴标准 MCP 配置 JSON（如 Claude Desktop 格式）</p>
-                <textarea
-                  value={configJson}
-                  onChange={e => setConfigJson(e.target.value)}
-                  rows={10}
-                  placeholder='{"mcpServers":{"name":{"command":"...","args":[...]}}}'
-                  className={`${inputCls} resize-none font-mono`}
-                />
-                <div className="flex justify-end gap-2 pt-2">
-                  <button onClick={closeModal} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
-                  <button onClick={handleCreateSimple} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">创建</button>
-                </div>
-              </div>
-            ) : (
-              /* 完整创建 / 编辑 共用表单 */
-              <div className="space-y-4">
-                {modalMode === 'full' && (
-                  <div>
-                    <label className="block text-sm text-content-secondary mb-1">插件名称 *</label>
-                    <input value={form.plugin_name} onChange={e => setForm(f => ({ ...f, plugin_name: e.target.value }))} placeholder="my-plugin" className={inputCls} />
-                  </div>
-                )}
+          ) : (
+            /* 完整创建 / 编辑 共用表单 */
+            <div className="space-y-4">
+              {modalMode === 'full' && (
                 <div>
-                  <label className="block text-sm text-content-secondary mb-1">显示名称</label>
-                  <input value={form.display_name} onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))} placeholder="我的插件" className={inputCls} />
+                  <label className="block text-sm text-content-secondary mb-1">插件名称 *</label>
+                  <input value={form.plugin_name} onChange={e => setForm(f => ({ ...f, plugin_name: e.target.value }))} placeholder="my-plugin" className={inputCls} />
                 </div>
-                <div>
-                  <label className="block text-sm text-content-secondary mb-1">描述</label>
-                  <input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="插件功能描述" className={inputCls} />
-                </div>
-
-                {modalMode === 'full' && (
-                  <div>
-                    <label className="block text-sm text-content-secondary mb-1">类型</label>
-                    <select value={form.server_type} onChange={e => setForm(f => ({ ...f, server_type: e.target.value as 'http' | 'stdio' }))} className={inputCls}>
-                      <option value="stdio">Stdio</option>
-                      <option value="http">HTTP</option>
-                    </select>
-                  </div>
-                )}
-
-                {/* 根据类型显示不同字段 */}
-                {(modalMode === 'edit' ? editingPlugin?.plugin_type : form.server_type) === 'http' ? (
-                  <>
-                    <div>
-                      <label className="block text-sm text-content-secondary mb-1">服务器 URL</label>
-                      <input value={form.server_url} onChange={e => setForm(f => ({ ...f, server_url: e.target.value }))} placeholder="http://localhost:3000/mcp" className={inputCls} />
-                    </div>
-                    <div>
-                      <label className="block text-sm text-content-secondary mb-1">Headers (JSON)</label>
-                      <textarea value={form.headers} onChange={e => setForm(f => ({ ...f, headers: e.target.value }))} rows={3} placeholder='{"Authorization": "Bearer ..."}' className={`${inputCls} resize-none font-mono`} />
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div>
-                      <label className="block text-sm text-content-secondary mb-1">命令</label>
-                      <input value={form.command} onChange={e => setForm(f => ({ ...f, command: e.target.value }))} placeholder="npx" className={inputCls} />
-                    </div>
-                    <div>
-                      <label className="block text-sm text-content-secondary mb-1">参数（每行一个）</label>
-                      <textarea value={form.args} onChange={e => setForm(f => ({ ...f, args: e.target.value }))} rows={3} placeholder={"-y\n@modelcontextprotocol/server-xxx"} className={`${inputCls} resize-none font-mono`} />
-                    </div>
-                    <div>
-                      <label className="block text-sm text-content-secondary mb-1">环境变量 (JSON)</label>
-                      <textarea value={form.env} onChange={e => setForm(f => ({ ...f, env: e.target.value }))} rows={3} placeholder='{"API_KEY": "..."}' className={`${inputCls} resize-none font-mono`} />
-                    </div>
-                  </>
-                )}
-
-                <label className="flex items-center gap-2 text-sm text-content-secondary cursor-pointer">
-                  <input type="checkbox" checked={form.enabled} onChange={e => setForm(f => ({ ...f, enabled: e.target.checked }))} className="rounded" />
-                  启用插件
-                </label>
-
-                <div className="flex justify-end gap-2 pt-2">
-                  <button onClick={closeModal} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
-                  <button
-                    onClick={modalMode === 'edit' ? handleUpdate : handleCreateFull}
-                    className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors"
-                  >
-                    {modalMode === 'edit' ? '保存' : '创建'}
-                  </button>
-                </div>
+              )}
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">显示名称</label>
+                <input value={form.display_name} onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))} placeholder="我的插件" className={inputCls} />
               </div>
-            )}
-          </div>
-        </div>
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">描述</label>
+                <input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="插件功能描述" className={inputCls} />
+              </div>
+
+              {modalMode === 'full' && (
+                <div>
+                  <label className="block text-sm text-content-secondary mb-1">类型</label>
+                  <select value={form.server_type} onChange={e => setForm(f => ({ ...f, server_type: e.target.value as 'http' | 'stdio' }))} className={inputCls}>
+                    <option value="stdio">Stdio</option>
+                    <option value="http">HTTP</option>
+                  </select>
+                </div>
+              )}
+
+              {/* 根据类型显示不同字段 */}
+              {(modalMode === 'edit' ? editingPlugin?.plugin_type : form.server_type) === 'http' ? (
+                <>
+                  <div>
+                    <label className="block text-sm text-content-secondary mb-1">服务器 URL</label>
+                    <input value={form.server_url} onChange={e => setForm(f => ({ ...f, server_url: e.target.value }))} placeholder="http://localhost:3000/mcp" className={inputCls} />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-content-secondary mb-1">Headers (JSON)</label>
+                    <textarea value={form.headers} onChange={e => setForm(f => ({ ...f, headers: e.target.value }))} rows={3} placeholder='{"Authorization": "Bearer ..."}' className={`${inputCls} resize-none font-mono`} />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-sm text-content-secondary mb-1">命令</label>
+                    <input value={form.command} onChange={e => setForm(f => ({ ...f, command: e.target.value }))} placeholder="npx" className={inputCls} />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-content-secondary mb-1">参数（每行一个）</label>
+                    <textarea value={form.args} onChange={e => setForm(f => ({ ...f, args: e.target.value }))} rows={3} placeholder={"-y\n@modelcontextprotocol/server-xxx"} className={`${inputCls} resize-none font-mono`} />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-content-secondary mb-1">环境变量 (JSON)</label>
+                    <textarea value={form.env} onChange={e => setForm(f => ({ ...f, env: e.target.value }))} rows={3} placeholder='{"API_KEY": "..."}' className={`${inputCls} resize-none font-mono`} />
+                  </div>
+                </>
+              )}
+
+              <label className="flex items-center gap-2 text-sm text-content-secondary cursor-pointer">
+                <input type="checkbox" checked={form.enabled} onChange={e => setForm(f => ({ ...f, enabled: e.target.checked }))} className="rounded" />
+                启用插件
+              </label>
+            </div>
+          )}
+        </Modal>
       )}
     </div>
   )

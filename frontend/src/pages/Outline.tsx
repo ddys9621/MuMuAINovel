@@ -7,6 +7,7 @@ import { useOutlineSync } from '@/store/hooks'
 import { usePlotCardSync, usePlotLineSync, useChapterOutlineSync } from '@/store/plotHooks'
 import { wizardStreamApi, outlineApi, chapterOutlineLinkApi, plotLineApi } from '@/services/api'
 import { MCPSelector } from '@/components/MCPSelector'
+import { Modal as UiModal, type ModalSize } from '@/components/ui/Modal'
 import type {
   Outline, OutlineCreate, OutlineUpdate,
   PlotCard, PlotCardCreate, PlotCardUpdate,
@@ -134,15 +135,12 @@ export default function OutlinePage() {
   )
 }
 
-// ==================== 通用弹窗壳 ====================
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+// ==================== 通用弹窗壳（薄壳，转发到全局 Modal） ====================
+function Modal({ title, onClose, children, size = 'xl' }: { title: string; onClose: () => void; children: React.ReactNode; size?: ModalSize }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
-      <div className="bg-white rounded-card p-6 w-full max-w-lg mx-4 space-y-4 max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <h2 className="text-lg font-bold text-content">{title}</h2>
-        {children}
-      </div>
-    </div>
+    <UiModal title={title} onClose={onClose} size={size}>
+      {children}
+    </UiModal>
   )
 }
 
@@ -358,7 +356,7 @@ function OutlinesView({ outlines, projectId, createOutline, updateOutline, delet
             </div>
             <MCPSelector value={{ enable: genEnableMcp, selected: genPlugins }} onChange={({ enable, selected }) => { setGenEnableMcp(enable); setGenPlugins(selected) }} />
           </div>
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
             <button onClick={() => setShowGenModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
             <button onClick={handleAIGenerate} disabled={generating} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
               {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
@@ -369,8 +367,8 @@ function OutlinesView({ outlines, projectId, createOutline, updateOutline, delet
       )}
 
       {showModal && (
-        <Modal title={editing ? '编辑大纲' : '新建大纲'} onClose={() => setShowModal(false)}>
-          <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
+        <Modal title={editing ? '编辑大纲' : '新建大纲'} onClose={() => setShowModal(false)} size="xl">
+          <div className="space-y-3">
             <div>
               <label className="block text-sm text-content-secondary mb-1">标题</label>
               <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand outline-none" />
@@ -406,7 +404,7 @@ function OutlinesView({ outlines, projectId, createOutline, updateOutline, delet
               <input value={form.opening_hook} onChange={e => setForm(f => ({ ...f, opening_hook: e.target.value }))} placeholder="第一章如何吸引读者" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand outline-none" />
             </div>
           </div>
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
             <button onClick={() => setShowModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
             <button onClick={handleSubmit} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">确定</button>
           </div>
@@ -431,14 +429,14 @@ function OutlinesView({ outlines, projectId, createOutline, updateOutline, delet
           return JSON.stringify(v);
         };
         return (
-          <Modal title={`查看大纲：${viewingOutline.title}`} onClose={() => setViewingOutline(null)}>
+          <Modal title={`查看大纲：${viewingOutline.title}`} onClose={() => setViewingOutline(null)} size="2xl">
             <div className="space-y-3">
               <div className="flex items-center gap-2 text-xs text-content-secondary">
                 {viewingOutline.is_active && <span className="bg-green-100 text-green-700 rounded px-1.5 py-0.5">活跃</span>}
                 {viewingOutline.version != null && <span>版本 v{viewingOutline.version}</span>}
                 <span>创建于 {new Date(viewingOutline.created_at).toLocaleString()}</span>
               </div>
-              <div className="max-h-[60vh] overflow-y-auto space-y-3">
+              <div className="space-y-3">
                 {parsed ? labels.map(([key, label]) => {
                   const val = parsed![key];
                   if (!val) return null;
@@ -455,7 +453,7 @@ function OutlinesView({ outlines, projectId, createOutline, updateOutline, delet
                 )}
               </div>
             </div>
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
               <button onClick={() => { setViewingOutline(null); openEdit(viewingOutline); }} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm inline-flex items-center gap-1.5">
                 <Pencil className="w-3.5 h-3.5" />编辑
               </button>
@@ -600,7 +598,7 @@ function PlotCardsView({ plotCards, projectId, outlines, createPlotCard, updateP
             </div>
             <MCPSelector value={{ enable: genEnableMcp, selected: genPlugins }} onChange={({ enable, selected }) => { setGenEnableMcp(enable); setGenPlugins(selected) }} />
           </div>
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
             <button onClick={() => setShowGenModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
             <button onClick={handleGenerate} disabled={generating} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
               {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
@@ -632,7 +630,7 @@ function PlotCardsView({ plotCards, projectId, outlines, createPlotCard, updateP
               <textarea value={form.content} onChange={e => setForm(f => ({ ...f, content: e.target.value }))} rows={5} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors resize-none" />
             </div>
           </div>
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
             <button onClick={() => setShowModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
             <button onClick={handleSubmit} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">确定</button>
           </div>
@@ -964,7 +962,7 @@ function PlotLinesView({ plotLines, projectId, outlines, plotCards, createPlotLi
             </div>
             <MCPSelector value={{ enable: genEnableMcp, selected: genPlugins }} onChange={({ enable, selected }) => { setGenEnableMcp(enable); setGenPlugins(selected) }} />
           </div>
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
             <button onClick={() => setShowGenModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
             <button onClick={handleGenerate} disabled={generating} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
               {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
@@ -975,7 +973,7 @@ function PlotLinesView({ plotLines, projectId, outlines, plotCards, createPlotLi
       )}
 
       {showModal && (
-        <Modal title={editing ? '编辑剧情线' : '新建剧情线'} onClose={() => setShowModal(false)}>
+        <Modal title={editing ? '编辑剧情线' : '新建剧情线'} onClose={() => setShowModal(false)} size="2xl">
           <div className="space-y-3">
             <div>
               <label className="block text-sm text-content-secondary mb-1">名称</label>
@@ -1055,7 +1053,7 @@ function PlotLinesView({ plotLines, projectId, outlines, plotCards, createPlotLi
               </div>
             </div>
           </div>
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
             <button onClick={() => setShowModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
             <button onClick={handleSubmit} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">确定</button>
           </div>
@@ -1063,96 +1061,133 @@ function PlotLinesView({ plotLines, projectId, outlines, plotCards, createPlotLi
       )}
 
       {viewing && (
-        <Modal title={`剧情线详情：${viewing.title}`} onClose={() => { setViewing(null); setViewingProgress(null) }}>
-          <div className="space-y-4">
-            <div className="flex flex-wrap items-center gap-2 text-xs text-content-secondary">
-              <span className={cn('rounded px-2 py-1', getPlotLineTypeColor(viewing.line_type))}>{getPlotLineTypeLabel(viewing.line_type)}</span>
-              {viewing.estimated_chapters != null && viewing.estimated_chapters > 0 && <span>预计章节 {viewing.estimated_chapters}</span>}
-              <span>关联章纲 {viewing.chapter_outline_count ?? 0}</span>
-              <span>关联卡片 {viewing.plot_card_count ?? 0}</span>
+        <Modal title={`剧情线详情：${viewing.title}`} onClose={() => { setViewing(null); setViewingProgress(null) }} size="2xl">
+          <div className="space-y-5">
+            {/* 顶部元信息栏 */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <span className={cn('rounded-full px-3 py-1 text-xs font-medium', getPlotLineTypeColor(viewing.line_type))}>{getPlotLineTypeLabel(viewing.line_type)}</span>
+              <div className="flex items-center gap-4 text-xs text-content-secondary">
+                {viewing.estimated_chapters != null && viewing.estimated_chapters > 0 && (
+                  <span className="inline-flex items-center gap-1"><BookOpen className="w-3.5 h-3.5" />预计 {viewing.estimated_chapters} 章</span>
+                )}
+                <span className="inline-flex items-center gap-1"><Link2 className="w-3.5 h-3.5" />章纲 {viewing.chapter_outline_count ?? 0}</span>
+                <span className="inline-flex items-center gap-1"><LayoutGrid className="w-3.5 h-3.5" />卡片 {viewing.plot_card_count ?? 0}</span>
+              </div>
             </div>
 
+            {/* 剧情简介 */}
             {viewing.description && (
-              <div className="rounded-btn border border-surface-border bg-surface/40 p-3">
-                <p className="text-xs text-content-secondary mb-1">剧情简介</p>
-                <p className="text-sm text-content whitespace-pre-wrap">{viewing.description}</p>
+              <div className="rounded-lg border border-surface-border bg-gradient-to-br from-surface/60 to-surface-hover/30 p-4">
+                <p className="text-xs font-medium text-content-secondary mb-2 uppercase tracking-wider">剧情简介</p>
+                <p className="text-sm text-content leading-relaxed whitespace-pre-wrap">{viewing.description}</p>
               </div>
             )}
 
-            <div className="rounded-card border border-surface-border p-4 space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-medium text-content">节点进度</p>
-                  <p className="text-xs text-content-secondary mt-1">这里会结合章节关联情况，展示每个节点推进了多少。</p>
+            {/* 整体进度概览 */}
+            {!loadingProgress && viewingProgress?.has_beats && (
+              <div className="rounded-lg bg-gradient-to-r from-brand/5 via-brand/10 to-brand/5 border border-brand/20 p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-sm font-semibold text-content">整体进度</p>
+                  <span className="text-lg font-bold text-brand">{((viewingProgress.total_progress || 0) * 100).toFixed(1)}%</span>
                 </div>
+                <div className="h-2.5 rounded-full bg-white/80 overflow-hidden shadow-inner">
+                  <div className="h-full rounded-full bg-gradient-to-r from-brand to-brand-600 transition-all duration-500" style={{ width: `${Math.max(0, Math.min(100, (viewingProgress.total_progress || 0) * 100))}%` }} />
+                </div>
+                <p className="text-xs text-content-secondary mt-2">已关联 {viewingProgress.linked_chapters_count} 个章纲 · 共 {viewingProgress.beats.length} 个节点</p>
+              </div>
+            )}
+
+            {/* 节点列表 */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-semibold text-content">节点详情</p>
                 {loadingProgress && <Loader2 className="w-4 h-4 animate-spin text-content-secondary" />}
               </div>
 
               {loadingProgress ? (
-                <div className="text-xs text-content-secondary">正在加载节点进度...</div>
-              ) : viewingProgress?.has_beats ? (
-                <>
-                  <div>
-                    <div className="flex items-center justify-between text-xs text-content-secondary mb-2">
-                      <span>整体进度</span>
-                      <span>{((viewingProgress.total_progress || 0) * 100).toFixed(1)}%</span>
-                    </div>
-                    <div className="h-2 rounded-full bg-surface-border overflow-hidden">
-                      <div className="h-full bg-brand transition-all" style={{ width: `${Math.max(0, Math.min(100, (viewingProgress.total_progress || 0) * 100))}%` }} />
-                    </div>
-                    <p className="text-xs text-content-tertiary mt-2">已关联章纲：{viewingProgress.linked_chapters_count}</p>
+                <div className="flex items-center justify-center py-8">
+                  <div className="flex flex-col items-center gap-2">
+                    <Loader2 className="w-6 h-6 animate-spin text-brand" />
+                    <span className="text-xs text-content-secondary">加载节点进度中…</span>
                   </div>
+                </div>
+              ) : viewingProgress?.has_beats ? (
+                <div className="grid grid-cols-1 gap-3 max-h-[50vh] overflow-y-auto pr-1">
+                  {viewingProgress.beats.map(beat => {
+                    const isCompleted = beat.status === 'completed'
+                    const isInProgress = beat.status === 'in_progress'
+                    const statusDot = isCompleted
+                      ? 'bg-emerald-500'
+                      : isInProgress
+                        ? 'bg-blue-500 animate-pulse'
+                        : 'bg-gray-300'
+                    const statusText = isCompleted ? '已完成' : isInProgress ? '进行中' : '未开始'
+                    const cardBorder = isCompleted
+                      ? 'border-emerald-200'
+                      : isInProgress
+                        ? 'border-blue-200'
+                        : 'border-surface-border'
+                    const barColor = isCompleted
+                      ? 'bg-gradient-to-r from-emerald-400 to-emerald-500'
+                      : isInProgress
+                        ? 'bg-gradient-to-r from-blue-400 to-blue-500'
+                        : 'bg-gray-200'
 
-                  <div className="space-y-3 max-h-[48vh] overflow-y-auto pr-1">
-                    {viewingProgress.beats.map(beat => {
-                      const statusClass = beat.status === 'completed'
-                        ? 'border-emerald-200 bg-emerald-50'
-                        : beat.status === 'in_progress'
-                          ? 'border-blue-200 bg-blue-50'
-                          : 'border-surface-border bg-surface/40'
-
-                      const statusText = beat.status === 'completed'
-                        ? '已完成'
-                        : beat.status === 'in_progress'
-                          ? '进行中'
-                          : '未开始'
-
-                      return (
-                        <div key={`progress-${beat.index}`} className={cn('rounded-btn border p-3 space-y-2', statusClass)}>
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-content">节点 {beat.index} · {beat.title}</p>
-                              {beat.description && <p className="text-xs text-content-secondary mt-1 whitespace-pre-wrap">{beat.description}</p>}
-                            </div>
-                            <span className="text-xs text-content-secondary shrink-0">{statusText}</span>
+                    return (
+                      <div key={`progress-${beat.index}`} className={cn('rounded-lg border bg-white p-4 transition-shadow hover:shadow-sm', cardBorder)}>
+                        <div className="flex items-start gap-3">
+                          {/* 序号指示器 */}
+                          <div className="flex flex-col items-center gap-1 pt-0.5">
+                            <span className="flex items-center justify-center w-7 h-7 rounded-full bg-surface-hover text-xs font-bold text-content">{beat.index}</span>
+                            <span className={cn('w-2 h-2 rounded-full shrink-0', statusDot)} />
                           </div>
-                          <div>
-                            <div className="flex items-center justify-between text-[11px] text-content-secondary mb-1">
-                              <span>覆盖度</span>
-                              <span>{(beat.coverage * 100).toFixed(0)}%</span>
+                          {/* 内容 */}
+                          <div className="flex-1 min-w-0 space-y-2">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="text-sm font-semibold text-content truncate">{beat.title}</p>
+                                {beat.description && <p className="text-xs text-content-secondary mt-1 leading-relaxed line-clamp-3">{beat.description}</p>}
+                              </div>
+                              <span className={cn(
+                                'shrink-0 text-[11px] font-medium rounded-full px-2 py-0.5',
+                                isCompleted ? 'bg-emerald-100 text-emerald-700'
+                                  : isInProgress ? 'bg-blue-100 text-blue-700'
+                                    : 'bg-gray-100 text-gray-500'
+                              )}>{statusText}</span>
                             </div>
-                            <div className="h-1.5 rounded-full bg-white/70 overflow-hidden">
-                              <div className="h-full bg-brand transition-all" style={{ width: `${Math.max(0, Math.min(100, beat.coverage * 100))}%` }} />
+                            {/* 进度条 */}
+                            <div>
+                              <div className="flex items-center justify-between text-[11px] text-content-secondary mb-1">
+                                <span>覆盖度</span>
+                                <span className="font-medium">{(beat.coverage * 100).toFixed(0)}%</span>
+                              </div>
+                              <div className="h-1.5 rounded-full bg-surface-hover overflow-hidden">
+                                <div className={cn('h-full rounded-full transition-all duration-500', barColor)} style={{ width: `${Math.max(0, Math.min(100, beat.coverage * 100))}%` }} />
+                              </div>
                             </div>
-                          </div>
-                          <div className="flex items-center justify-between text-[11px] text-content-secondary">
-                            <span>标识：{beat.key || `beat_${beat.index}`}</span>
-                            <span>权重 {(beat.weight * 100).toFixed(0)}%</span>
+                            {/* 底部元信息 */}
+                            <div className="flex items-center gap-3 text-[11px] text-content-tertiary">
+                              <span>标识 {beat.key || `beat_${beat.index}`}</span>
+                              <span>·</span>
+                              <span>权重 {(beat.weight * 100).toFixed(0)}%</span>
+                            </div>
                           </div>
                         </div>
-                      )
-                    })}
-                  </div>
-                </>
+                      </div>
+                    )
+                  })}
+                </div>
               ) : (
-                <div className="rounded-btn border border-dashed border-surface-border px-3 py-4 text-xs text-content-tertiary">
-                  {viewingProgress?.message || '这条剧情线还没有定义节点，先用铅笔按钮补充节点后，这里就会显示完整阅读进度。'}
+                <div className="flex flex-col items-center justify-center py-10 rounded-lg border border-dashed border-surface-border bg-surface/20">
+                  <GitBranch className="w-8 h-8 text-content-tertiary mb-2" />
+                  <p className="text-sm text-content-secondary">{viewingProgress?.message || '暂无节点数据'}</p>
+                  <p className="text-xs text-content-tertiary mt-1">点击下方「编辑节点」可添加剧情节点</p>
                 </div>
               )}
             </div>
           </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <button onClick={() => { const current = viewing; setViewing(null); setViewingProgress(null); if (current) openEdit(current) }} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm inline-flex items-center gap-1.5">
+          <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
+            <button onClick={() => { const current = viewing; setViewing(null); setViewingProgress(null); if (current) openEdit(current) }} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm inline-flex items-center gap-1.5 transition-colors">
               <Pencil className="w-3.5 h-3.5" />编辑节点
             </button>
             <button onClick={() => { setViewing(null); setViewingProgress(null) }} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">关闭</button>
@@ -1463,7 +1498,7 @@ function ChapterOutlinesView({ chapterOutlines, projectId, createChapterOutline,
             <MCPSelector value={{ enable: genEnableMcp, selected: genPlugins }} onChange={({ enable, selected }) => { setGenEnableMcp(enable); setGenPlugins(selected) }} />
             <p className="text-xs text-content-secondary">将从第 {sorted.length > 0 ? sorted[sorted.length - 1].chapter_number + 1 : 1} 章开始生成。</p>
           </div>
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
             <button onClick={() => setShowGenModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
             <button onClick={handleGenerate} disabled={generating} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
               {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
@@ -1475,7 +1510,7 @@ function ChapterOutlinesView({ chapterOutlines, projectId, createChapterOutline,
 
       {/* 创建/编辑弹窗 */}
       {showModal && (
-        <Modal title={editing ? '编辑章纲' : '新建章纲'} onClose={() => setShowModal(false)}>
+        <Modal title={editing ? '编辑章纲' : '新建章纲'} onClose={() => setShowModal(false)} size="xl">
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -1506,7 +1541,7 @@ function ChapterOutlinesView({ chapterOutlines, projectId, createChapterOutline,
               <textarea value={form.plot_points} onChange={e => setForm(f => ({ ...f, plot_points: e.target.value }))} rows={4} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors resize-none" />
             </div>
           </div>
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
             <button onClick={() => setShowModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
             <button onClick={handleSubmit} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">确定</button>
           </div>
@@ -1526,7 +1561,7 @@ function ChapterOutlinesView({ chapterOutlines, projectId, createChapterOutline,
               ))}
             </div>
           </div>
-          <div className="flex justify-end gap-2 pt-3">
+          <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
             <button onClick={() => setConfirmDelete(false)} disabled={deleting} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
             <button onClick={executeDelete} disabled={deleting} className="bg-red-500 hover:bg-red-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
               {deleting && <Loader2 className="w-4 h-4 animate-spin" />}
@@ -1546,7 +1581,7 @@ function ChapterOutlinesView({ chapterOutlines, projectId, createChapterOutline,
             </div>
             <p className="text-xs text-content-secondary">将从第 {sorted.length > 0 ? sorted[sorted.length - 1].chapter_number + 1 : 1} 章开始，自动编号创建 {batchCount} 个章纲。</p>
           </div>
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
             <button onClick={() => setShowBatchModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
             <button onClick={handleBatchCreate} disabled={batchCreating} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
               {batchCreating && <Loader2 className="w-4 h-4 animate-spin" />}
@@ -1590,7 +1625,7 @@ function ChapterOutlinesView({ chapterOutlines, projectId, createChapterOutline,
               })
             )}
           </div>
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
             <button onClick={() => setShowLinkModal(null)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
             <button onClick={handleLink} disabled={linkSaving || selectedLinkIds.length === 0} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
               {linkSaving && <Loader2 className="w-4 h-4 animate-spin" />}
@@ -1601,7 +1636,7 @@ function ChapterOutlinesView({ chapterOutlines, projectId, createChapterOutline,
       )}
 
       {viewingChapterOutline && (
-        <Modal title={`章纲详情：第${viewingChapterOutline.chapter_number}章`} onClose={() => setViewingChapterOutline(null)}>
+        <Modal title={`章纲详情：第${viewingChapterOutline.chapter_number}章`} onClose={() => setViewingChapterOutline(null)} size="xl">
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2 text-xs text-content-secondary">
               <span className="bg-surface-hover rounded px-2 py-1">#{viewingChapterOutline.chapter_number}</span>
@@ -1631,7 +1666,7 @@ function ChapterOutlinesView({ chapterOutlines, projectId, createChapterOutline,
               </div>
             )}
           </div>
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
             <button onClick={() => { const current = viewingChapterOutline; setViewingChapterOutline(null); if (current) openEdit(current) }} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm inline-flex items-center gap-1.5">
               <Pencil className="w-3.5 h-3.5" />编辑
             </button>

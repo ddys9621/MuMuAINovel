@@ -106,6 +106,56 @@
     @apply inline-flex items-center justify-center gap-2 border border-white/80 bg-white/75 px-3 py-2 text-sm text-content-secondary shadow-xs hover:-translate-y-0.5 hover:bg-white hover:text-content;
   }
 
+  .mu-page-header {
+    @apply relative border border-surface-border bg-white/95 shadow-xs;
+    border-left-width: 3px;
+    border-left-color: #ff5a3c;
+  }
+
+  .mu-page-header__row {
+    @apply flex flex-col gap-3 px-5 py-4 md:flex-row md:items-start md:justify-between md:gap-6;
+  }
+
+  .mu-page-header__eyebrow {
+    @apply inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.22em] text-brand;
+  }
+
+  .mu-page-header__title {
+    @apply mt-2 text-[20px] font-semibold leading-tight text-content md:text-[22px];
+  }
+
+  .mu-page-header__subtitle {
+    @apply mt-1 text-xs leading-6 text-content-secondary md:text-[13px];
+  }
+
+  .mu-page-header__actions {
+    @apply flex shrink-0 flex-wrap items-center gap-2;
+  }
+
+  .mu-page-header__btn {
+    @apply inline-flex items-center gap-1.5 border border-surface-border bg-white px-3.5 py-2 text-sm text-content-secondary shadow-xs hover:border-brand hover:text-brand;
+  }
+
+  .mu-page-header__btn-primary {
+    @apply inline-flex items-center gap-1.5 border border-brand bg-brand px-3.5 py-2 text-sm font-medium text-white shadow-xs hover:bg-brand-600 active:scale-[0.98];
+  }
+
+  .mu-page-header__stats {
+    @apply flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-surface-border-light bg-[#fff9f3] px-5 py-2.5;
+  }
+
+  .mu-page-header__stat {
+    @apply inline-flex items-center gap-1.5 text-xs text-content-secondary;
+  }
+
+  .mu-page-header__stat-value {
+    @apply text-sm font-semibold text-content tabular-nums;
+  }
+
+  .mu-page-header__stat-divider {
+    @apply hidden h-3 w-px bg-surface-border md:inline-block;
+  }
+
   .hh-hero-shell {
     @apply relative overflow-hidden border border-white/70 text-white shadow-lg;
     background: linear-gradient(135deg, rgba(255, 130, 86, 0.96) 0%, rgba(255, 170, 95, 0.9) 58%, rgba(255, 220, 170, 0.84) 100%);

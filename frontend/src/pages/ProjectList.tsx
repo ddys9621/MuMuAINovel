@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Plus,
@@ -177,29 +177,6 @@ function EmptyState({ onCreate, onInspiration }: { onCreate: () => void; onInspi
           <Plus className="w-4 h-4" />
           快速新建
         </button>
-      </div>
-    </div>
-  )
-}
-
-/* ─── 统计卡片 ─── */
-
-interface StatCardProps {
-  icon: ReactNode
-  label: string
-  value: string
-  bg: string
-}
-
-function StatCard({ icon, label, value, bg }: StatCardProps) {
-  return (
-    <div className="fanqie-soft-card flex items-center gap-4 p-4">
-      <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-[18px] ${bg}`}>
-        {icon}
-      </div>
-      <div className="min-w-0">
-        <p className="text-2xl font-semibold text-content leading-tight">{value}</p>
-        <p className="mt-1 text-xs text-content-secondary">{label}</p>
       </div>
     </div>
   )
@@ -734,102 +711,57 @@ export default function ProjectList() {
   const showSkeleton = loading && !projectsInitialized
 
   return (
-    <div className="animate-fade-in space-y-6">
-      <section className="hh-hero-shell px-6 py-7 md:px-8 md:py-8">
-        <div className="absolute -left-16 bottom-0 h-36 w-36 rounded-full bg-white/15 blur-3xl" />
-        <div className="absolute right-10 top-8 h-28 w-28 rounded-full bg-white/20 blur-3xl" />
-        <div className="relative z-10 flex flex-col gap-6 lg:flex-row lg:items-stretch lg:justify-between">
-          <div className="max-w-[760px]">
-            <div className="hh-hero-eyebrow">
-              <Sparkles className="h-3.5 w-3.5" />
+    <div className="animate-fade-in space-y-5">
+      <section className="mu-page-header">
+        <div className="mu-page-header__row">
+          <div className="min-w-0">
+            <div className="mu-page-header__eyebrow">
+              <Sparkles className="h-3 w-3" />
               作品中心
             </div>
-            <h1 className="mt-4 text-[30px] font-semibold leading-tight md:text-[36px]">让项目、灵感与进度始终井然有序</h1>
-            <p className="mt-3 max-w-[680px] text-sm leading-7 text-white/88 md:text-base">
-              在同一处查看作品状态、最近更新时间与创作入口，快速回到正在推进的项目。
-            </p>
-            <div className="mt-5 flex flex-wrap gap-2">
-              <span className="hh-hero-tag">作品归档</span>
-              <span className="hh-hero-tag">进度跟踪</span>
-              <span className="hh-hero-tag">快速继续创作</span>
-            </div>
+            <h1 className="mu-page-header__title">让项目、灵感与进度井然有序</h1>
+            <p className="mu-page-header__subtitle">在同一处查看作品状态与最近更新，快速回到正在推进的项目。</p>
           </div>
 
-          <div className="w-full lg:max-w-[360px]">
-            <div className="hh-hero-sidecard">
-              <div className="flex items-center gap-2 text-sm font-medium text-white">
-                <Sparkles className="h-4 w-4" />
-                快速开始
-              </div>
-              <p className="mt-2 text-sm leading-6 text-white/82">
-                新建正式项目，或先在右侧灵感抽屉里整理你的想法。
-              </p>
-              <div className="mt-4 flex flex-wrap items-center gap-2.5">
-                <button
-                  onClick={openInspirationDrawer}
-                  className="inline-flex items-center gap-1.5 rounded-btn bg-white/16 px-4 py-2.5 text-sm font-medium text-white backdrop-blur-sm transition hover:bg-white/22"
-                >
-                  <Sparkles className="w-4 h-4" />
-                  灵感创作
-                </button>
-                <button
-                  onClick={handleCreate}
-                  className="inline-flex items-center gap-1.5 rounded-btn bg-white px-4 py-2.5 text-sm font-medium text-brand shadow-xs transition hover:bg-white/90"
-                >
-                  <Plus className="w-4 h-4" />
-                  快速新建
-                </button>
-                <DropdownMenu onImport={handleImport} onExport={handleExport} onExportTxt={handleExportTxt} />
-              </div>
-              <div className="mt-4 grid grid-cols-2 gap-2 text-white">
-                <div className="hh-hero-metric px-3 py-3">
-                  <p className="text-[11px] text-white/70">项目</p>
-                  <p className="mt-1 text-lg font-semibold">{stats.total}</p>
-                </div>
-                <div className="hh-hero-metric px-3 py-3">
-                  <p className="text-[11px] text-white/70">创作中</p>
-                  <p className="mt-1 text-lg font-semibold">{stats.writing}</p>
-                </div>
-                <div className="hh-hero-metric px-3 py-3">
-                  <p className="text-[11px] text-white/70">已完成</p>
-                  <p className="mt-1 text-lg font-semibold">{stats.completed}</p>
-                </div>
-                <div className="hh-hero-metric px-3 py-3">
-                  <p className="text-[11px] text-white/70">总字数</p>
-                  <p className="mt-1 text-lg font-semibold">{formatWords(stats.totalWords)}</p>
-                </div>
-              </div>
-            </div>
+          <div className="mu-page-header__actions">
+            <button onClick={openInspirationDrawer} className="mu-page-header__btn">
+              <Sparkles className="h-4 w-4" />
+              灵感创作
+            </button>
+            <button onClick={handleCreate} className="mu-page-header__btn-primary">
+              <Plus className="h-4 w-4" />
+              快速新建
+            </button>
+            <DropdownMenu onImport={handleImport} onExport={handleExport} onExportTxt={handleExportTxt} />
           </div>
         </div>
-      </section>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          icon={<FolderOpen className="w-5 h-5 text-orange-600" />}
-          label="总项目"
-          value={`${stats.total} 个`}
-          bg="bg-orange-50"
-        />
-        <StatCard
-          icon={<Pen className="w-5 h-5 text-emerald-600" />}
-          label="创作中"
-          value={`${stats.writing} 个`}
-          bg="bg-emerald-50"
-        />
-        <StatCard
-          icon={<FileText className="w-5 h-5 text-brand" />}
-          label="总字数"
-          value={`${formatWords(stats.totalWords)} 字`}
-          bg="bg-brand-50"
-        />
-        <StatCard
-          icon={<CheckCircle className="w-5 h-5 text-purple-600" />}
-          label="已完成"
-          value={`${stats.completed} 个`}
-          bg="bg-purple-50"
-        />
-      </div>
+        <div className="mu-page-header__stats">
+          <span className="mu-page-header__stat">
+            <FolderOpen className="h-3.5 w-3.5 text-brand" />
+            项目总数
+            <span className="mu-page-header__stat-value">{stats.total}</span>
+          </span>
+          <span className="mu-page-header__stat-divider" />
+          <span className="mu-page-header__stat">
+            <Pen className="h-3.5 w-3.5 text-emerald-500" />
+            创作中
+            <span className="mu-page-header__stat-value">{stats.writing}</span>
+          </span>
+          <span className="mu-page-header__stat-divider" />
+          <span className="mu-page-header__stat">
+            <CheckCircle className="h-3.5 w-3.5 text-violet-500" />
+            已完成
+            <span className="mu-page-header__stat-value">{stats.completed}</span>
+          </span>
+          <span className="mu-page-header__stat-divider" />
+          <span className="mu-page-header__stat">
+            <FileText className="h-3.5 w-3.5 text-amber-500" />
+            总字数
+            <span className="mu-page-header__stat-value">{formatWords(stats.totalWords)}</span>
+          </span>
+        </div>
+      </section>
 
       <div className="flex items-center justify-between">
         <div>

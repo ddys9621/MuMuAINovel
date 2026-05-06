@@ -3,6 +3,7 @@ import { Plus, Pencil, Trash2, Shield, Map, Sword, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useStore } from '@/store/index'
 import { worldRulesApi } from '@/services/api'
+import { Modal } from '@/components/ui/Modal'
 import type { WorldRule, WorldRuleCreate, WorldRuleUpdate } from '@/types'
 
 const CATEGORIES = [
@@ -155,45 +156,46 @@ export default function WorldRules() {
 
       {/* 弹窗 */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowModal(false)}>
-          <div className="bg-white rounded-card p-6 w-full max-w-lg mx-4 space-y-4" onClick={e => e.stopPropagation()}>
-            <h2 className="text-lg font-bold text-content">{editingRule ? '编辑规则' : '添加规则'}</h2>
-
-            <div className="space-y-3">
-              <div>
-                <label className="block text-sm text-content-secondary mb-1">分类</label>
-                <select
-                  value={form.category}
-                  onChange={e => setForm(f => ({ ...f, category: e.target.value as Category }))}
-                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors"
-                >
-                  {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm text-content-secondary mb-1">标识 (key)</label>
-                <input value={form.key} onChange={e => setForm(f => ({ ...f, key: e.target.value }))} placeholder="如 qi_refining" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
-              </div>
-              <div>
-                <label className="block text-sm text-content-secondary mb-1">名称</label>
-                <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="如 炼气期" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
-              </div>
-              <div>
-                <label className="block text-sm text-content-secondary mb-1">摘要</label>
-                <input value={form.summary || ''} onChange={e => setForm(f => ({ ...f, summary: e.target.value }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
-              </div>
-              <div>
-                <label className="block text-sm text-content-secondary mb-1">详情</label>
-                <textarea value={form.details || ''} onChange={e => setForm(f => ({ ...f, details: e.target.value }))} rows={3} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors resize-none" />
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
+        <Modal
+          title={editingRule ? '编辑规则' : '添加规则'}
+          onClose={() => setShowModal(false)}
+          size="xl"
+          footer={(
+            <>
               <button onClick={() => setShowModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
               <button onClick={handleSubmit} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">确定</button>
+            </>
+          )}
+        >
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm text-content-secondary mb-1">分类</label>
+              <select
+                value={form.category}
+                onChange={e => setForm(f => ({ ...f, category: e.target.value as Category }))}
+                className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors"
+              >
+                {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm text-content-secondary mb-1">标识 (key)</label>
+              <input value={form.key} onChange={e => setForm(f => ({ ...f, key: e.target.value }))} placeholder="如 qi_refining" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+            </div>
+            <div>
+              <label className="block text-sm text-content-secondary mb-1">名称</label>
+              <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="如 炼气期" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+            </div>
+            <div>
+              <label className="block text-sm text-content-secondary mb-1">摘要</label>
+              <input value={form.summary || ''} onChange={e => setForm(f => ({ ...f, summary: e.target.value }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+            </div>
+            <div>
+              <label className="block text-sm text-content-secondary mb-1">详情</label>
+              <textarea value={form.details || ''} onChange={e => setForm(f => ({ ...f, details: e.target.value }))} rows={3} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors resize-none" />
             </div>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   )
