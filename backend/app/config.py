@@ -91,22 +91,6 @@ class Settings(BaseSettings):
     # 极端兜底乘数：服务端流式生成时的硬截断阈值（防止失控）
     chapter_hard_cap_factor: float = 1.5  # 目标字数 * 1.5（暂不使用，避免截断）
     
-    # LinuxDO OAuth2 配置
-    LINUXDO_CLIENT_ID: Optional[str] = None
-    LINUXDO_CLIENT_SECRET: Optional[str] = None
-    # 回调地址：Docker部署时必须使用实际域名或服务器IP，不能使用localhost
-    # 本地开发: http://localhost:8000/api/auth/callback
-    # 生产环境: https://your-domain.com/api/auth/callback 或 http://your-ip:8000/api/auth/callback
-    LINUXDO_REDIRECT_URI: Optional[str] = None
-    
-    # 前端URL配置（用于OAuth回调后重定向）
-    # 本地开发: http://localhost:8000
-    # 生产环境: https://your-domain.com 或 http://your-ip:8000
-    FRONTEND_URL: str = "http://localhost:8000"
-    
-    # 初始管理员配置（LinuxDO user_id）
-    INITIAL_ADMIN_LINUXDO_ID: Optional[str] = None
-    
     # 本地账户登录配置
     LOCAL_AUTH_ENABLED: bool = True  # 是否启用本地账户登录
     LOCAL_AUTH_USERNAME: Optional[str] = None  # 本地登录用户名

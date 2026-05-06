@@ -150,8 +150,8 @@ class SessionManager {
     this.stop();
     
     const currentPath = window.location.pathname;
-    // 如果已经在登录页或回调页，不显示错误提示
-    if (currentPath === '/login' || currentPath === '/auth/callback') {
+    // 如果已经在登录页，不显示错误提示
+    if (currentPath === '/login') {
       return;
     }
     

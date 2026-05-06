@@ -1,41 +1,85 @@
-# 分批安装 Python 依赖，避免网络超时
-# 使用方法：在 backend 目录下运行 .\install_deps.ps1
+# Install Python dependencies in batches to reduce timeout risk.
+# Usage: run this script from anywhere. It always targets backend/.venv.
 
-Write-Host "开始安装 Python 依赖..." -ForegroundColor Green
+$ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-# 激活虚拟环境
-.\.venv\Scripts\Activate.ps1
+$backendDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$venvDir = Join-Path $backendDir ".venv"
+$venvPython = Join-Path $venvDir "Scripts\python.exe"
 
-# 升级 pip
-Write-Host "`n[1/5] 升级 pip..." -ForegroundColor Cyan
-python -m pip install --upgrade pip
+function Run-Step($title, $packages, $timeoutSec) {
+    Write-Host ""
+    Write-Host $title -ForegroundColor Cyan
+    & $venvPython -m pip install --default-timeout=$timeoutSec @packages
+    if ($LASTEXITCODE -ne 0) {
+        throw "Install failed: $title"
+    }
+}
 
-# 第一批：核心 Web 框架
-Write-Host "`n[2/5] 安装 Web 框架..." -ForegroundColor Cyan
-pip install --default-timeout=100 fastapi==0.121.0 uvicorn[standard]==0.38.0 python-multipart==0.0.20
+Set-Location $backendDir
 
-# 第二批：数据库相关
-Write-Host "`n[3/5] 安装数据库驱动..." -ForegroundColor Cyan
-pip install --default-timeout=100 sqlalchemy==2.0.25 aiosqlite==0.20.0
+Write-Host "Installing Python dependencies..." -ForegroundColor Green
 
-# 第三批：数据验证和 AI 服务
-Write-Host "`n[4/5] 安装 AI 服务..." -ForegroundColor Cyan
-pip install --default-timeout=100 pydantic==2.12.4 pydantic-settings==2.11.0 openai==2.7.0 anthropic==0.72.0
+if (-not (Test-Path $venvPython)) {
+    Write-Host ""
+    Write-Host "[0/9] Create Python virtual environment" -ForegroundColor Cyan
+    python -m venv $venvDir
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to create Python virtual environment"
+    }
+}
 
-# 第四批：工具库
-Write-Host "`n[5/5] 安装工具库..." -ForegroundColor Cyan
-pip install --default-timeout=100 httpx==0.28.1 python-dotenv==1.0.0 mcp==1.21.0
+Write-Host ""
+Write-Host "[1/9] Upgrade pip" -ForegroundColor Cyan
+& $venvPython -m pip install --upgrade pip
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to upgrade pip"
+}
 
-# 第五批：Embedding 相关（最大的包，单独安装）
-Write-Host "`n[6/7] 安装 NumPy..." -ForegroundColor Cyan
-pip install --default-timeout=100 numpy==1.26.4
+Run-Step "[2/9] Install web framework" @(
+    "fastapi==0.121.0",
+    "uvicorn[standard]==0.38.0",
+    "python-multipart==0.0.20"
+) 100
 
-Write-Host "`n[7/7] 安装 ChromaDB（较大，请耐心等待）..." -ForegroundColor Cyan
-pip install --default-timeout=200 chromadb==1.3.2
+Run-Step "[3/9] Install database drivers" @(
+    "sqlalchemy==2.0.25",
+    "aiosqlite==0.20.0"
+) 100
 
-Write-Host "`n[8/8] 安装 Transformers..." -ForegroundColor Cyan
-pip install --default-timeout=200 transformers==4.57.1 sentence-transformers==5.1.2
+Run-Step "[4/9] Install validation and AI clients" @(
+    "pydantic==2.12.4",
+    "pydantic-settings==2.11.0",
+    "openai==2.7.0",
+    "anthropic==0.72.0"
+) 100
 
-Write-Host "`n✅ 所有依赖安装完成！" -ForegroundColor Green
-Write-Host "现在可以运行：python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload" -ForegroundColor Yellow
+Run-Step "[5/9] Install agent framework" @(
+    "langgraph>=0.2.0",
+    "langchain-core>=0.3.0",
+    "langchain-openai>=0.2.0"
+) 120
 
+Run-Step "[6/9] Install tools and desktop window" @(
+    "httpx==0.28.1",
+    "python-dotenv==1.0.0",
+    "mcp==1.21.0",
+    "pywebview==5.3.2"
+) 100
+
+Run-Step "[7/9] Install NumPy" @(
+    "numpy==1.26.4"
+) 100
+
+Run-Step "[8/9] Install ChromaDB" @(
+    "chromadb==1.3.2"
+) 200
+
+Run-Step "[9/9] Install Transformers" @(
+    "transformers==4.57.1",
+    "sentence-transformers==5.1.2"
+) 200
+
+Write-Host ""
+Write-Host "All dependencies installed. Restart the launcher." -ForegroundColor Green

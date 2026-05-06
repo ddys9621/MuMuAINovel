@@ -7,7 +7,6 @@ import { PageLoading } from '@/components/ui/PageLoading'
 
 // 页面懒加载
 const Login = lazy(() => import('@/pages/Login'))
-const AuthCallback = lazy(() => import('@/pages/AuthCallback'))
 const ProjectList = lazy(() => import('@/pages/ProjectList'))
 const ProjectDetail = lazy(() => import('@/pages/ProjectDetail'))
 const WorldSetting = lazy(() => import('@/pages/WorldSetting'))
@@ -32,7 +31,6 @@ export default function App() {
         <Routes>
           {/* 公开页面 - 无布局 */}
           <Route path="/login" element={<Login />} />
-          <Route path="/auth/callback" element={<AuthCallback />} />
 
           {/* 受保护页面 - 带布局 */}
           <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
