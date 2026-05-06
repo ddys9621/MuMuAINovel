@@ -9,7 +9,6 @@ import { ssePost } from '../utils/sseClient';
 import type { SSEClientOptions } from '../utils/sseClient';
 import type {
   User,
-  AuthUrlResponse,
   Project,
   ProjectCreate,
   ProjectUpdate,
@@ -149,15 +148,10 @@ api.interceptors.response.use(
 );
 
 export const authApi = {
-  getAuthConfig: () => api.get<unknown, { local_auth_enabled: boolean; linuxdo_enabled: boolean }>('/auth/config'),
+  getAuthConfig: () => api.get<unknown, { local_auth_enabled: boolean }>('/auth/config'),
   
   localLogin: (username: string, password: string) =>
     api.post<unknown, { success: boolean; message: string; user: User }>('/auth/local/login', { username, password }),
-  
-  bindAccountLogin: (username: string, password: string) =>
-    api.post<unknown, { success: boolean; message: string; user: User }>('/auth/bind/login', { username, password }),
-  
-  getLinuxDOAuthUrl: () => api.get<unknown, AuthUrlResponse>('/auth/linuxdo/url'),
   
   getCurrentUser: () => api.get<unknown, User>('/auth/user'),
   

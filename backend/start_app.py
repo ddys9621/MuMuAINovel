@@ -6,6 +6,7 @@ import threading
 import asyncio
 import json
 import logging
+import traceback
 from pathlib import Path
 from collections import deque
 
@@ -40,6 +41,22 @@ _log_buffer: deque = deque(maxlen=500)
 _log_seq = 0
 
 
+def write_startup_error(exc):
+    """Persist fatal startup errors because pythonw has no visible stderr."""
+    try:
+        log_dir = Path(__file__).resolve().parent / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / "startup_error.log"
+        with log_file.open("a", encoding="utf-8") as f:
+            f.write("\n" + "=" * 80 + "\n")
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S") + "\n")
+            f.write(f"{type(exc).__name__}: {exc}\n")
+            f.write(traceback.format_exc())
+            f.write("\n")
+    except Exception:
+        pass
+
+
 class PanelLogHandler(logging.Handler):
     """捕获日志到内存缓冲区"""
     def emit(self, record):
@@ -57,6 +74,25 @@ class PanelLogHandler(logging.Handler):
             pass
 
 
+def ensure_sqlite_database_dir(database_url):
+    """Create the parent directory for file-based SQLite databases."""
+    from sqlalchemy.engine import make_url
+
+    url = make_url(database_url)
+    if not url.drivername.startswith("sqlite"):
+        return
+
+    database_path = url.database
+    if not database_path or database_path == ":memory:":
+        return
+
+    db_file = Path(database_path)
+    if not db_file.is_absolute():
+        db_file = Path.cwd() / db_file
+
+    db_file.parent.mkdir(parents=True, exist_ok=True)
+
+
 def check_database_connection():
     try:
         from sqlalchemy import text
@@ -64,6 +100,9 @@ def check_database_connection():
         database_url = os.getenv('DATABASE_URL')
         if not database_url:
             return False, "环境变量 DATABASE_URL 未配置"
+
+        ensure_sqlite_database_dir(database_url)
+
         async def test():
             engine = create_async_engine(database_url, echo=False)
             async with engine.begin() as conn:
@@ -320,4 +359,8 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except Exception as e:
+        write_startup_error(e)
+        raise

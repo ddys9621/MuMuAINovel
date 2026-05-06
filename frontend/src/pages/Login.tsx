@@ -5,7 +5,6 @@ import {
   User,
   Lock,
   Loader2,
-  ExternalLink,
   Sparkles,
   Smartphone,
   Library,
@@ -18,7 +17,7 @@ const FEATURES = [
   '世界设定、角色档案与章节素材统一归档',
   '从灵感记录到正式项目，创作入口清晰可控',
   '项目进度、更新时间与状态变化一目了然',
-  '支持本地账号与 LinuxDO 两种登录方式',
+  '仅使用本地账号密码登录',
 ] as const
 
 const SCENES = [
@@ -47,8 +46,6 @@ export default function Login() {
   const [loading, setLoading] = useState(false)
   const [checking, setChecking] = useState(true)
   const [localAuthEnabled, setLocalAuthEnabled] = useState(false)
-  const [linuxdoEnabled, setLinuxdoEnabled] = useState(false)
-  const [activeTab, setActiveTab] = useState<'local' | 'linuxdo'>('local')
 
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -66,11 +63,6 @@ export default function Login() {
       try {
         const config = await authApi.getAuthConfig()
         setLocalAuthEnabled(config.local_auth_enabled)
-        setLinuxdoEnabled(config.linuxdo_enabled)
-
-        if (!config.local_auth_enabled && config.linuxdo_enabled) {
-          setActiveTab('linuxdo')
-        }
       } catch {
         toast.error('获取认证配置失败')
       } finally {
@@ -102,16 +94,6 @@ export default function Login() {
     }
   }
 
-  const handleLinuxDOLogin = async () => {
-    setLoading(true)
-    try {
-      const res = await authApi.getLinuxDOAuthUrl()
-      window.location.href = res.auth_url
-    } catch {
-      setLoading(false)
-    }
-  }
-
   if (checking) {
     return (
       <div className="fixed inset-0 flex items-center justify-center bg-transparent px-4">
@@ -127,8 +109,6 @@ export default function Login() {
       </div>
     )
   }
-
-  const bothEnabled = localAuthEnabled && linuxdoEnabled
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#fff9f5] px-4 py-4 md:px-6 md:py-6">
@@ -215,11 +195,7 @@ export default function Login() {
                 <div className="fanqie-chip border-brand/10 bg-brand/5 text-brand">欢迎回来</div>
                 <h2 className="mt-4 text-[30px] font-semibold leading-tight text-content">登录 HH小说创作</h2>
                 <p className="mt-3 text-sm leading-6 text-content-secondary">
-                  {bothEnabled
-                    ? '选择适合你的登录方式，继续当前创作进度。'
-                    : linuxdoEnabled
-                      ? '使用 LinuxDO 账号快速进入创作工作台。'
-                      : '使用本地账号登录并继续创作。'}
+                  使用本地账号登录并继续创作。
                 </p>
                 <div className="mt-5 flex flex-wrap gap-2">
                   <span className="rounded-pill bg-white px-3 py-1.5 text-xs font-medium text-content-secondary shadow-xs">结构化创作</span>
@@ -228,34 +204,7 @@ export default function Login() {
                 </div>
               </div>
 
-              {bothEnabled && (
-                <div className="mb-6 grid grid-cols-2 rounded-[20px] bg-[#fff2ea] p-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('local')}
-                    className={`rounded-[16px] px-4 py-3 text-sm font-medium transition-all ${
-                      activeTab === 'local'
-                        ? 'bg-white text-content shadow-xs'
-                        : 'text-content-secondary hover:text-content'
-                    }`}
-                  >
-                    本地登录
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('linuxdo')}
-                    className={`rounded-[16px] px-4 py-3 text-sm font-medium transition-all ${
-                      activeTab === 'linuxdo'
-                        ? 'bg-white text-content shadow-xs'
-                        : 'text-content-secondary hover:text-content'
-                    }`}
-                  >
-                    LinuxDO
-                  </button>
-                </div>
-              )}
-
-              {localAuthEnabled && activeTab === 'local' && (
+              {localAuthEnabled && (
                 <form onSubmit={handleLocalLogin} className="space-y-5">
                   <div>
                     <label htmlFor="username" className="mb-2 block text-sm font-medium text-content">
@@ -313,39 +262,18 @@ export default function Login() {
                 </form>
               )}
 
-              {linuxdoEnabled && activeTab === 'linuxdo' && (
-                <button
-                  type="button"
-                  onClick={handleLinuxDOLogin}
-                  disabled={loading}
-                  className="fanqie-secondary-btn h-12 w-full justify-center text-[15px] font-medium disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {loading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      跳转中…
-                    </>
-                  ) : (
-                    <>
-                      <ExternalLink className="h-4 w-4" />
-                      使用 LinuxDO 登录
-                    </>
-                  )}
-                </button>
-              )}
-
-              {!localAuthEnabled && !linuxdoEnabled && (
+              {!localAuthEnabled && (
                 <p className="rounded-[18px] bg-white/80 px-4 py-3 text-center text-sm text-content-secondary">
-                  暂未开启任何登录方式，请联系管理员
+                  暂未开启本地登录，请联系管理员
                 </p>
               )}
 
-              {(localAuthEnabled || linuxdoEnabled) && (
+              {localAuthEnabled && (
                 <div className="mt-6 rounded-[20px] border border-brand/10 bg-brand/5 px-4 py-4 text-sm text-content-secondary">
                   <p className="font-medium text-content">首次登录会自动创建账号</p>
                   <div className="mt-2 space-y-1.5 text-xs leading-5 text-content-secondary">
                     <p>• 登录后可继续访问已有项目与创作内容</p>
-                    <p>• 支持按当前配置使用本地账号或 LinuxDO 登录</p>
+                    <p>• 仅支持本地账号密码登录</p>
                     <p>• 进入后可直接回到项目列表继续创作</p>
                   </div>
                 </div>

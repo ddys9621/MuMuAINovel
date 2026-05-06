@@ -134,27 +134,15 @@ async def create_user(
         # 生成用户ID
         user_id = f"admin_created_{hashlib.md5(data.username.encode()).hexdigest()[:16]}"
         
-        # 创建用户
-        new_user = await user_manager.create_or_update_from_linuxdo(
-            linuxdo_id=user_id,
+        # 创建本地用户
+        new_user = await user_manager.create_or_update_local_user(
+            user_id=user_id,
             username=data.username,
             display_name=data.display_name,
             avatar_url=data.avatar_url,
-            trust_level=data.trust_level
+            trust_level=data.trust_level,
+            is_admin=data.is_admin,
         )
-        
-        # 设置管理员标志
-        if data.is_admin:
-            # 直接更新数据库中的is_admin字段
-            async with await user_manager._get_session() as session:
-                result = await session.execute(
-                    select(User).where(User.user_id == user_id)
-                )
-                db_user = result.scalar_one_or_none()
-                if db_user:
-                    db_user.is_admin = True
-                    await session.commit()
-                    new_user.is_admin = True
         
         # 设置密码
         actual_password = await password_manager.set_password(

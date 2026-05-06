@@ -7,7 +7,6 @@ from typing import Optional, List
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from pydantic import BaseModel
-from app.config import settings
 
 
 class User(BaseModel):
@@ -44,61 +43,33 @@ class UserManager:
         
         return session_maker()
     
-    async def create_or_update_from_linuxdo(
+    async def create_or_update_local_user(
         self,
-        linuxdo_id: str,
+        user_id: str,
         username: str,
         display_name: str,
-        avatar_url: Optional[str],
-        trust_level: int
+        avatar_url: Optional[str] = None,
+        trust_level: int = 0,
+        is_admin: bool = False,
     ) -> User:
-        """
-        从 LinuxDO 用户信息创建或更新用户
-        
-        Args:
-            linuxdo_id: LinuxDO 用户 ID（本地用户时为 local_xxx 格式）
-            username: 用户名
-            display_name: 显示名称
-            avatar_url: 头像 URL
-            trust_level: 信任等级
-            
-        Returns:
-            用户对象
-        """
+        """创建或更新本地用户。"""
         from app.models.user import User as UserModel
-        
-        # 生成 user_id
-        if linuxdo_id.startswith("local_"):
-            user_id = linuxdo_id
-        else:
-            user_id = f"linuxdo_{linuxdo_id}"
-        
+
         async with await self._get_session() as session:
-            # 查询用户是否存在
             result = await session.execute(
                 select(UserModel).where(UserModel.user_id == user_id)
             )
             user = result.scalar_one_or_none()
-            
-            # 检查是否为初始管理员或本地用户
-            initial_admin_id = settings.INITIAL_ADMIN_LINUXDO_ID
-            is_initial_admin = (initial_admin_id and linuxdo_id == initial_admin_id)
-            is_local_user = user_id.startswith("local_")
-            is_admin = is_initial_admin or is_local_user
-            
+
             if user:
-                # 更新现有用户
                 user.username = username
                 user.display_name = display_name
                 user.avatar_url = avatar_url
                 user.trust_level = trust_level
                 user.last_login = datetime.now()
-                
-                # 更新管理员状态
                 if is_admin and not user.is_admin:
                     user.is_admin = True
             else:
-                # 创建新用户
                 user = UserModel(
                     user_id=user_id,
                     username=username,
@@ -106,15 +77,15 @@ class UserManager:
                     avatar_url=avatar_url,
                     trust_level=trust_level,
                     is_admin=is_admin,
-                    linuxdo_id=linuxdo_id,
+                    linuxdo_id=user_id,
                     created_at=datetime.now(),
                     last_login=datetime.now()
                 )
                 session.add(user)
-            
+
             await session.commit()
             await session.refresh(user)
-            
+
             return User(**user.to_dict())
     
     async def get_user(self, user_id: str) -> Optional[User]:

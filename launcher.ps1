@@ -4,6 +4,10 @@
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$frontendDir = Join-Path $scriptDir "frontend"
+$backendDir  = Join-Path $scriptDir "backend"
+$staticDir   = Join-Path $backendDir "static"
+$indexFile   = Join-Path $staticDir "index.html"
 
 function Print-Step($msg) { Write-Host "`n== $msg ==" -ForegroundColor Cyan }
 function Print-Ok($msg)   { Write-Host "[OK] $msg" -ForegroundColor Green }
@@ -25,12 +29,75 @@ if ($missing.Count -gt 0) {
 }
 Print-Ok "Environment OK"
 
-# Step 2: Build frontend
+# Step 2: Prepare backend Python environment
+Print-Step "Prepare Backend"
+$venvDir = Join-Path $backendDir ".venv"
+$venvPython = Join-Path $venvDir "Scripts\python.exe"
+$installDeps = Join-Path $backendDir "install_deps.ps1"
+
+if (-not (Test-Path $venvPython)) {
+    Write-Host "Creating backend virtual environment..."
+    python -m venv $venvDir
+    if ($LASTEXITCODE -ne 0) {
+        Print-Err "Failed to create backend virtual environment"
+        pause
+        exit 1
+    }
+}
+
+$requiredModules = @(
+    "webview",
+    "fastapi",
+    "uvicorn",
+    "sqlalchemy",
+    "aiosqlite",
+    "pydantic_settings",
+    "openai",
+    "anthropic",
+    "httpx",
+    "dotenv",
+    "mcp",
+    "chromadb",
+    "transformers",
+    "sentence_transformers"
+)
+$moduleList = ($requiredModules | ForEach-Object { "'$_'" }) -join ","
+$checkCode = "import importlib.util, sys; mods=[$moduleList]; missing=[m for m in mods if importlib.util.find_spec(m) is None]; print(','.join(missing)); sys.exit(1 if missing else 0)"
+$missingModules = (& $venvPython -c $checkCode 2>$null)
+$needBackendInstall = $LASTEXITCODE -ne 0
+
+if ($needBackendInstall) {
+    if ($missingModules) {
+        Write-Host ("Missing backend modules: " + $missingModules) -ForegroundColor Yellow
+    }
+    Write-Host "Installing backend dependencies..."
+    if (-not (Test-Path $installDeps)) {
+        Print-Err "Missing backend/install_deps.ps1"
+        pause
+        exit 1
+    }
+
+    Set-Location $backendDir
+    & powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File $installDeps
+    if ($LASTEXITCODE -ne 0) {
+        Print-Err "Backend dependency installation failed"
+        pause
+        exit 1
+    }
+    Set-Location $scriptDir
+
+    $missingModules = (& $venvPython -c $checkCode 2>$null)
+    if ($LASTEXITCODE -ne 0) {
+        Print-Err ("Backend dependency check failed: " + $missingModules)
+        pause
+        exit 1
+    }
+}
+
+Print-Ok "Backend environment OK"
+
+# Step 3: Build frontend
 Print-Step "Build Frontend"
-$frontendDir = Join-Path $scriptDir "frontend"
-$backendDir  = Join-Path $scriptDir "backend"
-$staticDir   = Join-Path $backendDir "static"
-$indexFile   = Join-Path $staticDir "index.html"
 
 if (-not (Test-Path (Join-Path $frontendDir "node_modules"))) {
     Write-Host "Installing frontend dependencies..."
@@ -68,30 +135,83 @@ if ($needBuild) {
 
 Set-Location $scriptDir
 
-# Step 3: Start app (use pythonw to avoid keeping a terminal window)
+# Step 4: Start app (use pythonw to avoid keeping a terminal window)
 Print-Step "Starting App"
 Set-Location $backendDir
 
 $venvPythonW = Join-Path $backendDir ".venv\Scripts\pythonw.exe"
 $venvPython  = Join-Path $backendDir ".venv\Scripts\python.exe"
 $startScript = Join-Path $backendDir "start_app.py"
+$logDir = Join-Path $backendDir "logs"
+$startupOut = Join-Path $logDir "launcher-startup.out.log"
+$startupErr = Join-Path $logDir "launcher-startup.err.log"
+$startupFatal = Join-Path $logDir "startup_error.log"
 
-if (Test-Path $venvPythonW) {
-    Print-Ok "Launching app (windowless)..."
-    Start-Process -FilePath $venvPythonW -ArgumentList $startScript -WorkingDirectory $backendDir -WindowStyle Hidden
-} elseif (Test-Path $venvPython) {
+if (-not (Test-Path $logDir)) {
+    New-Item -ItemType Directory -Path $logDir | Out-Null
+}
+
+Remove-Item $startupOut, $startupErr, $startupFatal -Force -ErrorAction SilentlyContinue
+
+function Show-StartupFailure($proc) {
+    Print-Err "App process exited immediately. Startup failed."
+    if ($proc -and $null -ne $proc.ExitCode) {
+        Write-Host ("Exit code: " + $proc.ExitCode) -ForegroundColor Yellow
+    }
+
+    if (Test-Path $startupErr) {
+        $errText = (Get-Content $startupErr -Raw).Trim()
+        if ($errText) {
+            Write-Host "`n--- launcher-startup.err.log ---" -ForegroundColor Yellow
+            Write-Host $errText
+        }
+    }
+
+    if (Test-Path $startupFatal) {
+        $fatalText = (Get-Content $startupFatal -Raw).Trim()
+        if ($fatalText) {
+            Write-Host "`n--- startup_error.log ---" -ForegroundColor Yellow
+            Write-Host $fatalText
+        }
+    }
+
+    Write-Host "`nCheck logs:" -ForegroundColor Yellow
+    Write-Host "  $startupErr"
+    Write-Host "  $startupFatal"
+    pause
+    exit 1
+}
+
+$proc = $null
+
+if (Test-Path $venvPython) {
     Print-Ok "Launching app..."
-    Start-Process -FilePath $venvPython -ArgumentList $startScript -WorkingDirectory $backendDir -WindowStyle Hidden
+    $proc = Start-Process -FilePath $venvPython -ArgumentList $startScript -WorkingDirectory $backendDir -WindowStyle Hidden -RedirectStandardOutput $startupOut -RedirectStandardError $startupErr -PassThru
+} elseif (Test-Path $venvPythonW) {
+    Print-Ok "Launching app (windowless)..."
+    $proc = Start-Process -FilePath $venvPythonW -ArgumentList $startScript -WorkingDirectory $backendDir -WindowStyle Hidden -PassThru
 } else {
-    $pythonW = Get-Command "pythonw" -ErrorAction SilentlyContinue
-    if ($pythonW) {
-        Start-Process -FilePath "pythonw" -ArgumentList $startScript -WorkingDirectory $backendDir -WindowStyle Hidden
+    $python = Get-Command "python" -ErrorAction SilentlyContinue
+    if ($python) {
+        $proc = Start-Process -FilePath "python" -ArgumentList $startScript -WorkingDirectory $backendDir -WindowStyle Hidden -RedirectStandardOutput $startupOut -RedirectStandardError $startupErr -PassThru
     } else {
-        Start-Process -FilePath "python" -ArgumentList $startScript -WorkingDirectory $backendDir -WindowStyle Hidden
+        $pythonW = Get-Command "pythonw" -ErrorAction SilentlyContinue
+        if ($pythonW) {
+            $proc = Start-Process -FilePath "pythonw" -ArgumentList $startScript -WorkingDirectory $backendDir -WindowStyle Hidden -PassThru
+        } else {
+            Print-Err "Python executable not found"
+            pause
+            exit 1
+        }
     }
 }
 
+Start-Sleep 6
+if ($proc -and $proc.HasExited) {
+    Show-StartupFailure $proc
+}
+
 Write-Host ""
-Print-Ok "App launched! Startup console window should appear shortly."
+Print-Ok "App is still running. Startup panel should appear shortly."
 Write-Host "This terminal will close in 3 seconds..." -ForegroundColor Gray
 Start-Sleep 3
