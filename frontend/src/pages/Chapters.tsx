@@ -1096,9 +1096,9 @@ export default function Chapters() {
       {/* 批量生成弹窗 */}
       {/* AI 生成配置弹窗 */}
       {showGenModal && genTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-modal shadow-xl w-full max-w-xl mx-4 animate-scale-in">
-            <div className="flex items-center justify-between px-6 pt-5 pb-3">
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-8 sm:py-12">
+          <div className="relative my-auto bg-white shadow-xl w-full max-w-2xl mx-4 animate-scale-in max-h-[calc(100vh-4rem)] flex flex-col">
+            <div className="flex items-center justify-between px-6 pt-5 pb-3 flex-shrink-0 border-b border-surface-border">
               <h2 className="text-lg font-bold text-content">
                 {genTarget.isRegenerate ? '重新生成' : 'AI 生成'}：{genTarget.chapter.title}
               </h2>
@@ -1106,7 +1106,7 @@ export default function Chapters() {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="px-6 pb-6 space-y-4">
+            <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
               <div>
                 <label className="block text-sm font-medium text-content mb-1">写作风格</label>
                 <select
@@ -1208,20 +1208,20 @@ export default function Chapters() {
                   </div>
                 </div>
               </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  onClick={closeGenerateModal}
-                  className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm transition-colors"
-                >
-                  取消
-                </button>
-                <button
-                  onClick={confirmGenerate}
-                  className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm transition-colors"
-                >
-                  开始生成
-                </button>
-              </div>
+            </div>
+            <div className="flex justify-end gap-2 px-6 py-3 border-t border-surface-border bg-white flex-shrink-0">
+              <button
+                onClick={closeGenerateModal}
+                className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={confirmGenerate}
+                className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm transition-colors"
+              >
+                开始生成
+              </button>
             </div>
           </div>
         </div>

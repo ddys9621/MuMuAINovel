@@ -3,6 +3,7 @@ import { Plus, Pencil, Trash2, Star, Palette, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useStore } from '@/store/index'
 import { writingStyleApi } from '@/services/api'
+import { Modal } from '@/components/ui/Modal'
 import type { WritingStyle, PresetStyle, WritingStyleCreate, WritingStyleUpdate } from '@/types'
 
 export default function WritingStyles() {
@@ -131,46 +132,47 @@ export default function WritingStyles() {
 
       {/* 弹窗 */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowModal(false)}>
-          <div className="bg-white rounded-card p-6 w-full max-w-lg mx-4 space-y-4 max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <h2 className="text-lg font-bold text-content">{editingStyle ? '编辑风格' : '添加风格'}</h2>
-
-            {/* 预设选择 */}
-            {!editingStyle && presets.length > 0 && (
-              <div>
-                <label className="block text-sm text-content-secondary mb-1">从预设创建</label>
-                <select
-                  value={form.preset_id}
-                  onChange={e => handlePresetSelect(e.target.value)}
-                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors"
-                >
-                  <option value="">自定义风格</option>
-                  {presets.map(p => <option key={p.id} value={p.id}>{p.name} — {p.description}</option>)}
-                </select>
-              </div>
-            )}
-
-            <div className="space-y-3">
-              <div>
-                <label className="block text-sm text-content-secondary mb-1">名称</label>
-                <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
-              </div>
-              <div>
-                <label className="block text-sm text-content-secondary mb-1">描述</label>
-                <input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
-              </div>
-              <div>
-                <label className="block text-sm text-content-secondary mb-1">Prompt 内容</label>
-                <textarea value={form.prompt_content} onChange={e => setForm(f => ({ ...f, prompt_content: e.target.value }))} rows={6} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors resize-none font-mono" />
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
+        <Modal
+          title={editingStyle ? '编辑风格' : '添加风格'}
+          onClose={() => setShowModal(false)}
+          size="xl"
+          footer={(
+            <>
               <button onClick={() => setShowModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
               <button onClick={handleSubmit} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">确定</button>
+            </>
+          )}
+        >
+          {/* 预设选择 */}
+          {!editingStyle && presets.length > 0 && (
+            <div className="mb-3">
+              <label className="block text-sm text-content-secondary mb-1">从预设创建</label>
+              <select
+                value={form.preset_id}
+                onChange={e => handlePresetSelect(e.target.value)}
+                className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors"
+              >
+                <option value="">自定义风格</option>
+                {presets.map(p => <option key={p.id} value={p.id}>{p.name} — {p.description}</option>)}
+              </select>
+            </div>
+          )}
+
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm text-content-secondary mb-1">名称</label>
+              <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+            </div>
+            <div>
+              <label className="block text-sm text-content-secondary mb-1">描述</label>
+              <input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+            </div>
+            <div>
+              <label className="block text-sm text-content-secondary mb-1">Prompt 内容</label>
+              <textarea value={form.prompt_content} onChange={e => setForm(f => ({ ...f, prompt_content: e.target.value }))} rows={6} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors resize-none font-mono" />
             </div>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   )

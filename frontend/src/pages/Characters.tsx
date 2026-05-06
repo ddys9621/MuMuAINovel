@@ -406,15 +406,15 @@ export default function Characters() {
 
       {/* AI 生成角色弹窗 */}
       {showGenModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-modal shadow-xl w-full max-w-md mx-4 animate-scale-in">
-            <div className="flex items-center justify-between px-6 pt-5 pb-3">
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-8 sm:py-12">
+          <div className="relative my-auto bg-white shadow-xl w-full max-w-xl mx-4 animate-scale-in max-h-[calc(100vh-4rem)] flex flex-col">
+            <div className="flex items-center justify-between px-6 pt-5 pb-3 flex-shrink-0 border-b border-surface-border">
               <h2 className="text-lg font-bold text-content">AI 生成角色</h2>
               <button onClick={() => setShowGenModal(false)} className="text-content-tertiary hover:text-content">
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="px-6 pb-6 space-y-4">
+            <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
               <div>
                 <label className="block text-sm font-medium text-content mb-1">角色名称（可选）</label>
                 <input
@@ -463,22 +463,22 @@ export default function Characters() {
                   setSelectedPlugins(selected);
                 }}
               />
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  onClick={() => setShowGenModal(false)}
-                  className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm transition-colors"
-                >
-                  取消
-                </button>
-                <button
-                  onClick={handleGenerate}
-                  disabled={generating}
-                  className="inline-flex items-center gap-1.5 bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm transition-colors disabled:opacity-50"
-                >
-                  {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                  {generating ? '生成中...' : '开始生成'}
-                </button>
-              </div>
+            </div>
+            <div className="flex justify-end gap-2 px-6 py-3 border-t border-surface-border bg-white flex-shrink-0">
+              <button
+                onClick={() => setShowGenModal(false)}
+                className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleGenerate}
+                disabled={generating}
+                className="inline-flex items-center gap-1.5 bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm transition-colors disabled:opacity-50"
+              >
+                {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                {generating ? '生成中...' : '开始生成'}
+              </button>
             </div>
           </div>
         </div>
@@ -486,15 +486,15 @@ export default function Characters() {
 
       {/* AI 生成组织弹窗 */}
       {showGenOrgModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-modal shadow-xl w-full max-w-md mx-4 animate-scale-in">
-            <div className="flex items-center justify-between px-6 pt-5 pb-3">
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-8 sm:py-12">
+          <div className="relative my-auto bg-white shadow-xl w-full max-w-lg mx-4 animate-scale-in max-h-[calc(100vh-4rem)] flex flex-col">
+            <div className="flex items-center justify-between px-6 pt-5 pb-3 flex-shrink-0 border-b border-surface-border">
               <h2 className="text-lg font-bold text-content">AI 生成组织</h2>
               <button onClick={() => setShowGenOrgModal(false)} className="text-content-tertiary hover:text-content">
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="px-6 pb-6 space-y-4">
+            <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
               <div>
                 <label className="block text-sm font-medium text-content mb-1">组织名称（可选）</label>
                 <input
@@ -514,22 +514,22 @@ export default function Characters() {
                   className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none resize-none"
                 />
               </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  onClick={() => setShowGenOrgModal(false)}
-                  className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm transition-colors"
-                >
-                  取消
-                </button>
-                <button
-                  onClick={handleGenerateOrg}
-                  disabled={generatingOrg}
-                  className="inline-flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-btn px-4 py-2 text-sm transition-colors disabled:opacity-50"
-                >
-                  {generatingOrg ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                  {generatingOrg ? '生成中...' : '开始生成'}
-                </button>
-              </div>
+            </div>
+            <div className="flex justify-end gap-2 px-6 py-3 border-t border-surface-border bg-white flex-shrink-0">
+              <button
+                onClick={() => setShowGenOrgModal(false)}
+                className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleGenerateOrg}
+                disabled={generatingOrg}
+                className="inline-flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-btn px-4 py-2 text-sm transition-colors disabled:opacity-50"
+              >
+                {generatingOrg ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                {generatingOrg ? '生成中...' : '开始生成'}
+              </button>
             </div>
           </div>
         </div>
@@ -537,8 +537,8 @@ export default function Characters() {
 
       {/* 手动添加/编辑弹窗 */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-modal shadow-xl w-full max-w-md mx-4 animate-scale-in max-h-[90vh] flex flex-col">
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-8 sm:py-12">
+          <div className="relative my-auto bg-white shadow-xl w-full max-w-2xl mx-4 animate-scale-in max-h-[calc(100vh-4rem)] flex flex-col">
             <div className="flex items-center justify-between px-6 pt-5 pb-3 flex-shrink-0">
               <h2 className="text-lg font-bold text-content">
                 {editingId ? (form.is_organization ? '编辑组织' : '编辑角色') : '添加角色'}

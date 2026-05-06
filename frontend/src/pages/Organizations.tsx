@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Plus, Pencil, Trash2, Building, Loader2, Users, UserPlus, X, ChevronDown, ChevronUp } from 'lucide-react'
+import { Plus, Pencil, Trash2, Building, Loader2, Users, UserPlus, ChevronDown, ChevronUp } from 'lucide-react'
 import { toast } from 'sonner'
 import { useStore } from '@/store/index'
 import { organizationApi, characterApi } from '@/services/api'
+import { Modal } from '@/components/ui/Modal'
 import type { Character } from '@/types'
 
 /* ------------------------------------------------------------------ */
@@ -402,104 +403,104 @@ export default function Organizations() {
 
       {/* 创建/编辑组织弹窗 */}
       {showOrgModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowOrgModal(false)}>
-          <div className="bg-white rounded-modal shadow-xl p-6 w-full max-w-md mx-4 space-y-4 max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-bold text-content">{editingOrg ? '编辑组织' : '创建组织'}</h2>
-              <button onClick={() => setShowOrgModal(false)} className="p-1 rounded hover:bg-surface-hover text-content-secondary"><X className="w-4 h-4" /></button>
-            </div>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-sm text-content-secondary mb-1">名称 <span className="text-red-500">*</span></label>
-                <input value={orgForm.name} onChange={e => setOrgForm(f => ({ ...f, name: e.target.value }))} placeholder="组织名称" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
-              </div>
-              <div>
-                <label className="block text-sm text-content-secondary mb-1">类型</label>
-                <div className="flex flex-wrap gap-1.5">
-                  {ORG_TYPES.map(t => (
-                    <button key={t} onClick={() => setOrgForm(f => ({ ...f, organization_type: f.organization_type === t ? '' : t }))}
-                      className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${orgForm.organization_type === t ? 'bg-brand text-white' : 'bg-gray-100 text-content-secondary hover:bg-gray-200'}`}
-                    >{t}</button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm text-content-secondary mb-1">描述</label>
-                <textarea value={orgForm.description} onChange={e => setOrgForm(f => ({ ...f, description: e.target.value }))} rows={3} placeholder="组织的背景描述…" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors resize-none" />
-              </div>
-              <div>
-                <label className="block text-sm text-content-secondary mb-1">目标/宗旨</label>
-                <textarea value={orgForm.purpose} onChange={e => setOrgForm(f => ({ ...f, purpose: e.target.value }))} rows={2} placeholder="组织的核心目标…" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors resize-none" />
-              </div>
-              <div>
-                <label className="block text-sm text-content-secondary mb-1">势力等级 ({orgForm.power_level})</label>
-                <input type="range" min={0} max={100} value={orgForm.power_level} onChange={e => setOrgForm(f => ({ ...f, power_level: Number(e.target.value) }))} className="w-full" />
-              </div>
-              <div>
-                <label className="block text-sm text-content-secondary mb-1">所在地</label>
-                <input value={orgForm.location} onChange={e => setOrgForm(f => ({ ...f, location: e.target.value }))} placeholder="如：昆仑山、中原…" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
-              </div>
-              <div>
-                <label className="block text-sm text-content-secondary mb-1">座右铭</label>
-                <input value={orgForm.motto} onChange={e => setOrgForm(f => ({ ...f, motto: e.target.value }))} placeholder="组织的座右铭…" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
-              </div>
-              <div>
-                <label className="block text-sm text-content-secondary mb-1">代表颜色</label>
-                <input type="color" value={orgForm.color || '#6366f1'} onChange={e => setOrgForm(f => ({ ...f, color: e.target.value }))} className="w-10 h-8 rounded border border-surface-border cursor-pointer" />
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
+        <Modal
+          title={editingOrg ? '编辑组织' : '创建组织'}
+          onClose={() => setShowOrgModal(false)}
+          size="xl"
+          footer={(
+            <>
               <button onClick={() => setShowOrgModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm transition-colors">取消</button>
               <button onClick={handleOrgSubmit} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">确定</button>
+            </>
+          )}
+        >
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm text-content-secondary mb-1">名称 <span className="text-red-500">*</span></label>
+              <input value={orgForm.name} onChange={e => setOrgForm(f => ({ ...f, name: e.target.value }))} placeholder="组织名称" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+            </div>
+            <div>
+              <label className="block text-sm text-content-secondary mb-1">类型</label>
+              <div className="flex flex-wrap gap-1.5">
+                {ORG_TYPES.map(t => (
+                  <button key={t} onClick={() => setOrgForm(f => ({ ...f, organization_type: f.organization_type === t ? '' : t }))}
+                    className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${orgForm.organization_type === t ? 'bg-brand text-white' : 'bg-gray-100 text-content-secondary hover:bg-gray-200'}`}
+                  >{t}</button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm text-content-secondary mb-1">描述</label>
+              <textarea value={orgForm.description} onChange={e => setOrgForm(f => ({ ...f, description: e.target.value }))} rows={3} placeholder="组织的背景描述…" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors resize-none" />
+            </div>
+            <div>
+              <label className="block text-sm text-content-secondary mb-1">目标/宗旨</label>
+              <textarea value={orgForm.purpose} onChange={e => setOrgForm(f => ({ ...f, purpose: e.target.value }))} rows={2} placeholder="组织的核心目标…" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors resize-none" />
+            </div>
+            <div>
+              <label className="block text-sm text-content-secondary mb-1">势力等级 ({orgForm.power_level})</label>
+              <input type="range" min={0} max={100} value={orgForm.power_level} onChange={e => setOrgForm(f => ({ ...f, power_level: Number(e.target.value) }))} className="w-full" />
+            </div>
+            <div>
+              <label className="block text-sm text-content-secondary mb-1">所在地</label>
+              <input value={orgForm.location} onChange={e => setOrgForm(f => ({ ...f, location: e.target.value }))} placeholder="如：昆仑山、中原…" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+            </div>
+            <div>
+              <label className="block text-sm text-content-secondary mb-1">座右铭</label>
+              <input value={orgForm.motto} onChange={e => setOrgForm(f => ({ ...f, motto: e.target.value }))} placeholder="组织的座右铭…" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+            </div>
+            <div>
+              <label className="block text-sm text-content-secondary mb-1">代表颜色</label>
+              <input type="color" value={orgForm.color || '#6366f1'} onChange={e => setOrgForm(f => ({ ...f, color: e.target.value }))} className="w-10 h-8 rounded border border-surface-border cursor-pointer" />
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* 添加/编辑成员弹窗 */}
       {showMemberModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowMemberModal(false)}>
-          <div className="bg-white rounded-modal shadow-xl p-6 w-full max-w-md mx-4 space-y-4" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-bold text-content">{editingMember ? '编辑成员' : '添加成员'}</h2>
-              <button onClick={() => setShowMemberModal(false)} className="p-1 rounded hover:bg-surface-hover text-content-secondary"><X className="w-4 h-4" /></button>
-            </div>
-            <div className="space-y-3">
-              {!editingMember && (
-                <div>
-                  <label className="block text-sm text-content-secondary mb-1">选择角色 <span className="text-red-500">*</span></label>
-                  <select
-                    value={memberForm.character_id}
-                    onChange={e => setMemberForm(f => ({ ...f, character_id: e.target.value }))}
-                    className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors"
-                  >
-                    <option value="">请选择角色…</option>
-                    {characters
-                      .filter(c => !members.some(m => m.character_id === c.id))
-                      .map(c => <option key={c.id} value={c.id}>{c.name}{c.role_type ? ` (${c.role_type})` : ''}</option>)
-                    }
-                  </select>
-                </div>
-              )}
-              <div>
-                <label className="block text-sm text-content-secondary mb-1">职位 <span className="text-red-500">*</span></label>
-                <input value={memberForm.position} onChange={e => setMemberForm(f => ({ ...f, position: e.target.value }))} placeholder="如：掌门、长老、弟子…" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
-              </div>
-              <div>
-                <label className="block text-sm text-content-secondary mb-1">等级</label>
-                <input type="number" min={0} value={memberForm.rank} onChange={e => setMemberForm(f => ({ ...f, rank: Number(e.target.value) }))} placeholder="职位等级（数字）" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
-              </div>
-              <div>
-                <label className="block text-sm text-content-secondary mb-1">忠诚度 ({memberForm.loyalty})</label>
-                <input type="range" min={0} max={100} value={memberForm.loyalty} onChange={e => setMemberForm(f => ({ ...f, loyalty: Number(e.target.value) }))} className="w-full" />
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
+        <Modal
+          title={editingMember ? '编辑成员' : '添加成员'}
+          onClose={() => setShowMemberModal(false)}
+          size="lg"
+          footer={(
+            <>
               <button onClick={() => setShowMemberModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm transition-colors">取消</button>
               <button onClick={handleMemberSubmit} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">确定</button>
+            </>
+          )}
+        >
+          <div className="space-y-3">
+            {!editingMember && (
+              <div>
+                <label className="block text-sm text-content-secondary mb-1">选择角色 <span className="text-red-500">*</span></label>
+                <select
+                  value={memberForm.character_id}
+                  onChange={e => setMemberForm(f => ({ ...f, character_id: e.target.value }))}
+                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors"
+                >
+                  <option value="">请选择角色…</option>
+                  {characters
+                    .filter(c => !members.some(m => m.character_id === c.id))
+                    .map(c => <option key={c.id} value={c.id}>{c.name}{c.role_type ? ` (${c.role_type})` : ''}</option>)
+                  }
+                </select>
+              </div>
+            )}
+            <div>
+              <label className="block text-sm text-content-secondary mb-1">职位 <span className="text-red-500">*</span></label>
+              <input value={memberForm.position} onChange={e => setMemberForm(f => ({ ...f, position: e.target.value }))} placeholder="如：掌门、长老、弟子…" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+            </div>
+            <div>
+              <label className="block text-sm text-content-secondary mb-1">等级</label>
+              <input type="number" min={0} value={memberForm.rank} onChange={e => setMemberForm(f => ({ ...f, rank: Number(e.target.value) }))} placeholder="职位等级（数字）" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+            </div>
+            <div>
+              <label className="block text-sm text-content-secondary mb-1">忠诚度 ({memberForm.loyalty})</label>
+              <input type="range" min={0} max={100} value={memberForm.loyalty} onChange={e => setMemberForm(f => ({ ...f, loyalty: Number(e.target.value) }))} className="w-full" />
             </div>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   )

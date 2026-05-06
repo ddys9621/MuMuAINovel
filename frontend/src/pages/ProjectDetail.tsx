@@ -231,97 +231,60 @@ export default function ProjectDetail() {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="border-b border-white/70 bg-white/65 px-4 py-3 backdrop-blur-xl md:px-6">
-          <div className="mx-auto flex max-w-[1600px] items-center gap-4">
-            <button
-              className="fanqie-toolbar-btn h-11 w-11 p-0 lg:hidden"
-              onClick={() => setMobileOpen((v) => !v)}
-            >
-              {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-            </button>
+        <header className="border-b border-white/70 bg-white/70 px-4 py-3 backdrop-blur-xl md:px-6">
+          <div className="mx-auto max-w-[1600px] space-y-2">
+            {/* 第一行：移动菜单 + 标签 + 标题 */}
+            <div className="flex items-center gap-3">
+              <button
+                className="fanqie-toolbar-btn h-10 w-10 p-0 lg:hidden"
+                onClick={() => setMobileOpen((v) => !v)}
+              >
+                {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+              </button>
 
-            <div className="min-w-0 flex-1">
-              <div className="mb-1 flex items-center gap-2">
-                <span className="fanqie-chip border-brand/10 bg-brand/5 text-brand">项目工作台</span>
-                <span className={`inline-flex rounded-pill px-3 py-1 text-xs font-medium ${projectStatus.className}`}>{projectStatus.label}</span>
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <span className="fanqie-chip shrink-0 border-brand/10 bg-brand/5 px-2.5 py-0.5 text-xs text-brand">项目工作台</span>
+                <span className={`shrink-0 inline-flex rounded-pill px-2.5 py-0.5 text-xs font-medium ${projectStatus.className}`}>{projectStatus.label}</span>
+                <span className="hidden text-xs text-content-tertiary md:inline">·</span>
+                <span className="hidden text-xs text-content-secondary md:inline">{currentSection}</span>
+                <span className="hidden text-xs text-content-tertiary md:inline">·</span>
+                <h1 className="min-w-0 truncate text-sm font-semibold text-content md:text-base">{currentProject?.title ?? '加载中…'}</h1>
               </div>
-              <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
-                <div className="min-w-0">
-                  <h1 className="truncate text-lg font-semibold text-content md:text-[24px]">{currentProject?.title ?? '加载中…'}</h1>
-                  <p className="truncate text-sm text-content-secondary">当前页面 · {currentSection}</p>
-                </div>
-                <div className="hidden flex-wrap items-center gap-2 text-xs text-content-secondary md:flex">
-                  <span className="fanqie-chip">大纲 {stats.outlines}</span>
-                  <span className="fanqie-chip">角色 {stats.characters}</span>
-                  <span className="fanqie-chip">章节 {stats.chapters}</span>
-                  <span className="fanqie-chip">字数 {formatCount(stats.words)}</span>
-                </div>
-              </div>
+            </div>
+
+            {/* 第二行：统计数据 + 主题标签 + 描述 */}
+            <div className="hidden items-center gap-1.5 text-xs text-content-secondary md:flex">
+              <span className="fanqie-chip px-2.5 py-0.5">大纲 <b className="ml-0.5 font-semibold text-content">{stats.outlines}</b></span>
+              <span className="fanqie-chip px-2.5 py-0.5">角色 <b className="ml-0.5 font-semibold text-content">{stats.characters}</b></span>
+              <span className="fanqie-chip px-2.5 py-0.5">章节 <b className="ml-0.5 font-semibold text-content">{stats.chapters}</b></span>
+              <span className="fanqie-chip px-2.5 py-0.5">字数 <b className="ml-0.5 font-semibold text-content">{formatCount(stats.words)}</b></span>
+              {currentProject?.theme && (
+                <>
+                  <span className="mx-1 h-3 w-px bg-surface-border" />
+                  <span className="fanqie-chip max-w-[200px] truncate px-2.5 py-0.5">主题 · {currentProject.theme}</span>
+                </>
+              )}
+              {projectTags.length > 0 && (
+                <>
+                  {!currentProject?.theme && <span className="mx-1 h-3 w-px bg-surface-border" />}
+                  {projectTags.map((tag) => (
+                    <span key={tag} className="fanqie-chip px-2.5 py-0.5">{tag.trim()}</span>
+                  ))}
+                </>
+              )}
+              {currentProject?.description && (
+                <>
+                  <span className="mx-1 h-3 w-px bg-surface-border" />
+                  <p className="min-w-0 truncate text-content-tertiary">{currentProject.description}</p>
+                </>
+              )}
             </div>
           </div>
         </header>
 
         <main className="flex-1 overflow-y-auto px-4 pb-5 pt-4 md:px-6 md:pb-6 md:pt-5">
           <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-4">
-            <section className="hh-hero-shell px-6 py-6">
-              <div className="absolute -right-10 top-0 h-32 w-32 rounded-full bg-white/18 blur-3xl" />
-              <div className="absolute -left-10 bottom-0 h-32 w-32 rounded-full bg-white/14 blur-3xl" />
-              <div className="relative z-10 flex flex-col gap-5 lg:flex-row lg:items-stretch lg:justify-between">
-                <div className="max-w-[820px]">
-                  <div className="hh-hero-eyebrow">
-                    <Sparkles className="h-3.5 w-3.5" />
-                    项目概览
-                  </div>
-                  <h2 className="mt-4 line-clamp-2 text-[28px] font-semibold leading-tight md:text-[34px]">
-                    {currentProject?.title || '当前项目'}
-                  </h2>
-                  <p className="mt-3 max-w-[720px] line-clamp-3 text-sm leading-7 text-white/88 md:text-base">
-                    {currentProject?.description || '项目简介还未填写。你可以直接进入对应模块继续完善世界设定、角色、组织与章节内容。'}
-                  </p>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <span className="hh-hero-tag">当前页面：{currentSection}</span>
-                    {currentProject?.theme && <span className="hh-hero-tag">主题：{currentProject.theme}</span>}
-                    {(projectTags.length > 0) && projectTags.map((tag) => (
-                      <span key={tag} className="hh-hero-tag">{tag.trim()}</span>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="w-full lg:max-w-[420px]">
-                  <div className="hh-hero-sidecard">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-medium text-white">创作进度</p>
-                        <p className="mt-1 text-xs text-white/72">围绕设定、角色、章节持续推进当前项目</p>
-                      </div>
-                      <span className={`inline-flex rounded-pill px-3 py-1 text-xs font-medium ${projectStatus.className} bg-white/90`}>
-                        {projectStatus.label}
-                      </span>
-                    </div>
-                    <div className="mt-4 grid grid-cols-2 gap-3">
-                      <div className="hh-hero-metric">
-                        <p className="text-xs text-white/70">大纲</p>
-                        <p className="mt-2 text-2xl font-semibold">{stats.outlines}</p>
-                      </div>
-                      <div className="hh-hero-metric">
-                        <p className="text-xs text-white/70">角色</p>
-                        <p className="mt-2 text-2xl font-semibold">{stats.characters}</p>
-                      </div>
-                      <div className="hh-hero-metric">
-                        <p className="text-xs text-white/70">章节</p>
-                        <p className="mt-2 text-2xl font-semibold">{stats.chapters}</p>
-                      </div>
-                      <div className="hh-hero-metric">
-                        <p className="text-xs text-white/70">字数</p>
-                        <p className="mt-2 text-2xl font-semibold">{formatCount(stats.words)}</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <section className="fanqie-card min-h-[calc(100vh-320px)] p-4 md:p-6">
+            <section className="fanqie-card min-h-[calc(100vh-160px)] p-4 md:p-6">
               <Outlet />
             </section>
           </div>
