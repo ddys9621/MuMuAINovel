@@ -16,8 +16,6 @@ export type Step =
   | 'generating'
   | 'complete';
 
-export type OptionGenerationStep = 'title' | 'description' | 'theme' | 'genre';
-
 export interface Message {
   id: string;
   type: 'ai' | 'user';
@@ -28,7 +26,6 @@ export interface Message {
 }
 
 export interface WizardData {
-  originalIdea?: string;
   title: string;
   description: string;
   theme: string;
@@ -52,23 +49,9 @@ export interface GenerationMeta {
   stallLevel: StallLevel;
 }
 
-export interface GenerationApiContext {
-  title?: string;
-  description?: string;
-  theme?: string;
-  original_idea?: string;
-}
-
-export interface RefinementContext {
-  requirements: string[];
-  previousOptions: string[];
-}
-
 export interface RetryContext {
-  step: OptionGenerationStep;
-  context: GenerationApiContext;
-  hint?: string;
-  refinementContext?: RefinementContext;
+  step: 'title' | 'description' | 'theme' | 'genre';
+  context: Partial<WizardData>;
 }
 
 export interface WizardState {
@@ -83,7 +66,6 @@ export interface WizardState {
   progressMessage: string;
   generationSteps: GenerationSteps;
   generationMeta: GenerationMeta;
-  refinementContexts: Partial<Record<OptionGenerationStep, RefinementContext>>;
   retryContext: RetryContext | null;
 }
 
@@ -99,7 +81,6 @@ export type WizardAction =
   | { type: 'API_LOADING'; payload: Step }
   | { type: 'API_SUCCESS'; payload: { nextStep: Step; aiMessage: Omit<Message, 'id'> } }
   | { type: 'API_ERROR'; payload: { error: string; retryContext?: RetryContext; options?: string[] } }
-  | { type: 'RECORD_REFINEMENT_RESULT'; payload: { step: OptionGenerationStep; hint?: string; options: string[] } }
   | { type: 'GEN_START'; payload: { title: string } }
   | { type: 'GEN_PROGRESS'; payload: { progress: number; message: string; steps?: Partial<GenerationSteps> } }
   | { type: 'GEN_STEP_UPDATE'; payload: Partial<GenerationSteps> }
@@ -131,6 +112,5 @@ export const createInitialState = (): WizardState => ({
   progressMessage: '',
   generationSteps: { worldBuilding: 'pending', characters: 'pending', outline: 'pending' },
   generationMeta: { startedAt: null, lastUpdateAt: null, elapsedSec: 0, chunks: 0, stallLevel: 'none' },
-  refinementContexts: {},
   retryContext: null,
 });

@@ -167,29 +167,6 @@ export function wizardReducer(state: WizardState, action: WizardAction): WizardS
     case 'SET_WIZARD_DATA':
       return { ...state, wizardData: { ...state.wizardData, ...action.payload } };
 
-    case 'RECORD_REFINEMENT_RESULT': {
-      const existing = state.refinementContexts[action.payload.step] ?? {
-        requirements: [],
-        previousOptions: [],
-      };
-      const hint = action.payload.hint?.trim();
-      const requirements =
-        hint && existing.requirements[existing.requirements.length - 1] !== hint
-          ? [...existing.requirements, hint]
-          : existing.requirements;
-
-      return {
-        ...state,
-        refinementContexts: {
-          ...state.refinementContexts,
-          [action.payload.step]: {
-            requirements,
-            previousOptions: action.payload.options,
-          },
-        },
-      };
-    }
-
     // ---- 生成流程 ----
     case 'GEN_START':
       return {

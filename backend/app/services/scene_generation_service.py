@@ -41,11 +41,7 @@ class SceneGenerationService:
         plot_card_id: str,
         user_id: str,
         writing_style_id: Optional[str] = None,
-        previous_generated_content: Optional[str] = None,
-        # R8 拆书参考包显式参数（任一为空则走 injector 默认）
-        pack_ids: Optional[List[str]] = None,
-        dimensions: Optional[List[str]] = None,
-        strength: Optional[str] = None,
+        previous_generated_content: Optional[str] = None
     ) -> AsyncGenerator[str, None]:
         """
         直接生成场景内容，复用原有的完整上下文收集逻辑
@@ -188,43 +184,6 @@ class SceneGenerationService:
             generated_scenes_content = self._get_generated_scenes_content(all_plot_cards, plot_card.id)
             logger.info(f"📝 从数据库读取已生成内容: {len(generated_scenes_content)} 字符")
 
-        # 拆书参考注入（R5-S4）：把已挂载参考包的 style/methodology/corpus 注入场景生成
-        # 设计文档：@/agent-docs/features/dissect_to_creation_pipeline.md §A.2
-        dissect_user_segment = ""
-        try:
-            from app.services.reference_pack_injector import ReferencePackInjector
-            _injector = ReferencePackInjector()
-            _anchor = (
-                f"{plot_card.title or ''} "
-                f"{(plot_card.content or '')[:300]}"
-            ).strip() or chapter_outline.title or "场景生成"
-            _ref_block = await _injector.build_reference_block(
-                db, project.id,
-                scene="scene_generation",
-                pack_ids=pack_ids,
-                dimensions=dimensions,
-                strength=strength,
-                anchor_query=_anchor,
-            )
-            if _ref_block.user_segment:
-                dissect_user_segment = _ref_block.user_segment
-            if _ref_block.system_segment:
-                style_content = (
-                    f"{style_content}\n\n{_ref_block.system_segment}".strip()
-                    if style_content
-                    else _ref_block.system_segment
-                )
-            if not _ref_block.is_empty:
-                logger.info(
-                    f"📚 [R5-场景生成] 注入拆书参考包 {len(_ref_block.used_packs)} 个，"
-                    f"维度={_ref_block.used_dimensions}，强度={_ref_block.used_strength}"
-                )
-        except ValueError:
-            # 项目未挂载参考包 → 优雅跳过
-            pass
-        except Exception as _e:  # pragma: no cover - 防御性兜底
-            logger.warning(f"[R5-场景生成] 拆书参考注入失败（已跳过）: {_e}")
-
         # ========== 构建提示词 ==========
 
         if previous_content or generated_scenes_content:
@@ -247,7 +206,7 @@ class SceneGenerationService:
                 target_word_count=plot_card.word_count_target or 500,
                 memory_context=memory_context,
                 linked_cards_context=linked_cards_context,
-                mcp_references=dissect_user_segment,
+                mcp_references=""
             )
         else:
             base_prompt = prompt_service.get_chapter_generation_prompt(
@@ -268,7 +227,7 @@ class SceneGenerationService:
                 target_word_count=plot_card.word_count_target or 500,
                 memory_context=memory_context,
                 linked_cards_context=linked_cards_context,
-                mcp_references=dissect_user_segment,
+                mcp_references=""
             )
 
         # 追加当前场景的特定提示词
@@ -278,10 +237,7 @@ class SceneGenerationService:
             generated_scenes_content=generated_scenes_content
         )
 
-        prompt = prompt_service.apply_project_generation_prompt(
-            base_prompt + "\n\n" + scene_prompt,
-            project.generation_prompt or ''
-        )
+        prompt = base_prompt + "\n\n" + scene_prompt
         logger.info(f"📝 提示词构建完成，总长度: {len(prompt)} 字符")
 
         # 更新卡片状态为生成中

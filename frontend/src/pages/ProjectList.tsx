@@ -25,14 +25,9 @@ import {
 import { toast } from 'sonner'
 import { useStore } from '@/store/index'
 import { useProjectSync } from '@/store/hooks'
-import { projectApi, referencePackApi, wizardStreamApi } from '@/services/api'
+import { projectApi, wizardStreamApi } from '@/services/api'
 import InspirationDrawer from '@/components/inspiration/InspirationDrawer'
 import { MCPSelector } from '@/components/MCPSelector'
-import {
-  ReferencePackSelector,
-  DEFAULT_SELECTOR_VALUE as DEFAULT_REF_PACK_VALUE,
-  type ReferencePackSelectorValue,
-} from '@/components/ReferencePackSelector'
 import type { Project } from '@/types'
 
 /* ─── 常量 ─── */
@@ -609,8 +604,6 @@ export default function ProjectList() {
   const [deletingProject, setDeletingProject] = useState<Project | null>(null)
   const [showImportDialog, setShowImportDialog] = useState(false)
   const [showWizard, setShowWizard] = useState(false)
-  // V3.2-A：拆书页跳转过来预选本书参考包。仅首次 mount 读取 + 状态保留，避免反复触发
-  const [pendingPackTaskId, setPendingPackTaskId] = useState<string | null>(null)
   const inspirationOpen = searchParams.get('panel') === 'inspiration'
 
   const openInspirationDrawer = () => {
@@ -631,21 +624,6 @@ export default function ProjectList() {
       refreshProjects()
     }
   }, [projectsInitialized, refreshProjects])
-
-  // V3.2-A：响应拆书页「以本书作参考创建项目」跳转（?wizard=1&pack_task_id=xxx）
-  // 仅读一次，读后从 URL 移除参数避免刷新重复弹出
-  useEffect(() => {
-    if (searchParams.get('wizard') !== '1') return
-    const taskId = searchParams.get('pack_task_id')
-    setPendingPackTaskId(taskId)
-    setShowWizard(true)
-    const next = new URLSearchParams(searchParams)
-    next.delete('wizard')
-    next.delete('pack_task_id')
-    setSearchParams(next, { replace: true })
-    // 只需首次 mount 或 URL 变化时检查
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   // 统计数据
   const stats = useMemo(() => {
@@ -836,12 +814,8 @@ export default function ProjectList() {
       {/* 向导创建弹窗 */}
       {showWizard && (
         <WizardModal
-          onClose={() => {
-            setShowWizard(false)
-            setPendingPackTaskId(null)
-          }}
+          onClose={() => setShowWizard(false)}
           onSuccess={handleWizardSuccess}
-          initialPackTaskId={pendingPackTaskId}
         />
       )}
     </div>
@@ -880,16 +854,7 @@ const DEFAULT_WIZARD_FORM: WizardForm = {
 const GENRE_OPTIONS = ['玄幻', '奇幻', '武侠', '仙侠', '都市', '现实', '历史', '军事', '游戏', '体育', '科幻', '悬疑', '灵异', '二次元', '言情', '现言', '古言']
 const PERSPECTIVE_OPTIONS = ['第一人称', '第三人称', '全知视角']
 
-function WizardModal({
-  onClose,
-  onSuccess,
-  initialPackTaskId,
-}: {
-  onClose: () => void;
-  onSuccess: (projectId: string) => void;
-  /** V3.2-A：拆书页跳转过来时传入，在 mount 后拉取该任务对应的参考包预填 */
-  initialPackTaskId?: string | null;
-}) {
+function WizardModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (projectId: string) => void }) {
   const [form, setForm] = useState<WizardForm>(DEFAULT_WIZARD_FORM)
   const [phase, setPhase] = useState<WizardPhase>('form')
   const [progress, setProgress] = useState(0)
@@ -900,50 +865,6 @@ function WizardModal({
   const [minimized, setMinimized] = useState(false)
   const [selectedPlugins, setSelectedPlugins] = useState<string[]>([])
   const [enableMcp, setEnableMcp] = useState(false)
-  // V3.2-B：拆书参考包选择状态（项目创建后后端会自动挂载）
-  const [refPack, setRefPack] = useState<ReferencePackSelectorValue>(DEFAULT_REF_PACK_VALUE)
-
-  // V3.2-A：从拆书页跳转过来时，根据 task_id 拉取对应的参考包并预填 refPack
-  useEffect(() => {
-    if (!initialPackTaskId) return
-    let cancelled = false
-    referencePackApi
-      .list()
-      .then((packs) => {
-        if (cancelled) return
-        const matched = (packs ?? []).find((p) => p.task_id === initialPackTaskId)
-        if (!matched) {
-          toast.warning('该拆书任务未生成参考包，请手动选择')
-          return
-        }
-        if (matched.status !== 'ready' && matched.status !== 'partial') {
-          toast.warning(`该参考包状态为 ${matched.status}，未就绪，请稍后重试`)
-          return
-        }
-        setRefPack({
-          enabled: true,
-          packIds: [matched.id],
-          dimensions: [],
-          strength: 'medium',
-        })
-        toast.success(`已预选拆书参考包：${matched.source_book_title}`)
-      })
-      .catch(() => {
-        // api 拦截器已 toast
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [initialPackTaskId])
-  // 把 refPack 转为 R8 API payload。未启用返空对象。
-  const r8Payload = (): { pack_ids?: string[]; dimensions?: string[]; strength?: 'light' | 'medium' | 'deep' } =>
-    !refPack.enabled
-      ? {}
-      : {
-          pack_ids: refPack.packIds.length > 0 ? refPack.packIds : undefined,
-          dimensions: refPack.dimensions.length > 0 ? refPack.dimensions : undefined,
-          strength: refPack.strength,
-        }
   const abortRef = useRef<AbortController | null>(null)
 
   const updateField = <K extends keyof WizardForm>(key: K, value: WizardForm[K]) => {
@@ -979,8 +900,6 @@ function WizardModal({
           character_count: form.character_count,
           enable_mcp: enableMcp,
           selected_plugins: selectedPlugins,
-          // V3.2-B：透传拆书参考包；项目创建成功后后端会自动挂载
-          ...r8Payload(),
         },
         {
           signal: controller.signal,
@@ -1017,8 +936,6 @@ function WizardModal({
           requirements: form.requirements.trim() || undefined,
           enable_mcp: enableMcp,
           selected_plugins: selectedPlugins,
-          // V3.2-B：后端读项目挂载列表，此处继续透传以便后端有显式选择优先级
-          ...r8Payload(),
         },
         {
           signal: controller.signal,
@@ -1050,8 +967,6 @@ function WizardModal({
           requirements: form.requirements.trim() || undefined,
           enable_mcp: enableMcp,
           selected_plugins: selectedPlugins,
-          // V3.2-B：透传拆书参考包选择
-          ...r8Payload(),
         },
         {
           signal: controller.signal,
@@ -1296,14 +1211,6 @@ function WizardModal({
                   className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none resize-none"
                 />
               </div>
-
-              {/* V3.2-B：拆书参考包选择器（项目创建前选包，创建后自动挂载） */}
-              <ReferencePackSelector
-                value={refPack}
-                onChange={setRefPack}
-                disabledTitle="拆书参考包"
-                hint="项目创建后会自动挂载到项目"
-              />
 
               {/* MCP 插件 */}
               <MCPSelector

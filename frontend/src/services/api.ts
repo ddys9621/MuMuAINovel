@@ -70,15 +70,6 @@ import type {
   WorldRuleListResponse,
   PaginationResponse,
   ChapterAnalysisResponse,
-  BookDissectTask,
-  BookDissectUploadResponse,
-  BookDissectV2Overview,
-  BookDissectV2ChapterSummary,
-  BookDissectV2ChapterDetail,
-  BookDissectV2DictionaryEntry,
-  BookDissectV2Entity,
-  BookDissectV2Relation,
-  BookDissectV2Event,
 } from '../types';
 
 type ChapterListApiResponse = Chapter[] | { items?: Chapter[] };
@@ -541,13 +532,8 @@ export const inspirationApi = {
       title?: string;
       description?: string;
       theme?: string;
-      original_idea?: string;
     };
     hint?: string;
-    refinement_context?: {
-      requirements?: string[];
-      previous_options?: string[];
-    };
   }) =>
     api.post<unknown, {
       prompt?: string;
@@ -581,7 +567,6 @@ export const wizardStreamApi = {
       description: string;
       theme: string;
       genre: string | string[];
-      generation_prompt?: string;
       narrative_perspective?: string;
       target_words?: number;
       chapter_count?: number;
@@ -590,10 +575,6 @@ export const wizardStreamApi = {
       model?: string;
       enable_mcp?: boolean;
       selected_plugins?: string[];
-      // R8 拆书参考包显式参数（项目创建第一步，向后端透传）
-      pack_ids?: string[];
-      dimensions?: string[];
-      strength?: 'light' | 'medium' | 'deep';
     },
     options?: SSEClientOptions<WorldBuildingResponse>
   ) => ssePost<WorldBuildingResponse>(
@@ -614,10 +595,6 @@ export const wizardStreamApi = {
       model?: string;
       enable_mcp?: boolean;
       selected_plugins?: string[];
-      // R8 拆书参考包显式参数
-      pack_ids?: string[];
-      dimensions?: string[];
-      strength?: 'light' | 'medium' | 'deep';
     },
     options?: SSEClientOptions<GenerateCharactersResponse>
   ) => ssePost<GenerateCharactersResponse>(
@@ -649,12 +626,8 @@ export const wizardStreamApi = {
       requirements?: string;
       provider?: string;
       model?: string;
-      enable_mcp?: boolean;  // 是否启用MCP
-      selected_plugins?: string[];  // 选择的插件列表
-      // R8：拆书参考包显式参数（任一为空数组/undefined 都走"自动模式"）
-      pack_ids?: string[];
-      dimensions?: string[];
-      strength?: 'light' | 'medium' | 'deep';
+      enable_mcp?: boolean;  // 新增：是否启用MCP
+      selected_plugins?: string[];  // 新增：选择的插件列表
     },
     options?: SSEClientOptions<GenerateOutlineResponse>
   ) => ssePost<GenerateOutlineResponse>(
@@ -683,17 +656,8 @@ export const wizardStreamApi = {
     data?: {
       provider?: string;
       model?: string;
-      title?: string;
-      description?: string;
-      theme?: string;
-      genre?: string | string[];
-      generation_prompt?: string;
       enable_mcp?: boolean;
       selected_plugins?: string[];
-      // R8 拆书参考包显式参数
-      pack_ids?: string[];
-      dimensions?: string[];
-      strength?: 'light' | 'medium' | 'deep';
     },
     options?: SSEClientOptions<WorldBuildingResponse>
   ) => ssePost<WorldBuildingResponse>(
@@ -1179,10 +1143,6 @@ export const sceneGenerationApi = {
       plot_card_id: string;
       writing_style_id?: string;
       previous_generated_content?: string;
-      // R8 拆书参考包显式参数
-      pack_ids?: string[];
-      dimensions?: string[];
-      strength?: 'light' | 'medium' | 'deep';
     },
     options?: SSEClientOptions
   ) => ssePost('/api/scene-generation/generate-scene-stream', data, options),
@@ -1387,167 +1347,3 @@ export const memoryApi = {
     api.delete<unknown, { success: boolean; message: string }>(`/memories/projects/${projectId}/chapters/${chapterId}/memories`),
 };
 
-
-// ============================================
-// 拆书参考 API
-// ============================================
-export const bookDissectApi = {
-  /** 上传 txt/md 参考书，返回 task_id + 切分预览（不接 LLM） */
-  upload: (file: File) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    return api.post<unknown, BookDissectUploadResponse>('/book-dissect/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
-  },
-
-  /** 查询单个任务状态 + 元信息 + 结果 */
-  getTask: (taskId: string) =>
-    api.get<unknown, BookDissectTask>(`/book-dissect/${taskId}`),
-
-  /** 列出当前用户所有拆书任务（按创建时间倒序） */
-  listTasks: () => api.get<unknown, BookDissectTask[]>('/book-dissect'),
-
-  /** 启动 LLM 抽取（V2 引擎：逐章抽取 + 全书聚合）。 */
-  startExtraction: (
-    taskId: string,
-    params?: {
-      sampling_mode?: string
-      sampling_param?: number
-      extraction_engine?: 'auto' | 'chunked' | 'long_context'
-    },
-  ) =>
-    api.post<unknown, BookDissectTask>(
-      `/book-dissect/${taskId}/start-extraction`,
-      params ?? { sampling_mode: 'all', sampling_param: 1 },
-    ),
-
-  /** 删除任务并清理磁盘文件 */
-  deleteTask: (taskId: string) =>
-    api.delete<unknown, { message: string; task_id: string }>(`/book-dissect/${taskId}`),
-
-  // V3 R6 废弃：applyToWizard() 已移除。
-  // 后端端点统一返 410 Gone；改用 imitationApi.preview / imitationApi.streamUrl
-  // 配合 referencePackApi.attach 在用户自己项目内做「一键仿写」。
-
-  // ----- V2 浏览 -----
-  v2GetOverview: (taskId: string) =>
-    api.get<unknown, BookDissectV2Overview>(`/book-dissect/${taskId}/v2/overview`),
-
-  v2ListChapters: (taskId: string) =>
-    api.get<unknown, BookDissectV2ChapterSummary[]>(`/book-dissect/${taskId}/v2/chapters`),
-
-  v2GetChapterDetail: (taskId: string, chapterNumber: number) =>
-    api.get<unknown, BookDissectV2ChapterDetail>(
-      `/book-dissect/${taskId}/v2/chapters/${chapterNumber}`,
-    ),
-
-  v2ListDictionary: (taskId: string) =>
-    api.get<unknown, BookDissectV2DictionaryEntry[]>(`/book-dissect/${taskId}/v2/dictionary`),
-
-  v2ListEntities: (taskId: string, entityType?: string, slim = false) =>
-    api.get<unknown, BookDissectV2Entity[]>(
-      `/book-dissect/${taskId}/v2/entities`,
-      {
-        params: {
-          ...(entityType ? { entity_type: entityType } : {}),
-          ...(slim ? { slim: true } : {}),
-        },
-      },
-    ),
-
-  v2GetEntity: (taskId: string, entityId: string) =>
-    api.get<unknown, BookDissectV2Entity>(
-      `/book-dissect/${taskId}/v2/entities/${entityId}`,
-    ),
-
-  v2ListRelations: (taskId: string, category?: string) =>
-    api.get<unknown, BookDissectV2Relation[]>(
-      `/book-dissect/${taskId}/v2/relations`,
-      { params: category ? { relation_category: category } : undefined },
-    ),
-
-  v2ListEvents: (taskId: string, importance?: string) =>
-    api.get<unknown, BookDissectV2Event[]>(
-      `/book-dissect/${taskId}/v2/events`,
-      { params: importance ? { importance } : undefined },
-    ),
-};
-
-
-// ============================================
-// 拆书 V3 仿写：参考包 API
-// ============================================
-import type {
-  ReferencePackSummary,
-  ReferencePackDetail,
-  ProjectReferencePackItem,
-  AttachReferencePackRequest,
-  AttachReferencePackResponse,
-  UpdateAttachmentRequest,
-} from '@/types/reference_pack';
-
-export const referencePackApi = {
-  /** 列出当前用户的所有参考包（不含 5 tab 详细内容） */
-  list: () => api.get<unknown, ReferencePackSummary[]>('/reference-packs'),
-
-  /** 参考包详情（含 5 tab 完整 JSON） */
-  get: (packId: string) =>
-    api.get<unknown, ReferencePackDetail>(`/reference-packs/${packId}`),
-
-  /** 删除参考包（同时清理所有项目挂载关联） */
-  delete: (packId: string) =>
-    api.delete<unknown, { deleted: string }>(`/reference-packs/${packId}`),
-
-  /** 列出某项目已挂载的参考包 */
-  listAttachments: (projectId: string) =>
-    api.get<unknown, ProjectReferencePackItem[]>(
-      `/projects/${projectId}/reference-packs`,
-    ),
-
-  /** 挂载参考包到项目 */
-  attach: (projectId: string, payload: AttachReferencePackRequest) =>
-    api.post<unknown, AttachReferencePackResponse>(
-      `/projects/${projectId}/reference-packs`,
-      payload,
-    ),
-
-  /** 更新挂载配置（默认维度 / 强度） */
-  updateAttachment: (
-    projectId: string,
-    packId: string,
-    payload: UpdateAttachmentRequest,
-  ) =>
-    api.patch<unknown, ProjectReferencePackItem>(
-      `/projects/${projectId}/reference-packs/${packId}`,
-      payload,
-    ),
-
-  /** 卸载参考包（保留项目本体） */
-  detach: (projectId: string, packId: string) =>
-    api.delete<unknown, { detached: string }>(
-      `/projects/${projectId}/reference-packs/${packId}`,
-    ),
-};
-
-
-// ============================================
-// 拆书 V3 R5：一键仿写（preview / stream）
-// ============================================
-import type {
-  ImitateChapterRequest,
-  ImitatePromptPreview,
-} from '@/types/reference_pack';
-
-export const imitationApi = {
-  /** Dry-run 预览：返回拼装后的 system/user prompt + 使用的 pack/维度/强度 */
-  preview: (projectId: string, payload: ImitateChapterRequest) =>
-    api.post<unknown, ImitatePromptPreview>(
-      `/projects/${projectId}/imitate-chapter-preview`,
-      payload,
-    ),
-
-  /** 流式生成端点 URL（前端用 SSEPostClient 直连，便于 abort 控制） */
-  streamUrl: (projectId: string) =>
-    `/api/projects/${projectId}/imitate-chapter-stream`,
-};

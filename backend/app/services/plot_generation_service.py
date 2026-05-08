@@ -11,7 +11,6 @@ from app.models.relationship import Organization
 from app.services.plot_prompts import PlotPromptService
 from app.services.ai_service import AIService
 from app.services.world_rule_service import WorldRuleService
-from app.services.prompt_service import prompt_service as project_prompt_service
 from app.logger import get_logger
 from app.utils.plot_line_types import normalize_plot_line_type
 
@@ -360,11 +359,7 @@ class PlotGenerationService:
         model: Optional[str] = None,
         enable_mcp: bool = False,
         selected_plugins: Optional[List[str]] = None,
-        user_id: Optional[str] = None,
-        # R6/R8：拆书参考包注入。三者都 None 时走「项目挂载关系自动注入」。
-        pack_ids: Optional[List[str]] = None,
-        dimensions: Optional[List[str]] = None,
-        strength: Optional[str] = None,
+        user_id: Optional[str] = None
     ) -> List[PlotCard]:
         """生成剧情卡片（必须基于大纲）"""
         
@@ -405,8 +400,7 @@ class PlotGenerationService:
             "world_time_period": project.world_time_period,
             "world_location": project.world_location,
             "world_atmosphere": project.world_atmosphere,
-            "world_rules": enhanced_world_rules,
-            "generation_prompt": project.generation_prompt
+            "world_rules": enhanced_world_rules
         }
         
         # 获取章纲内容（优先级高于大纲）
@@ -488,43 +482,8 @@ class PlotGenerationService:
 请结合上述资料，生成符合要求的剧情卡片。"""
 
                 logger.info(f"📚 [剧情卡片生成] MCP 参考资料已拼接到 prompt")
-
-            # ========== R6：拆书参考包注入（无论是否启用 MCP 都尝试）==========
-            # 设计文档：@/agent-docs/features/dissect_to_creation_pipeline.md §A.2
-            try:
-                from app.services.reference_pack_injector import ReferencePackInjector
-                _injector = ReferencePackInjector()
-                _anchor = (
-                    f"{project.theme or ''} {project.genre or ''} "
-                    f"{(extend_from or '')[:200]} {outline_content[:300]}"
-                ).strip() or "剧情卡片"
-                _ref_block = await _injector.build_reference_block(
-                    db, project_id,
-                    scene="plot_card",
-                    pack_ids=pack_ids,
-                    dimensions=dimensions,
-                    strength=strength,
-                    fallback_dimensions=("synopsis", "structure", "methodology"),
-                    anchor_query=_anchor,
-                )
-                if _ref_block.user_segment:
-                    final_prompt = f"{final_prompt}\n\n{_ref_block.user_segment}"
-                    logger.info(
-                        "[R6-剧情卡片] 已注入参考包：dims=%s strength=%s 字符=%d",
-                        _ref_block.metadata.get("dimensions"),
-                        _ref_block.metadata.get("strength"),
-                        len(_ref_block.user_segment),
-                    )
-            except ValueError:
-                logger.info("[R6-剧情卡片] 项目未挂载参考包或无可用维度，跳过注入")
-            except Exception as _e:  # pragma: no cover - 防御性兜底
-                logger.warning("[R6-剧情卡片] 拆书参考注入失败（已跳过）：%s", _e)
-
+            
             # ========== 阶段 2: 内容生成 ==========
-            final_prompt = project_prompt_service.apply_project_generation_prompt(
-                final_prompt,
-                project.generation_prompt or ''
-            )
             logger.info(f"📝 [剧情卡片生成] 内容生成阶段开始")
             logger.info(f"  - Prompt 长度: {len(final_prompt)} 字符")
             
@@ -964,8 +923,7 @@ class PlotGenerationService:
         project_data: Dict[str, Any],
         lines: List[Dict[str, Any]],
         provider: Optional[str] = None,
-        model: Optional[str] = None,
-        dissect_ref_block: str = "",
+        model: Optional[str] = None
     ) -> Dict[int, List[Dict[str, Any]]]:
         """
         逐条生成剧情线的节点（beats）- 避免API超时
@@ -975,8 +933,6 @@ class PlotGenerationService:
             lines: 剧情线列表，每项包含 index, title, description, line_type
             provider: AI 提供商
             model: AI 模型
-            dissect_ref_block: R6 拆书参考包 user_segment（由调用方一次性算好后透传，
-                避免每条 beat 重复查库）。空串=不注入。
 
         Returns:
             index -> beats 的映射字典
@@ -1001,15 +957,6 @@ class PlotGenerationService:
                 prompt = self.prompt_service.generate_single_line_beats_prompt(
                     project_data=project_data,
                     line=line
-                )
-
-                # R6：拼拆书参考包 user_segment（节点生成主要受益于 structure / synopsis 维度）
-                if dissect_ref_block:
-                    prompt = f"{prompt}\n\n{dissect_ref_block}"
-
-                prompt = project_prompt_service.apply_project_generation_prompt(
-                    prompt,
-                    project_data.get("generation_prompt") or ''
                 )
 
                 start_time = time.time()
@@ -1132,11 +1079,7 @@ class PlotGenerationService:
         count: int = 3,
         enable_mcp: bool = False,
         selected_plugins: Optional[List[str]] = None,
-        user_id: Optional[str] = None,
-        # R6/R8：拆书参考包注入。三者都 None 时走「项目挂载关系自动注入」。
-        pack_ids: Optional[List[str]] = None,
-        dimensions: Optional[List[str]] = None,
-        strength: Optional[str] = None,
+        user_id: Optional[str] = None
     ) -> List[PlotLine]:
         """生成剧情线"""
         
@@ -1176,8 +1119,7 @@ class PlotGenerationService:
             "world_time_period": project.world_time_period,
             "world_location": project.world_location,
             "world_atmosphere": project.world_atmosphere,
-            "world_rules": enhanced_world_rules,
-            "generation_prompt": project.generation_prompt
+            "world_rules": enhanced_world_rules
         }
         
         # 获取角色信息（限制数量以控制 token）
@@ -1243,41 +1185,6 @@ class PlotGenerationService:
                 logger.warning(f"⚠️ [剧情线生成] enable_mcp=True 但 user_id 为空，降级为基础模式")
                 enable_mcp = False
 
-            # ========== R6：拆书参考包注入 ==========
-            # 项目挂了 pack 自动用，无需用户每次去 selector 选；用户显式传 R8 字段则覆盖。
-            # 设计文档：@/agent-docs/features/dissect_to_creation_pipeline.md §A.2
-            dissect_ref_block = ""
-            try:
-                from app.services.reference_pack_injector import ReferencePackInjector
-                _injector = ReferencePackInjector()
-                _anchor = (
-                    f"{project.theme or ''} {project.genre or ''} "
-                    f"{(outline_content or '')[:300]}"
-                ).strip() or "剧情线生成"
-                _ref_block = await _injector.build_reference_block(
-                    db, project_id,
-                    scene="plot_line",
-                    pack_ids=pack_ids,
-                    dimensions=dimensions,
-                    strength=strength,
-                    # 剧情线生成关注故事骨架/结构/方法论；corpus/style 主要给章节正文用，可由 default_dimensions 决定是否启用
-                    fallback_dimensions=("synopsis", "structure", "methodology"),
-                    anchor_query=_anchor,
-                )
-                if _ref_block.user_segment:
-                    dissect_ref_block = _ref_block.user_segment
-                    logger.info(
-                        "[R6-剧情线] 已注入参考包：dims=%s strength=%s 字符=%d",
-                        _ref_block.metadata.get("dimensions"),
-                        _ref_block.metadata.get("strength"),
-                        len(dissect_ref_block),
-                    )
-            except ValueError:
-                # 项目未挂载参考包等情况，优雅降级
-                logger.info("[R6-剧情线] 项目未挂载参考包或无可用维度，跳过注入")
-            except Exception as _e:  # pragma: no cover - 防御性兜底
-                logger.warning("[R6-剧情线] 拆书参考注入失败（已跳过）：%s", _e)
-
             # ========== 阶段 1：生成剧情线基本信息（title + description） ==========
             logger.info(f"🔹 [阶段 1] 开始生成剧情线基本信息")
 
@@ -1325,15 +1232,6 @@ class PlotGenerationService:
 {reference_materials}
 
 请结合上述资料，生成符合要求的剧情线。"""
-
-                # R6：拼拆书参考包 user_segment（每条剧情线复用同一份 block，避免重复 IO）
-                if dissect_ref_block:
-                    final_prompt = f"{final_prompt}\n\n{dissect_ref_block}"
-
-                final_prompt = project_prompt_service.apply_project_generation_prompt(
-                    final_prompt,
-                    project.generation_prompt or ''
-                )
 
                 # 调用 AI 生成单条剧情线结构
                 generation_start_time = time.time()
@@ -1415,13 +1313,12 @@ class PlotGenerationService:
             logger.info(f"🔹 [阶段 2] 开始批量节点规划")
             stage2_start_time = time.time()
 
-            # 调用批量 beats 生成（R6：透传同一份拆书参考块，避免阶段 2 重复查库）
+            # 调用批量 beats 生成
             index_to_beats = await self._generate_beats_for_lines_with_ai(
                 project_data=project_data,
                 lines=generated_lines_data,
                 provider=provider,
-                model=model,
-                dissect_ref_block=dissect_ref_block,
+                model=model
             )
 
             stage2_time = time.time() - stage2_start_time
@@ -1530,11 +1427,7 @@ class PlotGenerationService:
         model: Optional[str] = None,
         enable_mcp: bool = False,
         selected_plugins: Optional[List[str]] = None,
-        user_id: Optional[str] = None,
-        # R8 拆书参考包显式参数（任一为空则走 injector 默认）
-        pack_ids: Optional[List[str]] = None,
-        dimensions: Optional[List[str]] = None,
-        strength: Optional[str] = None,
+        user_id: Optional[str] = None
     ) -> List[ChapterOutline]:
         """生成章纲"""
         
@@ -1579,8 +1472,7 @@ class PlotGenerationService:
             "world_time_period": project.world_time_period,
             "world_location": project.world_location,
             "world_atmosphere": project.world_atmosphere,
-            "world_rules": enhanced_world_rules,
-            "generation_prompt": project.generation_prompt
+            "world_rules": enhanced_world_rules
         }
 
         # 获取主要角色信息
@@ -1803,49 +1695,8 @@ class PlotGenerationService:
 请结合上述资料，生成符合要求的章纲。"""
 
                 logger.info(f"📚 [章纲生成] MCP 参考资料已拼接到 prompt")
-
-            # 拆书参考注入（R4）：把已挂载参考包的 structure / methodology / corpus 拼到 prompt 末尾
-            # 设计文档：@/agent-docs/features/dissect_to_creation_pipeline.md §A.2
-            try:
-                from app.services.reference_pack_injector import ReferencePackInjector
-                injector = ReferencePackInjector()
-                # 用本批章纲对应的剧情线 + 全书 premise 作为 corpus 检索锚
-                anchor_parts = []
-                if plot_line_content:
-                    anchor_parts.append(plot_line_content[:300])
-                if story_premise:
-                    anchor_parts.append(story_premise[:300])
-                anchor_query = " ".join(anchor_parts).strip() or "章纲生成"
-
-                ref_block = await injector.build_reference_block(
-                    db, project_id,
-                    scene="chapter_outline",
-                    pack_ids=pack_ids,
-                    dimensions=dimensions,
-                    strength=strength,
-                    anchor_query=anchor_query,
-                )
-                if not ref_block.is_empty:
-                    final_prompt = (
-                        f"{final_prompt}\n\n{ref_block.user_segment}\n\n"
-                        "请结合以上拆书参考的写作手法（仅作方法参考，"
-                        "不要复刻原书的具体人名/地名/情节），生成本批章纲。"
-                    )
-                    logger.info(
-                        f"📚 [R4-章纲] 注入拆书参考包 {len(ref_block.used_packs)} 个，"
-                        f"维度={ref_block.used_dimensions}，强度={ref_block.used_strength}"
-                    )
-            except ValueError:
-                # 项目未挂载参考包 / 全部未就绪 → 优雅跳过
-                pass
-            except Exception as e:  # pragma: no cover - 防御性兜底
-                logger.warning(f"[R4-章纲] 拆书参考注入失败（已跳过）: {e}")
-
+            
             # ========== 阶段 2: 内容生成 ==========
-            final_prompt = project_prompt_service.apply_project_generation_prompt(
-                final_prompt,
-                project.generation_prompt or ''
-            )
             logger.info(f"📝 [章纲生成] 内容生成阶段开始")
             logger.info(f"  - Prompt 长度: {len(final_prompt)} 字符")
             

@@ -45,7 +45,6 @@ export interface Project {
   theme?: string;
   genre?: string;
   target_words?: number;
-  generation_prompt?: string;
   current_words: number;
   status: 'planning' | 'writing' | 'revising' | 'completed';
   wizard_status?: 'incomplete' | 'completed';
@@ -67,7 +66,6 @@ export interface ProjectCreate {
   theme?: string;
   genre?: string;
   target_words?: number;
-  generation_prompt?: string;
   narrative_perspective?: string;
   chapter_count?: number;
   character_count?: number;
@@ -85,7 +83,6 @@ export interface ProjectUpdate {
   theme?: string;
   genre?: string;
   target_words?: number;
-  generation_prompt?: string;
   status?: 'planning' | 'writing' | 'revising' | 'completed';
   world_time_period?: string;
   world_location?: string;
@@ -245,10 +242,6 @@ export interface ChapterGenerateRequest {
   target_word_count?: number;
   enable_mcp?: boolean;
   selected_plugins?: string[];
-  // R8 拆书参考包显式参数（任一为空则走默认）
-  pack_ids?: string[];
-  dimensions?: string[];
-  strength?: 'light' | 'medium' | 'deep';
 }
 
 // 章节生成检查响应
@@ -305,10 +298,6 @@ export interface GenerateCharacterRequest {
   model?: string;
   enable_mcp?: boolean;
   selected_plugins?: string[];
-  // R8 拆书参考包显式参数（任一为空则走默认）
-  pack_ids?: string[];
-  dimensions?: string[];
-  strength?: 'light' | 'medium' | 'deep';
 }
 
 // 向导API响应类型
@@ -988,10 +977,6 @@ export interface ChapterOutlineGenerateRequest {
   enable_mcp?: boolean;
   selected_plugins?: string[];
   auto_generate_plot_cards?: boolean;
-  // R8 拆书参考包显式参数（任一为空则走默认）
-  pack_ids?: string[];
-  dimensions?: string[];
-  strength?: 'light' | 'medium' | 'deep';
 }
 
 export interface ChapterOutlineReorderRequest {
@@ -1284,151 +1269,4 @@ export interface SceneStreamData {
   content?: string;
   done?: boolean;
   error?: string;
-}
-
-// ============================================
-// 拆书参考（Book Dissect）
-// ============================================
-
-export interface BookDissectChapterMeta {
-  number: number;
-  title: string;
-  raw_title: string;
-  word_count: number;
-  kind: 'chapter' | 'special' | 'english' | 'preamble';
-}
-
-// V1 采样式 schema（DissectResult / DissectProjectSchema 等）已随 V1 逻辑一并移除。
-
-export type BookDissectStatus = 'pending' | 'running' | 'completed' | 'failed';
-export type BookDissectStage =
-  | 'split_done'
-  | 'queued'
-  | 'splitting'
-  | 'scanning'
-  | 'dictionary'
-  | 'extracting'
-  | 'aggregating'
-  | 'synthesizing'
-  | 'done'
-  | string;
-
-export interface BookDissectTask {
-  id: string;
-  user_id: string;
-  status: BookDissectStatus;
-  progress: number;
-  stage?: BookDissectStage | null;
-  error_message?: string | null;
-  file_name?: string | null;
-  file_size: number;
-  encoding?: string | null;
-  chapter_count: number;
-  total_words: number;
-  chapters_meta?: BookDissectChapterMeta[] | null;
-  // V2 字段
-  version?: number;
-  extraction_phase?: string | null;
-  chapters_total?: number;
-  chapters_extracted?: number;
-  chapters_failed?: number;
-  sampling_mode?: string;
-  sampling_param?: number;
-  created_at: string;
-  started_at?: string | null;
-  completed_at?: string | null;
-}
-
-export interface BookDissectUploadResponse {
-  task_id: string;
-  file_name: string;
-  file_size: number;
-  encoding: string;
-  chapter_count: number;
-  total_words: number;
-  preview: BookDissectChapterMeta[];
-}
-
-// V3 R6 废弃：BookDissectApplyField / BookDissectApplyRequest / BookDissectApplyResponse 已移除。
-// 后端 POST /api/book-dissect/{task_id}/apply-to-wizard 现返 410 Gone；
-// 请改用参考包挂载 + 一键仿写路径，详见 @/frontend/src/components/ImitationDialog.tsx。
-
-
-// ============================================================
-// 拆书 V2 浏览类型
-// ============================================================
-
-export interface BookDissectV2Overview {
-  task_id: string;
-  version: number;
-  extraction_phase: string | null;
-  chapters_total: number;
-  chapters_extracted: number;
-  chapters_failed: number;
-  sampling_mode: string;
-  sampling_param: number;
-  stats: Record<string, unknown>;
-  synopsis: Record<string, unknown> | null;
-}
-
-export interface BookDissectV2ChapterSummary {
-  id: string;
-  chapter_number: number;
-  chapter_title: string | null;
-  summary: string | null;
-  extraction_status: string;
-  extraction_error: string | null;
-}
-
-export interface BookDissectV2ChapterDetail extends BookDissectV2ChapterSummary {
-  fact: Record<string, unknown> | null;
-  is_truncated: boolean;
-  segment_count: number;
-}
-
-export interface BookDissectV2DictionaryEntry {
-  id: string;
-  name: string;
-  entity_type: string;
-  aliases: string[];
-  frequency: number;
-  confidence: string;
-  sample_context: string | null;
-  source: string | null;
-}
-
-export interface BookDissectV2Entity {
-  id: string;
-  canonical_name: string;
-  entity_type: string;
-  aliases: string[];
-  profile: Record<string, unknown>;
-  first_chapter: number | null;
-  last_chapter: number | null;
-  appearance_count: number;
-  role_type: string | null;
-  parent_entity_id: string | null;
-}
-
-export interface BookDissectV2Relation {
-  id: string;
-  entity_a_id: string;
-  entity_b_id: string;
-  relation_type: string;
-  relation_category: string | null;
-  occurrence_count: number;
-  first_chapter: number | null;
-  evidence: Array<{ chapter: number; text: string }>;
-}
-
-export interface BookDissectV2Event {
-  id: string;
-  chapter_number: number;
-  event_type: string;
-  title: string;
-  description: string | null;
-  actors: string[];
-  location: string | null;
-  importance: string;
-  evidence: string | null;
 }

@@ -18,7 +18,6 @@ import {
   Wrench,
   Loader2,
   Sparkles,
-  Library,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useStore } from '@/store/index'
@@ -35,7 +34,6 @@ const NAV_ITEMS = [
   { label: '章节管理', icon: BookOpen, path: 'chapters' },
   { label: '剧情分析', icon: BarChart3, path: 'chapter-analysis' },
   { label: '写作风格', icon: Palette, path: 'writing-styles' },
-  { label: '仿写参考包', icon: Library, path: 'reference-packs' },
   { label: '记忆系统', icon: Brain, path: 'memories' },
 ] as const
 

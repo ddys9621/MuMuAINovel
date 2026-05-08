@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Pencil, Trash2, Zap, X, Loader2, RefreshCw, Layers, Search, Film, Eye, ChevronUp, Download, LayoutGrid, Sparkles } from 'lucide-react';
+import { Plus, Pencil, Trash2, Zap, X, Loader2, RefreshCw, Layers, Search, Film, Eye, ChevronUp, Download, LayoutGrid } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStore } from '@/store';
 import { useChapterSync } from '@/store/hooks';
@@ -8,12 +8,6 @@ import { SSEPostClient } from '@/utils/sseClient';
 import type { Chapter, ChapterCanGenerateResponse, ChapterGenerateRequest, PlotCardWithLinks, WritingStyle } from '@/types';
 import { SceneGenerator } from '@/components/SceneGenerator';
 import { MCPSelector } from '@/components/MCPSelector';
-import {
-  ReferencePackSelector,
-  DEFAULT_SELECTOR_VALUE,
-  type ReferencePackSelectorValue,
-} from '@/components/ReferencePackSelector';
-import { ImitationDialog } from '@/components/ImitationDialog';
 
 const STATUS_MAP: Record<string, { label: string; cls: string }> = {
   draft: { label: '草稿', cls: 'bg-gray-100 text-gray-500' },
@@ -84,9 +78,6 @@ export default function Chapters() {
   // 场景生成
   const [sceneTarget, setSceneTarget] = useState<{ outlineId: string; title: string } | null>(null);
 
-  // 一键仿写（V3 R5）
-  const [showImitationDialog, setShowImitationDialog] = useState(false);
-
   // 从章纲同步
   const [syncing, setSyncing] = useState(false);
 
@@ -119,8 +110,6 @@ export default function Chapters() {
     enable_mcp: true,
     selected_plugins: [] as string[],
   });
-  // R8：拆书参考包选择器状态（正文生成与重生成共用）
-  const [genRefPack, setGenRefPack] = useState<ReferencePackSelectorValue>(DEFAULT_SELECTOR_VALUE);
   const [genCheck, setGenCheck] = useState<ChapterCanGenerateResponse | null>(null);
   const [styles, setStyles] = useState<WritingStyle[]>([]);
   const [stylesLoaded, setStylesLoaded] = useState(false);
@@ -168,13 +157,7 @@ export default function Chapters() {
     selected_plugins: genConfig.enable_mcp && genConfig.selected_plugins.length > 0
       ? genConfig.selected_plugins
       : undefined,
-    // R8：仅 enabled 时透传拆书参考包参数
-    ...(genRefPack.enabled ? {
-      pack_ids: genRefPack.packIds.length > 0 ? genRefPack.packIds : undefined,
-      dimensions: genRefPack.dimensions.length > 0 ? genRefPack.dimensions : undefined,
-      strength: genRefPack.strength,
-    } : {}),
-  }), [genConfig, genRefPack]);
+  }), [genConfig]);
 
   const openGenerateModal = useCallback(async (chapter: Chapter, isRegenerate: boolean) => {
     setGenCheck(null);
@@ -316,12 +299,6 @@ export default function Chapters() {
       ? {
           style_id: genConfig.style_id,
           target_word_count: genConfig.target_word_count,
-          // R8：重生成也支持拆书参考包（仅 enabled 时传）
-          ...(genRefPack.enabled ? {
-            pack_ids: genRefPack.packIds.length > 0 ? genRefPack.packIds : undefined,
-            dimensions: genRefPack.dimensions.length > 0 ? genRefPack.dimensions : undefined,
-            strength: genRefPack.strength,
-          } : {}),
         }
       : buildChapterGenerateRequest()) as Record<string, unknown>;
     setShowGenModal(false);
@@ -1067,28 +1044,16 @@ export default function Chapters() {
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-sm font-medium text-content">正文内容</label>
-                  <div className="flex items-center gap-2">
-                    {loadingContent && (
-                      <span className="text-xs text-content-tertiary inline-flex items-center gap-1">
-                        <Loader2 className="w-3 h-3 animate-spin" />加载中…
-                      </span>
-                    )}
-                    {form.content && (
-                      <span className="text-xs text-content-tertiary">
-                        {form.content.length.toLocaleString()} 字
-                      </span>
-                    )}
-                    {editingId && currentProject && (
-                      <button
-                        type="button"
-                        onClick={() => setShowImitationDialog(true)}
-                        className="inline-flex items-center gap-1 text-xs text-brand hover:text-brand-600 border border-brand/30 hover:bg-brand/5 rounded-btn px-2 py-0.5 transition-colors"
-                        title="从已挂载参考包生成草稿追加到正文"
-                      >
-                        <Sparkles className="w-3 h-3" />一键仿写
-                      </button>
-                    )}
-                  </div>
+                  {loadingContent && (
+                    <span className="text-xs text-content-tertiary inline-flex items-center gap-1">
+                      <Loader2 className="w-3 h-3 animate-spin" />加载中…
+                    </span>
+                  )}
+                  {form.content && (
+                    <span className="text-xs text-content-tertiary">
+                      {form.content.length.toLocaleString()} 字
+                    </span>
+                  )}
                 </div>
                 <textarea
                   value={form.content}
@@ -1123,26 +1088,8 @@ export default function Chapters() {
         <SceneGenerator
           chapterOutlineId={sceneTarget.outlineId}
           chapterTitle={sceneTarget.title}
-          projectId={currentProject?.id}
           onClose={() => setSceneTarget(null)}
           onComplete={() => refreshChapters()}
-        />
-      )}
-
-      {/* 一键仿写弹板（V3 R5） */}
-      {editingId && currentProject && (
-        <ImitationDialog
-          isOpen={showImitationDialog}
-          projectId={currentProject.id}
-          targetChapterId={editingId}
-          targetChapterTitle={form.title || '未命名章节'}
-          onClose={() => setShowImitationDialog(false)}
-          onApply={(draft) => {
-            setForm((prev) => {
-              const sep = prev.content && !prev.content.endsWith('\n') ? '\n\n' : '';
-              return { ...prev, content: prev.content + sep + draft };
-            });
-          }}
         />
       )}
 
@@ -1204,15 +1151,6 @@ export default function Chapters() {
                   selected_plugins: val.selected,
                 }))}
               />
-              {currentProject?.id && (
-                <ReferencePackSelector
-                  projectId={currentProject.id}
-                  value={genRefPack}
-                  onChange={setGenRefPack}
-                  hint={genTarget.isRegenerate ? '让本次重生成参考拆书的笔法/节奏/语料' : '让本章正文参考拆书的笔法/方法论/语料'}
-                  disabledTitle="使用拆书参考包作为对标"
-                />
-              )}
               <div className="rounded-card border border-surface-border bg-surface/40 p-3 space-y-3">
                 <div>
                   <p className="text-sm font-medium text-content">本次生成会参考的内容</p>
