@@ -24,6 +24,10 @@ class DirectGenerateRequest(BaseModel):
     plot_card_id: str = Field(..., description="剧情卡片ID")
     writing_style_id: Optional[str] = Field(None, description="写作风格ID")
     previous_generated_content: Optional[str] = Field(None, description="前端编辑器中已有的内容（用户可能已修改）")
+    # R8 拆书参考包显式参数（任一为空则走 injector 默认）
+    pack_ids: Optional[List[str]] = Field(None, description="显式选中的拆书参考包 ID 列表")
+    dimensions: Optional[List[str]] = Field(None, description="显式选中的参考维度")
+    strength: Optional[str] = Field(None, description="参考强度：light/medium/deep")
 
 
 class PlotCardResponse(BaseModel):
@@ -106,7 +110,10 @@ async def generate_scene_stream(
                 plot_card_id=request_data.plot_card_id,
                 user_id=user_id,
                 writing_style_id=request_data.writing_style_id,
-                previous_generated_content=request_data.previous_generated_content
+                previous_generated_content=request_data.previous_generated_content,
+                pack_ids=request_data.pack_ids,
+                dimensions=request_data.dimensions,
+                strength=request_data.strength,
             ):
                 yield f"data: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"

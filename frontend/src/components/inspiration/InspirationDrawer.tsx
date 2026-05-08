@@ -19,6 +19,11 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MCPSelector } from '@/components/MCPSelector';
+import {
+  ReferencePackSelector,
+  DEFAULT_SELECTOR_VALUE as DEFAULT_REF_PACK_VALUE,
+  type ReferencePackSelectorValue,
+} from '@/components/ReferencePackSelector';
 import { useInspirationMachine } from '@/components/inspiration/useInspirationMachine';
 import {
   type GenerationArtifacts,
@@ -138,6 +143,8 @@ export default function InspirationDrawer({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [mcpSettings, setMcpSettings] = useState<MCPSelectorValue>({ enable: false, selected: [] });
+  // V3.2-B：拆书参考包选择（项目创建前选包、创建后后端自动挂载）
+  const [refPackSettings, setRefPackSettings] = useState<ReferencePackSelectorValue>(DEFAULT_REF_PACK_VALUE);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const announcedProjectIdRef = useRef('');
 
@@ -145,6 +152,7 @@ export default function InspirationDrawer({
     useProjectGeneration({
       dispatch,
       mcpSettings,
+      refPackSettings,
     });
 
   const wizardData = state.wizardData as Partial<WizardData>;
@@ -320,6 +328,7 @@ export default function InspirationDrawer({
     setManualInputOpen(false);
     setHistoryOpen(false);
     setAdvancedOpen(false);
+    setRefPackSettings(DEFAULT_REF_PACK_VALUE);
     resetArtifacts();
     reset();
   };
@@ -483,6 +492,9 @@ export default function InspirationDrawer({
               onToggle={() => setAdvancedOpen((value) => !value)}
               mcpSettings={mcpSettings}
               setMcpSettings={setMcpSettings}
+              refPackSettings={refPackSettings}
+              setRefPackSettings={setRefPackSettings}
+              hasProjectStarted={Boolean(state.projectId)}
             />
 
             {historyMessages.length > 0 && (
@@ -1045,17 +1057,30 @@ function AdvancedSection({
   onToggle,
   mcpSettings,
   setMcpSettings,
+  refPackSettings,
+  setRefPackSettings,
+  hasProjectStarted,
 }: {
   open: boolean;
   onToggle: () => void;
   mcpSettings: MCPSelectorValue;
   setMcpSettings: React.Dispatch<React.SetStateAction<MCPSelectorValue>>;
+  refPackSettings: ReferencePackSelectorValue;
+  setRefPackSettings: React.Dispatch<React.SetStateAction<ReferencePackSelectorValue>>;
+  hasProjectStarted: boolean;
 }) {
-  const summary = !mcpSettings.enable
+  // 汇总描述：MCP 状态 + 拆书参考状态
+  const mcpSummary = !mcpSettings.enable
     ? '未启用 MCP 增强'
     : mcpSettings.selected.length > 0
       ? `已启用 ${mcpSettings.selected.length} 个插件`
       : '已开启，但未选择插件';
+  const packSummary = !refPackSettings.enabled
+    ? '未启用拆书参考'
+    : refPackSettings.packIds.length > 0
+      ? `拆书参考：已选 ${refPackSettings.packIds.length} 本·${refPackSettings.strength}`
+      : `拆书参考：全部·${refPackSettings.strength}`;
+  const summary = `${packSummary}、${mcpSummary}`;
 
   return (
     <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -1071,7 +1096,14 @@ function AdvancedSection({
       </button>
 
       {open && (
-        <div className="border-t border-slate-200 px-4 py-4">
+        <div className="space-y-3 border-t border-slate-200 px-4 py-4">
+          {/* V3.2-B：拆书参考包选择 - 项目未创建前为无 projectId 模式 */}
+          <ReferencePackSelector
+            value={refPackSettings}
+            onChange={setRefPackSettings}
+            disabledTitle="拆书参考包"
+            hint={hasProjectStarted ? '项目已创建后不再重新挂载' : '项目创建后会自动挂载到项目'}
+          />
           <MCPSelector value={mcpSettings} onChange={setMcpSettings} />
         </div>
       )}

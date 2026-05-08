@@ -74,6 +74,10 @@ class ChapterGenerateRequest(BaseModel):
         None,
         description="本次章节生成选择使用的MCP插件列表"
     )
+    # R8 拆书参考包显式参数（任一为空则走 injector 默认）
+    pack_ids: Optional[List[str]] = Field(None, description="显式选中的拆书参考包 ID 列表")
+    dimensions: Optional[List[str]] = Field(None, description="显式选中的参考维度")
+    strength: Optional[str] = Field(None, description="参考强度：light/medium/deep")
 
 
 class BatchGenerateRequest(BaseModel):
