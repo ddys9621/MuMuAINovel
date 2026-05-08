@@ -1,0 +1,426 @@
+/**
+ * R8 通用：拆书参考包选择器
+ *
+ * 在各生成场景的对话框里嵌入此组件，让用户精细控制：
+ * - 是否启用拆书参考（开关）
+ * - 用哪几个参考包（多选；空 = 用项目所有挂载）
+ * - 哪些维度（多选；空 = 用各 pack 的 default_dimensions）
+ * - 强度（light / medium / deep）
+ *
+ * 父组件接住 onChange 后把字段透传到 generation API（pack_ids / dimensions / strength）。
+ *
+ * 设计文档：@/agent-docs/features/dissect_to_creation_pipeline.md §6.1
+ */
+import { useEffect, useMemo, useState } from 'react';
+import { Library, Loader2, Sparkles } from 'lucide-react';
+import { toast } from 'sonner';
+
+import { referencePackApi } from '@/services/api';
+import type {
+  ProjectReferencePackItem,
+  ReferenceDimension,
+  ReferencePackSummary,
+  ReferenceStrength,
+} from '@/types/reference_pack';
+
+const DIMENSION_LABELS: Record<ReferenceDimension, string> = {
+  synopsis: '故事梗概', // V3.2：Story Bible 层（粗粒度全局引导，放最前）
+  // V3.2-P2 模式三维度：仅作类型/类别/节奏的轻量提示
+  entities: '实体分布',
+  relations: '关系频谱',
+  events: '事件节奏',
+  methodology: '方法论',
+  style: '文风',
+  structure: '结构手法',
+  archetypes: '角色塑造',
+  worldbuilding: '世界观',
+  corpus: '灵感语料',
+};
+
+const STRENGTH_LABELS: Record<ReferenceStrength, string> = {
+  light: '轻参考',
+  medium: '中参考',
+  deep: '深参考',
+};
+
+const STRENGTH_HINT: Record<ReferenceStrength, string> = {
+  light: '每维度 ~600 字符上限；corpus top 1',
+  medium: '每维度 ~1500 字符；corpus top 2',
+  deep: '每维度 ~3500 字符；corpus top 3',
+};
+
+export interface ReferencePackSelectorValue {
+  enabled: boolean;
+  packIds: string[]; // 空数组 = 用项目所有已挂载的 ready/partial pack
+  dimensions: ReferenceDimension[]; // 空数组 = 用各 pack 的 default_dimensions
+  strength: ReferenceStrength;
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export const DEFAULT_SELECTOR_VALUE: ReferencePackSelectorValue = {
+  enabled: false,
+  packIds: [],
+  dimensions: [],
+  strength: 'medium',
+};
+
+// ============================================================
+// P2-1 性能优化：TTL 缓存
+// - 项目级缓存（projectId 为 key）：项目内反复打开多个生成对话框（30s 窗口内复用）
+// - 用户级缓存（V3.2-B：项目未创建场景）：灵感模式入口选包、拆书页仿写需要拉全部 pack 列表
+// 外部变更（挂载/卸载）调 invalidateAttachmentsCache 主动清除对应 key。
+// ============================================================
+
+const CACHE_TTL_MS = 30 * 1000;
+const USER_PACKS_CACHE_KEY = '__user_packs__';  // 用户级缓存的虚拟 key
+type _CacheEntry = { items: ProjectReferencePackItem[]; expireAt: number };
+const _attachmentsCache = new Map<string, _CacheEntry>();
+
+function _getCached(key: string): ProjectReferencePackItem[] | null {
+  const entry = _attachmentsCache.get(key);
+  if (!entry) return null;
+  if (Date.now() >= entry.expireAt) {
+    _attachmentsCache.delete(key);
+    return null;
+  }
+  return entry.items;
+}
+
+function _setCached(key: string, items: ProjectReferencePackItem[]): void {
+  _attachmentsCache.set(key, {
+    items,
+    expireAt: Date.now() + CACHE_TTL_MS,
+  });
+}
+
+/** 把 ReferencePackSummary 包装成虚拟的 ProjectReferencePackItem（未挂载场景使用）。 */
+function _wrapAsAttachment(pack: ReferencePackSummary): ProjectReferencePackItem {
+  return {
+    id: `virtual-${pack.id}`,  // 虚拟主键，仅用于 React key
+    project_id: '',
+    pack_id: pack.id,
+    pack_summary: pack,
+    default_dimensions: [],  // 未挂载时无默认维度，用 selector 最终 fallback
+    default_strength: 'medium',
+    attached_at: pack.created_at,
+  };
+}
+
+/**
+ * 供挂载/卸载/拆书变更后主动失效缓存。
+ * - 传 projectId：仅失效该项目的项目级缓存
+ * - 不传（或 'all'）：清除所有缓存（包含用户级）
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function invalidateAttachmentsCache(projectId?: string): void {
+  if (projectId && projectId !== 'all') {
+    _attachmentsCache.delete(projectId);
+  } else {
+    _attachmentsCache.clear();
+  }
+}
+
+/**
+ * V3.2-B：拆书生成任务刚完成时调，失效用户级 pack 列表缓存。 */
+// eslint-disable-next-line react-refresh/only-export-components
+export function invalidateUserPacksCache(): void {
+  _attachmentsCache.delete(USER_PACKS_CACHE_KEY);
+}
+
+interface Props {
+  /**
+   * V3.2-B：projectId 为可选。
+   * - 传：项目已存在，拉该项目挂载的 pack（原有行为）
+   * - 不传：「项目创建前选包」场景（灵感模式入口、拆书仿写 CTA）——
+   *           拉当前用户全部可用 pack，包装成虚拟挂载项
+   */
+  projectId?: string;
+  value: ReferencePackSelectorValue;
+  onChange: (v: ReferencePackSelectorValue) => void;
+  /** 场景提示，如「为本次故事大纲生成提供对标书参考」 */
+  hint?: string;
+  /** 关闭时（enabled=false）显示的标题，默认「使用拆书参考包」 */
+  disabledTitle?: string;
+}
+
+export function ReferencePackSelector({
+  projectId,
+  value,
+  onChange,
+  hint,
+  disabledTitle = '使用拆书参考包',
+}: Props) {
+  const [attachments, setAttachments] = useState<ProjectReferencePackItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [errored, setErrored] = useState(false);
+
+  // 仅当用户首次启用时拉取（懒加载，避免每个对话框打开就请求）
+  const shouldLoad = value.enabled && attachments.length === 0 && !errored;
+  useEffect(() => {
+    if (!shouldLoad) return;
+    const cacheKey = projectId || USER_PACKS_CACHE_KEY;
+    // P2-1：命中缓存时同步填充，不再请求 API
+    const cached = _getCached(cacheKey);
+    if (cached) {
+      setAttachments(cached);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+
+    // 传 projectId：拉项目挂载列表；不传：拉全用户 pack 并包装成虚拟挂载项
+    const fetcher: Promise<ProjectReferencePackItem[]> = projectId
+      ? referencePackApi.listAttachments(projectId).then((items) => items ?? [])
+      : referencePackApi
+          .list()
+          .then((packs) => (packs ?? [])
+            // 只要 ready/partial。generating/failed 不可用
+            .filter((p) => p.status === 'ready' || p.status === 'partial')
+            .map(_wrapAsAttachment)
+          );
+
+    fetcher
+      .then((list) => {
+        if (cancelled) return;
+        _setCached(cacheKey, list); // 写入缓存
+        setAttachments(list);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setErrored(true);
+        toast.error(projectId ? '加载项目挂载的参考包失败' : '加载拆书参考包列表失败');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, shouldLoad]);
+
+  // 仅展示 ready / partial 的包（generating/failed 不可用）
+  const usablePacks = useMemo(
+    () => attachments.filter(
+      (a) => a.pack_summary.status === 'ready' || a.pack_summary.status === 'partial'
+    ),
+    [attachments],
+  );
+
+  // 该 packs 集合上"至少一个 pack 提供了"的维度并集（决定哪些维度可勾选）
+  const availableDimensions = useMemo(() => {
+    const set = new Set<ReferenceDimension>(['corpus']); // corpus 永远可用
+    const targetPacks =
+      value.packIds.length > 0
+        ? usablePacks.filter((p) => value.packIds.includes(p.pack_id))
+        : usablePacks;
+    targetPacks.forEach((p) => {
+      (p.pack_summary.generated_dimensions ?? []).forEach((d: string) => {
+        set.add(d as ReferenceDimension);
+      });
+    });
+    return set;
+  }, [usablePacks, value.packIds]);
+
+  // 关闭态：只显示开关行
+  if (!value.enabled) {
+    return (
+      <div className="flex items-center justify-between rounded-btn border border-dashed border-surface-border bg-surface px-3 py-2 text-sm">
+        <div className="flex items-center gap-2 text-content-secondary">
+          <Sparkles className="h-3.5 w-3.5 text-brand/60" />
+          <span>{disabledTitle}</span>
+          {hint && <span className="text-[11px] text-content-tertiary">— {hint}</span>}
+        </div>
+        <button
+          type="button"
+          onClick={() => onChange({ ...value, enabled: true })}
+          className="rounded-pill border border-brand/40 bg-brand/5 px-3 py-1 text-xs font-medium text-brand hover:bg-brand/10"
+        >
+          启用
+        </button>
+      </div>
+    );
+  }
+
+  // 启用但加载中
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 rounded-btn border border-brand/20 bg-brand/[0.04] px-3 py-2 text-sm text-content-secondary">
+        <Loader2 className="h-3.5 w-3.5 animate-spin text-brand/70" />
+        加载项目挂载的参考包…
+      </div>
+    );
+  }
+
+  // 启用但项目未挂载任何 pack / 用户账号下未拆任何书
+  if (usablePacks.length === 0) {
+    return (
+      <div className="space-y-2 rounded-btn border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-amber-700">
+            <Library className="h-3.5 w-3.5" />
+            <span>
+              {projectId ? '项目未挂载任何就绪的参考包' : '你还没有任何拆书参考包'}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => onChange({ ...value, enabled: false })}
+            className="rounded-pill border border-surface-border bg-white px-3 py-1 text-xs text-content-secondary hover:bg-surface-hover"
+          >
+            关闭
+          </button>
+        </div>
+        <p className="text-[11px] text-amber-700/80">
+          {projectId ? (
+            <>
+              请先去
+              <a
+                href={`/project/${projectId}/reference-packs`}
+                target="_blank"
+                rel="noreferrer"
+                className="mx-1 font-medium underline-offset-2 hover:underline"
+              >
+                项目参考包
+              </a>
+              页面挂载至少一个拆书参考包，再回来启用。
+            </>
+          ) : (
+            <>
+              请先到
+              <a
+                href="/book-dissect"
+                target="_blank"
+                rel="noreferrer"
+                className="mx-1 font-medium underline-offset-2 hover:underline"
+              >
+                拆书页面
+              </a>
+              上传一本你想参考的书，拆书完成后再回来启用。
+            </>
+          )}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 rounded-btn border border-brand/25 bg-gradient-to-r from-brand/[0.05] to-emerald-500/[0.03] px-3 py-3 text-sm">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-content">
+          <Sparkles className="h-3.5 w-3.5 text-brand" />
+          <span className="font-medium">{disabledTitle}</span>
+          {hint && <span className="text-[11px] text-content-tertiary">— {hint}</span>}
+        </div>
+        <button
+          type="button"
+          onClick={() => onChange({ ...DEFAULT_SELECTOR_VALUE })}
+          className="rounded-pill border border-surface-border bg-white px-3 py-1 text-xs text-content-secondary hover:bg-surface-hover"
+        >
+          关闭
+        </button>
+      </div>
+
+      {/* 参考包多选（空 = 全部挂载的） */}
+      <div>
+        <div className="mb-1 text-xs font-medium text-content-tertiary">
+          参考包
+          <span className="ml-1 text-[11px] text-content-tertiary/70">
+            （不勾选则使用全部挂载的 {usablePacks.length} 本）
+          </span>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {usablePacks.map((p) => {
+            const checked = value.packIds.includes(p.pack_id);
+            return (
+              <button
+                key={p.pack_id}
+                type="button"
+                onClick={() => {
+                  const next = checked
+                    ? value.packIds.filter((id) => id !== p.pack_id)
+                    : [...value.packIds, p.pack_id];
+                  onChange({ ...value, packIds: next });
+                }}
+                className={`rounded-pill border px-3 py-1 text-xs transition-colors ${
+                  checked
+                    ? 'border-brand bg-brand text-white'
+                    : 'border-surface-border bg-white text-content-secondary hover:bg-surface-hover'
+                }`}
+                title={p.pack_summary.status === 'partial' ? '部分维度未生成' : ''}
+              >
+                {p.pack_summary.source_book_title || p.pack_id.slice(0, 8)}
+                {p.pack_summary.status === 'partial' && (
+                  <span className="ml-1 text-[10px] opacity-80">·部分</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 维度多选 */}
+      <div>
+        <div className="mb-1 text-xs font-medium text-content-tertiary">
+          参考维度
+          <span className="ml-1 text-[11px] text-content-tertiary/70">
+            （不勾选则使用挂载默认值）
+          </span>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {(Object.keys(DIMENSION_LABELS) as ReferenceDimension[]).map((d) => {
+            const enabledDim = availableDimensions.has(d);
+            const checked = value.dimensions.includes(d);
+            return (
+              <button
+                key={d}
+                type="button"
+                disabled={!enabledDim}
+                onClick={() => {
+                  const next = checked
+                    ? value.dimensions.filter((x) => x !== d)
+                    : [...value.dimensions, d];
+                  onChange({ ...value, dimensions: next });
+                }}
+                className={`rounded-pill border px-3 py-1 text-xs transition-colors ${
+                  !enabledDim
+                    ? 'border-surface-border text-content-tertiary opacity-40 cursor-not-allowed'
+                    : checked
+                      ? 'border-brand bg-brand text-white'
+                      : 'border-surface-border bg-white text-content-secondary hover:bg-surface-hover'
+                }`}
+              >
+                {DIMENSION_LABELS[d]}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 强度 */}
+      <div>
+        <div className="mb-1 text-xs font-medium text-content-tertiary">参考强度</div>
+        <div className="flex items-center gap-3">
+          <div className="inline-flex overflow-hidden rounded-btn border border-surface-border">
+            {(Object.keys(STRENGTH_LABELS) as ReferenceStrength[]).map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => onChange({ ...value, strength: s })}
+                className={`px-3 py-1 text-xs transition-colors ${
+                  value.strength === s
+                    ? 'bg-brand text-white'
+                    : 'bg-white text-content-secondary hover:bg-surface-hover'
+                }`}
+              >
+                {STRENGTH_LABELS[s]}
+              </button>
+            ))}
+          </div>
+          <span className="text-[11px] text-content-tertiary">
+            {STRENGTH_HINT[value.strength]}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}

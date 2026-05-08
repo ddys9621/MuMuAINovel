@@ -5,13 +5,13 @@ import { toast } from 'sonner';
 import { inspirationApi } from '../../services/api';
 import { wizardReducer } from './reducer';
 import { createInitialState } from './types';
-import type { Step, WizardData } from './types';
+import type { GenerationApiContext, OptionGenerationStep, RefinementContext, Step, WizardData } from './types';
 
 const REGENERATE_OPTIONS = new Set(['重新生成', '让AI重新生成']);
 const CUSTOM_INPUT_OPTIONS = new Set(['我自己输入书名', '我自己输入']);
 
 /** API step → 下一个显示步骤的映射 */
-const API_STEP_MAP: Record<string, { loadingStep: Step; successStep: Step }> = {
+const API_STEP_MAP: Record<OptionGenerationStep, { loadingStep: Step; successStep: Step }> = {
   title: { loadingStep: 'loading_title', successStep: 'title' },
   description: { loadingStep: 'loading_desc', successStep: 'description' },
   theme: { loadingStep: 'loading_theme', successStep: 'theme' },
@@ -19,42 +19,83 @@ const API_STEP_MAP: Record<string, { loadingStep: Step; successStep: Step }> = {
 };
 
 /** 当前 step → 需要调用的 API step */
-const NEXT_API_STEP: Record<string, 'title' | 'description' | 'theme' | 'genre'> = {
+const NEXT_API_STEP: Record<string, OptionGenerationStep> = {
   idea: 'title',
   title: 'description',
   description: 'theme',
   theme: 'genre',
 };
 
+type BuildContextInput = Partial<WizardData> & Partial<GenerationApiContext>;
+
 /** 构建 API context */
-const buildApiContext = (step: string, data: Partial<WizardData>, userInput?: string) => {
+const buildApiContext = (
+  step: OptionGenerationStep,
+  data: BuildContextInput,
+  userInput?: string,
+): GenerationApiContext => {
+  const originalIdea = (userInput || data.originalIdea || data.original_idea || '').trim();
+  const base = originalIdea ? { original_idea: originalIdea } : {};
+
   switch (step) {
-    case 'title': return { description: userInput || data.description };
-    case 'description': return { title: data.title };
-    case 'theme': return { title: data.title, description: data.description };
-    case 'genre': return { title: data.title, description: data.description, theme: data.theme };
+    case 'title': return { ...base, description: userInput || data.originalIdea || data.description };
+    case 'description': return { ...base, title: data.title };
+    case 'theme': return { ...base, title: data.title, description: data.description };
+    case 'genre': return { ...base, title: data.title, description: data.description, theme: data.theme };
     default: return {};
   }
 };
+
+const buildRefinementContext = (
+  context?: RefinementContext,
+  hint?: string,
+): RefinementContext => {
+  const trimmedHint = hint?.trim();
+  const requirements = [...(context?.requirements ?? [])];
+
+  if (trimmedHint && requirements[requirements.length - 1] !== trimmedHint) {
+    requirements.push(trimmedHint);
+  }
+
+  return {
+    requirements,
+    previousOptions: context?.previousOptions ?? [],
+  };
+};
+
+const hasRefinementContext = (context: RefinementContext) =>
+  context.requirements.length > 0 || context.previousOptions.length > 0;
 
 export function useInspirationMachine() {
   const [state, dispatch] = useReducer(wizardReducer, undefined, createInitialState);
 
   /** 通用 API 调用：生成选项 */
   const callGenerateOptions = useCallback(async (
-    apiStep: 'title' | 'description' | 'theme' | 'genre',
-    context: Partial<WizardData>,
+    apiStep: OptionGenerationStep,
+    context: BuildContextInput,
     userInput?: string,
     hint?: string,
+    refinementContext?: RefinementContext,
   ) => {
     const mapping = API_STEP_MAP[apiStep];
     dispatch({ type: 'API_LOADING', payload: mapping.loadingStep });
 
     try {
+      const trimmedHint = hint?.trim() || undefined;
+      const requestContext = buildApiContext(apiStep, context, userInput);
+      const requestRefinementContext = buildRefinementContext(refinementContext, trimmedHint);
       const requestData = {
         step: apiStep,
-        context: buildApiContext(apiStep, context, userInput),
-        ...(hint ? { hint } : {}),
+        context: requestContext,
+        ...(trimmedHint ? { hint: trimmedHint } : {}),
+        ...(hasRefinementContext(requestRefinementContext)
+          ? {
+              refinement_context: {
+                requirements: requestRefinementContext.requirements,
+                previous_options: requestRefinementContext.previousOptions,
+              },
+            }
+          : {}),
       };
 
       const response = await inspirationApi.generateOptions(requestData);
@@ -67,7 +108,12 @@ export function useInspirationMachine() {
             error: response.error
               ? `生成${stepLabel}时出错：${response.error}\n\n你可以选择：`
               : `生成的选项格式不正确（至少需要3个有效选项）\n\n你可以选择：`,
-            retryContext: { step: apiStep, context: requestData.context },
+            retryContext: {
+              step: apiStep,
+              context: requestContext,
+              hint: trimmedHint,
+              refinementContext: requestRefinementContext,
+            },
             options: response.options?.length ? response.options : ['重新生成', '我自己输入'],
           },
         });
@@ -86,6 +132,10 @@ export function useInspirationMachine() {
           },
         },
       });
+      dispatch({
+        type: 'RECORD_REFINEMENT_RESULT',
+        payload: { step: apiStep, hint: trimmedHint, options: response.options },
+      });
     } catch (error: unknown) {
       const detail =
         typeof error === 'object' &&
@@ -100,7 +150,12 @@ export function useInspirationMachine() {
         type: 'API_ERROR',
         payload: {
           error: '生成失败，请重试',
-          retryContext: { step: apiStep, context: buildApiContext(apiStep, context, userInput) },
+          retryContext: {
+            step: apiStep,
+            context: buildApiContext(apiStep, context, userInput),
+            hint: hint?.trim() || undefined,
+            refinementContext: buildRefinementContext(refinementContext, hint),
+          },
         },
       });
     }
@@ -141,7 +196,9 @@ export function useInspirationMachine() {
     dispatch({ type: 'SEND_MESSAGE', payload: input });
 
     if (state.currentStep === 'idea') {
-      await callGenerateOptions('title', {}, input);
+      const originalIdea = input.trim();
+      dispatch({ type: 'SET_WIZARD_DATA', payload: { originalIdea } });
+      await callGenerateOptions('title', { originalIdea }, originalIdea);
     } else {
       // 非 idea 阶段的自定义输入
       await handleCustomInput(input);
@@ -151,16 +208,16 @@ export function useInspirationMachine() {
   /** 重试 */
   const retry = useCallback(async () => {
     if (!state.retryContext) return;
-    const { step, context } = state.retryContext;
+    const { step, context, hint, refinementContext } = state.retryContext;
 
     // 移除上一条错误消息
     dispatch({ type: 'RETRY' });
-    await callGenerateOptions(step, context as Partial<WizardData>);
+    await callGenerateOptions(step, context, undefined, hint, refinementContext);
   }, [state.retryContext, callGenerateOptions]);
 
   /** 换一批：对当前步骤重新生成选项，可带额外提示 */
   const regenerateOptions = useCallback(async (hint?: string) => {
-    const stepMap: Record<string, 'title' | 'description' | 'theme' | 'genre'> = {
+    const stepMap: Record<string, OptionGenerationStep> = {
       title: 'title',
       description: 'description',
       theme: 'theme',
@@ -169,9 +226,20 @@ export function useInspirationMachine() {
     const apiStep = stepMap[state.currentStep];
     if (!apiStep) return;
 
+    const trimmedHint = hint?.trim() || undefined;
     dispatch({ type: 'DISABLE_LAST_OPTIONS' });
-    await callGenerateOptions(apiStep, state.wizardData, undefined, hint || undefined);
-  }, [state.currentStep, state.wizardData, callGenerateOptions]);
+    dispatch({
+      type: 'ADD_MESSAGE',
+      payload: { type: 'user', content: trimmedHint ? `重新生成：${trimmedHint}` : '重新生成' },
+    });
+    await callGenerateOptions(
+      apiStep,
+      state.wizardData,
+      undefined,
+      trimmedHint,
+      state.refinementContexts[apiStep],
+    );
+  }, [state.currentStep, state.refinementContexts, state.wizardData, callGenerateOptions]);
 
   /** 选择选项 */
   const selectOption = useCallback(async (option: string) => {

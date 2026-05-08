@@ -3,6 +3,11 @@ import { X, Loader2, Play, CheckCircle2, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { sceneGenerationApi } from '@/services/api'
+import {
+  ReferencePackSelector,
+  DEFAULT_SELECTOR_VALUE,
+  type ReferencePackSelectorValue,
+} from '@/components/ReferencePackSelector'
 
 interface PlotCardItem {
   id: string
@@ -17,15 +22,19 @@ interface PlotCardItem {
 interface SceneGeneratorProps {
   chapterOutlineId: string
   chapterTitle: string
+  /** R8：项目 ID（可选），提供后可在弹框里选择拆书参考包 */
+  projectId?: string
   onClose: () => void
   onComplete?: () => void
 }
 
-export function SceneGenerator({ chapterOutlineId, chapterTitle, onClose, onComplete }: SceneGeneratorProps) {
+export function SceneGenerator({ chapterOutlineId, chapterTitle, projectId, onClose, onComplete }: SceneGeneratorProps) {
   const [plotCards, setPlotCards] = useState<PlotCardItem[]>([])
   const [loading, setLoading] = useState(true)
   const [generatingId, setGeneratingId] = useState<string | null>(null)
   const [generatedContent, setGeneratedContent] = useState<Record<string, string>>({})
+  // R8：拆书参考包选择器状态（弹框内共用，每个卡片生成时均使用当前值）
+  const [refPack, setRefPack] = useState<ReferencePackSelectorValue>(DEFAULT_SELECTOR_VALUE)
   const abortRef = useRef<AbortController | null>(null)
 
   const loadPlotCards = useCallback(async () => {
@@ -60,6 +69,12 @@ export function SceneGenerator({ chapterOutlineId, chapterTitle, onClose, onComp
           chapter_outline_id: chapterOutlineId,
           plot_card_id: card.id,
           previous_generated_content: generatedContent[card.id] || undefined,
+          // R8：仅 enabled 时透传拆书参考包参数
+          ...(refPack.enabled ? {
+            pack_ids: refPack.packIds.length > 0 ? refPack.packIds : undefined,
+            dimensions: refPack.dimensions.length > 0 ? refPack.dimensions : undefined,
+            strength: refPack.strength,
+          } : {}),
         },
         {
           signal: controller.signal,
@@ -102,6 +117,19 @@ export function SceneGenerator({ chapterOutlineId, chapterTitle, onClose, onComp
             <X className="w-4 h-4" />
           </button>
         </div>
+
+        {/* R8 拆书参考包选择（项目内弹框级别，所有场景卡片共享配置） */}
+        {projectId && (
+          <div className="px-6 py-2 border-b border-surface-border shrink-0">
+            <ReferencePackSelector
+              projectId={projectId}
+              value={refPack}
+              onChange={setRefPack}
+              hint="本弹框内生成的所有场景共用该参考配置"
+              disabledTitle="使用拆书参考包作为对标"
+            />
+          </div>
+        )}
 
         {/* 内容 */}
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">

@@ -6,6 +6,11 @@ import { useStore } from '@/store';
 import { useCharacterSync } from '@/store/hooks';
 import { characterApi, organizationApi } from '@/services/api';
 import { MCPSelector } from '@/components/MCPSelector';
+import {
+  ReferencePackSelector,
+  DEFAULT_SELECTOR_VALUE,
+  type ReferencePackSelectorValue,
+} from '@/components/ReferencePackSelector';
 import type { Character } from '@/types';
 import { ROLE_OPTIONS, getRoleDisplayName, normalizeRoleType } from '@/utils/characterRole';
 
@@ -56,6 +61,8 @@ export default function Characters() {
   const [genForm, setGenForm] = useState({ name: '', role_type: 'supporting', background: '', requirements: '' });
   const [enableMcp, setEnableMcp] = useState(false);
   const [selectedPlugins, setSelectedPlugins] = useState<string[]>([]);
+  // R8：拆书参考包选择器
+  const [genRefPack, setGenRefPack] = useState<ReferencePackSelectorValue>(DEFAULT_SELECTOR_VALUE);
   const [filter, setFilter] = useState<'all' | 'character' | 'organization'>('all');
   const [orgMembers, setOrgMembers] = useState<Array<Record<string, unknown>>>([]);
   const [orgId, setOrgId] = useState<string | null>(null);
@@ -238,6 +245,12 @@ export default function Characters() {
         requirements: genForm.requirements.trim() || undefined,
         enable_mcp: enableMcp,
         selected_plugins: selectedPlugins,
+        // R8：仅 enabled 时透传拆书参考包参数
+        ...(genRefPack.enabled ? {
+          pack_ids: genRefPack.packIds.length > 0 ? genRefPack.packIds : undefined,
+          dimensions: genRefPack.dimensions.length > 0 ? genRefPack.dimensions : undefined,
+          strength: genRefPack.strength,
+        } : {}),
       });
       toast.success('AI 角色已生成');
       await refreshCharacters();
@@ -463,6 +476,15 @@ export default function Characters() {
                   setSelectedPlugins(selected);
                 }}
               />
+              {currentProject?.id && (
+                <ReferencePackSelector
+                  projectId={currentProject.id}
+                  value={genRefPack}
+                  onChange={setGenRefPack}
+                  hint="让本次角色生成参考拆书的角色塑造手法"
+                  disabledTitle="使用拆书参考包作为对标"
+                />
+              )}
             </div>
             <div className="flex justify-end gap-2 px-6 py-3 border-t border-surface-border bg-white flex-shrink-0">
               <button

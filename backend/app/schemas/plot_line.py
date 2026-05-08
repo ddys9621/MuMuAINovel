@@ -63,6 +63,11 @@ class PlotLineGenerateRequest(BaseModel):
     count: int = Field(3, ge=1, le=10, description="生成剧情线数量")
     enable_mcp: bool = Field(False, description="是否启用MCP工具增强")
     selected_plugins: Optional[List[str]] = Field(None, description="选择的MCP插件列表")
+    # R8/R6：拆书参考包注入。三个字段都为 None 时走「项目挂载关系自动注入」（推荐默认）。
+    # 用户在前端 ReferencePackSelector 显式覆盖时透传。
+    pack_ids: Optional[List[str]] = Field(None, description="显式参考包 ID 列表；None=用项目所有挂载包")
+    dimensions: Optional[List[str]] = Field(None, description="显式注入维度列表；None=用挂载包默认并集")
+    strength: Optional[str] = Field(None, description="注入强度 light/medium/deep；None=用挂载包最深者")
 
 
 class PlotLineReorderRequest(BaseModel):

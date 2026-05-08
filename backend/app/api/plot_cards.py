@@ -301,7 +301,7 @@ async def generate_plot_cards(
         # 使用用户配置的 AI 服务创建生成服务实例
         plot_generation_service = PlotGenerationService(user_ai_service)
         
-        # 调用生成服务
+        # 调用生成服务（R6/R8：透传拆书参考包字段，未传则用项目挂载关系自动注入）
         cards = await plot_generation_service.generate_plot_cards(
             db=db,
             project_id=generate_data.project_id,
@@ -313,7 +313,10 @@ async def generate_plot_cards(
             custom_prompt=generate_data.prompt,
             enable_mcp=generate_data.enable_mcp,
             selected_plugins=generate_data.selected_plugins,
-            user_id=getattr(request.state, 'user_id', None)
+            user_id=getattr(request.state, 'user_id', None),
+            pack_ids=generate_data.pack_ids,
+            dimensions=generate_data.dimensions,
+            strength=generate_data.strength,
         )
         
         # 处理返回的 tags 字段

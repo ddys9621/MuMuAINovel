@@ -31,7 +31,12 @@ class ChapterRegenerateRequest(BaseModel):
     style_id: Optional[int] = Field(None, description="写作风格ID")
     target_word_count: int = Field(3000, description="目标字数", ge=500, le=10000)
     focus_areas: List[str] = Field(default_factory=list, description="重点优化方向")
-    
+
+    # R8 拆书参考包显式参数（任一为空则走 injector 默认）
+    pack_ids: Optional[List[str]] = Field(None, description="显式选中的拆书参考包 ID 列表")
+    dimensions: Optional[List[str]] = Field(None, description="显式选中的参考维度")
+    strength: Optional[str] = Field(None, description="参考强度：light/medium/deep")
+
     # 版本管理
     save_as_version: bool = Field(True, description="是否保存为新版本")
     version_note: Optional[str] = Field(None, description="版本说明", max_length=500)
