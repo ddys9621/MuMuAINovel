@@ -23,10 +23,6 @@ const Memories = lazy(() => import('@/pages/Memories'))
 const Settings = lazy(() => import('@/pages/Settings'))
 const MCPPlugins = lazy(() => import('@/pages/MCPPlugins'))
 const UserManagement = lazy(() => import('@/pages/UserManagement'))
-const BookDissect = lazy(() => import('@/pages/BookDissect'))
-const ReferencePackLibrary = lazy(() => import('@/pages/ReferencePackLibrary'))
-const ReferencePackDetail = lazy(() => import('@/pages/ReferencePackDetail'))
-const ProjectReferencePacks = lazy(() => import('@/pages/ProjectReferencePacks'))
 
 export default function App() {
   return (
@@ -40,9 +36,6 @@ export default function App() {
           <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
             <Route path="/" element={<ProjectList />} />
             <Route path="/projects" element={<ProjectList />} />
-            <Route path="/book-dissect" element={<BookDissect />} />
-            <Route path="/reference-packs" element={<ReferencePackLibrary />} />
-            <Route path="/reference-packs/:packId" element={<ReferencePackDetail />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/mcp-plugins" element={<MCPPlugins />} />
             <Route path="/user-management" element={<UserManagement />} />
@@ -61,7 +54,6 @@ export default function App() {
             <Route path="chapter-analysis" element={<ChapterAnalysis />} />
             <Route path="writing-styles" element={<WritingStyles />} />
             <Route path="memories" element={<Memories />} />
-            <Route path="reference-packs" element={<ProjectReferencePacks />} />
           </Route>
 
           {/* 独立页面 */}

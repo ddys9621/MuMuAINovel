@@ -207,18 +207,7 @@ class ChapterRegenerator:
         # 修改指令
         prompt_parts.append(modification_instructions)
         prompt_parts.append("\n---\n")
-
-        # 拆书参考注入（R5-S5）：通过 project_context 由 API 层提前组装好的拆书参考段
-        # 设计文档：@/agent-docs/features/dissect_to_creation_pipeline.md §A.2
-        dissect_user = project_context.get('dissect_reference_user') if isinstance(project_context, dict) else None
-        if dissect_user:
-            prompt_parts.append(f"## 📚 拆书参考（仅作写作手法参考，不要复刻原书具体内容）\n\n{dissect_user}")
-            prompt_parts.append("\n---\n")
-        dissect_system = project_context.get('dissect_reference_system') if isinstance(project_context, dict) else None
-        if dissect_system:
-            prompt_parts.append(f"## 🎨 文风参考（来自拆书）\n\n{dissect_system}")
-            prompt_parts.append("\n---\n")
-
+        
         # 项目背景信息
         prompt_parts.append(f"""## 🌍 项目背景信息
 
@@ -285,11 +274,7 @@ class ChapterRegenerator:
 现在开始：
 """)
         
-        full_prompt = "\n".join(prompt_parts)
-        return prompt_service.apply_project_generation_prompt(
-            full_prompt,
-            project_context.get('generation_prompt', '') if isinstance(project_context, dict) else ''
-        )
+        return "\n".join(prompt_parts)
     
     def calculate_content_diff(
         self,

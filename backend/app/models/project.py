@@ -27,7 +27,6 @@ class Project(Base):
     world_location = Column(Text, comment="地理位置")
     world_atmosphere = Column(Text, comment="氛围基调")
     world_rules = Column(Text, comment="世界规则")
-    generation_prompt = Column(Text, comment="最终提交提示词补充")
     
     # 项目配置
     chapter_count = Column(Integer, comment="章节数量")

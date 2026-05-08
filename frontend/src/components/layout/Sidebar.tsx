@@ -8,8 +8,6 @@ import {
   PanelLeft,
   Sparkles,
   Flame,
-  BookOpen,
-  Library,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { BrandLogo } from '@/components/ui/BrandLogo'
@@ -24,8 +22,6 @@ const navGroups = [
     label: '创作台',
     items: [
       { icon: LayoutGrid, label: '我的项目', path: '/projects' },
-      { icon: BookOpen, label: '拆书参考', path: '/book-dissect' },
-      { icon: Library, label: '参考库', path: '/reference-packs' },
       { icon: Settings, label: '设置', path: '/settings' },
       { icon: Puzzle, label: 'MCP 插件', path: '/mcp-plugins' },
     ],

@@ -219,8 +219,7 @@ from app.api import (
     auth, users, settings, writing_styles, memories,
     mcp_plugins, admin, inspiration,
     plot_cards, plot_lines, chapter_outlines, story_outlines,
-    world_rules, scene_generation, book_dissect,
-    reference_pack, imitation
+    world_rules, scene_generation
 )
 
 app.include_router(auth.router, prefix="/api")
@@ -250,16 +249,6 @@ app.include_router(world_rules.router, prefix="/api")
 
 # 场景生成API（场景级创作循环）
 app.include_router(scene_generation.router, prefix="/api")
-
-# 拆书参考 API（上传参考书反向拆解为创作素材）
-app.include_router(book_dissect.router, prefix="/api")
-
-# V3 仿写：参考包（独立资料库）+ 项目挂载关联
-app.include_router(reference_pack.router, prefix="/api")
-app.include_router(reference_pack.project_router, prefix="/api")
-
-# V3 仿写 R5：项目内章节编辑器的一键仿写（preview / SSE 流式）
-app.include_router(imitation.router, prefix="/api")
 
 # 静态文件目录（兼容打包后的环境）
 if getattr(sys, 'frozen', False):

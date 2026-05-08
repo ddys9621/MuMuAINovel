@@ -513,40 +513,6 @@ async def generate_character(
             user_input=user_input
         )
 
-        # 拆书参考注入（R6）：追加 archetypes / entities 维度为角色生成提供塑造手法参考
-        # 设计文档：@/agent-docs/features/dissect_to_creation_pipeline.md §A.2
-        try:
-            from app.services.reference_pack_injector import ReferencePackInjector
-            _injector = ReferencePackInjector()
-            _anchor = (
-                f"{request.role_type or ''} {user_input or ''}".strip()
-                or "角色生成"
-            )
-            _ref_block = await _injector.build_reference_block(
-                db, request.project_id,
-                scene="character_generation",
-                # 角色场景默认只要 archetypes 维度；corpus 也作为同类角色样本供 LLM 参考
-                fallback_dimensions=("archetypes", "corpus"),
-                pack_ids=request.pack_ids,
-                dimensions=request.dimensions,
-                strength=request.strength,
-                anchor_query=_anchor,
-            )
-            if _ref_block.user_segment:
-                prompt = (
-                    f"{prompt}\n\n{_ref_block.user_segment}\n\n"
-                    "请参考上述拆书中的角色塑造手法（仅作方法参考，"
-                    "不要复刻原书人名与具体设定），生成本项目的角色。"
-                )
-                logger.info(
-                    f"📚 [R6-角色] 注入拆书参考包 {len(_ref_block.used_packs)} 个，"
-                    f"维度={_ref_block.used_dimensions}"
-                )
-        except ValueError:
-            pass
-        except Exception as _e:  # pragma: no cover - 防御性兜底
-            logger.warning(f"[R6-角色] 拆书参考注入失败（已跳过）: {_e}")
-
         # 调用AI生成角色
         logger.info(f"🎯 开始为项目 {request.project_id} 生成角色")
         logger.info(f"  - 角色名：{request.name or 'AI生成'}")
@@ -984,38 +950,6 @@ async def generate_character_stream(
                 project_context=project_context,
                 user_input=user_input
             )
-
-            # 拆书参考注入（R6）：同同步版本
-            try:
-                from app.services.reference_pack_injector import ReferencePackInjector
-                _injector = ReferencePackInjector()
-                _anchor = (
-                    f"{request.role_type or ''} {user_input or ''}".strip()
-                    or "角色生成"
-                )
-                _ref_block = await _injector.build_reference_block(
-                    db, request.project_id,
-                    scene="character_generation",
-                    fallback_dimensions=("archetypes", "corpus"),
-                    pack_ids=request.pack_ids,
-                    dimensions=request.dimensions,
-                    strength=request.strength,
-                    anchor_query=_anchor,
-                )
-                if _ref_block.user_segment:
-                    prompt = (
-                        f"{prompt}\n\n{_ref_block.user_segment}\n\n"
-                        "请参考上述拆书中的角色塑造手法（仅作方法参考，"
-                        "不要复刻原书人名与具体设定），生成本项目的角色。"
-                    )
-                    yield await SSEResponse.send_progress(
-                        f"📚 已注入拆书参考包（{','.join(_ref_block.used_dimensions)}）",
-                        33,
-                    )
-            except ValueError:
-                pass
-            except Exception as _e:  # pragma: no cover
-                logger.warning(f"[R6-角色-流式] 拆书参考注入失败（已跳过）: {_e}")
 
             yield await SSEResponse.send_progress("调用AI服务生成角色...", 35)
             logger.info(f"🎯 开始为项目 {request.project_id} 生成角色（SSE流式）")

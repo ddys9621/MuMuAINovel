@@ -233,104 +233,6 @@ async def ensure_plot_cards_scene_columns(engine: AsyncEngine):
             logger.info("✅ plot_cards.generation_order already exists")
 
 
-async def ensure_book_dissect_v2_columns(engine: AsyncEngine):
-    """Ensure V2 columns exist on book_dissect_tasks table.
-
-    V2 字段：
-    - version (int, default=1)
-    - extraction_phase (varchar 50)
-    - chapters_total / chapters_extracted / chapters_failed (int, default=0)
-    - sampling_mode (varchar 20, default='all')
-    - sampling_param (int, default=1)
-    """
-    v2_columns = [
-        ("version", "INTEGER DEFAULT 1"),
-        ("extraction_phase", "VARCHAR(50)"),
-        ("chapters_total", "INTEGER DEFAULT 0"),
-        ("chapters_extracted", "INTEGER DEFAULT 0"),
-        ("chapters_failed", "INTEGER DEFAULT 0"),
-        ("sampling_mode", "VARCHAR(20) DEFAULT 'all'"),
-        ("sampling_param", "INTEGER DEFAULT 1"),
-    ]
-
-    async with engine.begin() as conn:
-        for col_name, col_def in v2_columns:
-            if not await column_exists(conn, "book_dissect_tasks", col_name):
-                logger.info("🔧 Adding book_dissect_tasks.%s column (V2)", col_name)
-                await apply_sql(conn, [
-                    f"ALTER TABLE book_dissect_tasks ADD COLUMN {col_name} {col_def}",
-                ])
-            else:
-                logger.info("✅ book_dissect_tasks.%s already exists", col_name)
-
-        # 既有任务统一标记为 V1（version=1 是默认值，但显式刷一次确保正确）
-        await apply_sql(conn, [
-            "UPDATE book_dissect_tasks SET version = 1 WHERE version IS NULL",
-        ])
-
-
-async def ensure_book_dissect_v31_columns(engine: AsyncEngine):
-    """Ensure V3.1 columns exist on book_dissect_tasks table.
-
-    V3.1 字段：
-    - extraction_engine (varchar 20, default='auto')
-      路由策略：auto(由 LongContextRouter 决定) / chunked(强制逐章) / long_context(强制一次性)
-    """
-    v31_columns = [
-        ("extraction_engine", "VARCHAR(20) DEFAULT 'auto'"),
-    ]
-
-    async with engine.begin() as conn:
-        for col_name, col_def in v31_columns:
-            if not await column_exists(conn, "book_dissect_tasks", col_name):
-                logger.info("🔧 Adding book_dissect_tasks.%s column (V3.1)", col_name)
-                await apply_sql(conn, [
-                    f"ALTER TABLE book_dissect_tasks ADD COLUMN {col_name} {col_def}",
-                ])
-            else:
-                logger.info("✅ book_dissect_tasks.%s already exists", col_name)
-
-
-async def ensure_reference_pack_v32_columns(engine: AsyncEngine):
-    """Ensure V3.2 columns exist on reference_packs table.
-
-    V3.2 字段（synopsis 复活 + V3.2-P2 模式三维度）：
-    - synopsis_json (TEXT, NULL) Tab6 故事类型骨架（Story Bible）
-    - entities_json / relations_json / events_json (TEXT, NULL) V3.2-P2 聚合模式三维度
-      见 @/agent-docs/features/dissect_to_creation_pipeline.md §A.6 / §A.7
-    """
-    v32_columns = [
-        ("synopsis_json", "TEXT NULL"),
-        # V3.2-P2：聚合模式三维度（不调 LLM，从 V2 表纯统计聚合产出）
-        ("entities_json", "TEXT NULL"),
-        ("relations_json", "TEXT NULL"),
-        ("events_json", "TEXT NULL"),
-    ]
-
-    async with engine.begin() as conn:
-        for col_name, col_def in v32_columns:
-            if not await column_exists(conn, "reference_packs", col_name):
-                logger.info("🔧 Adding reference_packs.%s column (V3.2)", col_name)
-                await apply_sql(conn, [
-                    f"ALTER TABLE reference_packs ADD COLUMN {col_name} {col_def}",
-                ])
-            else:
-                logger.info("✅ reference_packs.%s already exists", col_name)
-
-
-async def ensure_project_generation_prompt_column(engine: AsyncEngine):
-    """Ensure project-level generation prompt adjustment exists."""
-    async with engine.begin() as conn:
-        if not await column_exists(conn, "projects", "generation_prompt"):
-            logger.info("🔧 Adding projects.generation_prompt column")
-            await apply_sql(conn, [
-                """ALTER TABLE projects
-                ADD COLUMN generation_prompt TEXT""",
-            ])
-        else:
-            logger.info("✅ projects.generation_prompt already exists")
-
-
 async def run_auto_migrations(engine: AsyncEngine):
     try:
         await ensure_chapter_outline_columns(engine)
@@ -339,10 +241,6 @@ async def run_auto_migrations(engine: AsyncEngine):
         await ensure_plot_line_columns(engine)
         await ensure_chapter_outline_scene_pov_columns(engine)  # 专业网文版字段
         await ensure_plot_cards_scene_columns(engine)  # 场景级创作循环字段
-        await ensure_book_dissect_v2_columns(engine)  # 拆书 V2 字段
-        await ensure_book_dissect_v31_columns(engine)  # 拆书 V3.1 字段
-        await ensure_reference_pack_v32_columns(engine)  # 拆书 V3.2 synopsis 复活
-        await ensure_project_generation_prompt_column(engine)
         logger.info("✅ Auto migrations finished")
     except Exception as exc:
         logger.error("❌ Auto migrations failed: %s", exc, exc_info=True)
