@@ -276,7 +276,7 @@ async def world_building_generator(
         # 解析结果
         yield await SSEResponse.send_progress("解析AI返回结果...", 80)
 
-        from app.utils.json_cleaner import clean_and_parse_json
+        from app.utils.json_cleaner import clean_and_parse_json, repair_json_with_llm
 
         world_data = {}
         try:
@@ -285,15 +285,39 @@ async def world_building_generator(
                 expected_type='object',
                 log_prefix="[世界观生成]"
             )
-                    
+
         except json.JSONDecodeError as e:
-            logger.error(f"世界构建JSON解析失败: {e}")
-            world_data = {
-                "time_period": "AI返回格式错误，请重试",
-                "location": "AI返回格式错误，请重试",
-                "atmosphere": "AI返回格式错误，请重试",
-                "rules": "AI返回格式错误，请重试"
-            }
+            # 一次兜底失败：调用 LLM 做"只改格式、不动内容"的二次修复
+            logger.warning(f"[世界观生成] 首次解析失败，触发 LLM 二次格式修复: {e}")
+            yield await SSEResponse.send_progress("⚠️ 格式异常，AI 正在二次修复...", 82)
+            try:
+                world_data = await repair_json_with_llm(
+                    accumulated_text,
+                    user_ai_service=user_ai_service,
+                    expected_type='object',
+                    provider=provider,
+                    model=model,
+                    schema_hint="time_period, location, atmosphere, rules",
+                    log_prefix="[世界观生成]",
+                )
+                logger.info("[世界观生成] LLM 二次格式修复成功")
+                yield await SSEResponse.send_progress("✅ 二次修复成功", 84)
+            except Exception as repair_err:
+                logger.error(f"[世界观生成] LLM 二次格式修复仍失败: {repair_err}")
+                # 最终兜底：保留原始内容预览，避免用户重试时完全丢失生成结果
+                preview = (accumulated_text or "").strip()
+                if len(preview) > 1500:
+                    preview = preview[:1500] + "...(已截断)"
+                fallback_rules = (
+                    f"AI返回格式错误，请重试。\n\n原始内容预览：\n{preview}"
+                    if preview else "AI返回格式错误，请重试"
+                )
+                world_data = {
+                    "time_period": "AI返回格式错误，请重试",
+                    "location": "AI返回格式错误，请重试",
+                    "atmosphere": "AI返回格式错误，请重试",
+                    "rules": fallback_rules,
+                }
         # 保存到数据库
         yield await SSEResponse.send_progress("保存到数据库...", 90)
         
