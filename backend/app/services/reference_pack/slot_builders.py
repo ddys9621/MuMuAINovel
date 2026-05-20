@@ -198,14 +198,32 @@ async def build_output_spec(db: AsyncSession, ctx: Any) -> str:
 # ============================================================
 
 def _make_dissect_builder(dimension: str) -> Callable[[AsyncSession, Any], Awaitable[str]]:
-    """工厂：生成读取指定维度预压缩字段的 builder。"""
+    """工厂：生成读取指定维度预压缩字段的 builder。
+
+    优先级：
+    1. 优先返回 V4.4 K5 三档预压缩字段（pack.<dim>_<strength>）
+    2. fallback：如果预压缩字段为空，返回对应 _json 字段截断版
+       （Phase 1 期间预压缩生成器还没写，先用 fallback 让链路跑通）
+    """
+    # strength → 大致截断字符数（与 STRENGTH_BUDGET 1.5 倍换算）
+    STRENGTH_CHAR_LIMIT = {"light": 130, "medium": 400, "deep": 1000}
+
     async def _builder(db: AsyncSession, ctx: Any) -> str:
         pack = await _get_first_attached_pack(db, ctx.project_id)
         if not pack:
             return ""
         strength = _get_strength_for(ctx, dimension)
+        # 1. 优先取预压缩
         text = pack.get_precompressed(dimension, strength)
-        return text or ""
+        if text:
+            return text
+        # 2. fallback：取 _json 字段截断版
+        json_text = getattr(pack, f"{dimension}_json", None)
+        if not json_text:
+            return ""
+        max_chars = STRENGTH_CHAR_LIMIT.get(strength, 400)
+        return json_text[:max_chars] + ("…(截断)" if len(json_text) > max_chars else "")
+
     _builder.__name__ = f"build_dissect_{dimension}"
     return _builder
 
