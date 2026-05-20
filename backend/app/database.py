@@ -18,6 +18,12 @@ logger = get_logger(__name__)
 # database -> app.models -> model -> database 的循环导入。
 from app.models.analysis_task import AnalysisTask  # noqa: F401
 from app.models.batch_generation_task import BatchGenerationTask  # noqa: F401
+from app.models.book_dissect_task import BookDissectTask  # noqa: F401
+from app.models.book_dissect_chapter_fact import BookDissectChapterFact  # noqa: F401
+from app.models.book_dissect_dictionary import BookDissectDictionary  # noqa: F401
+from app.models.book_dissect_entity import BookDissectEntity  # noqa: F401
+from app.models.book_dissect_relation import BookDissectRelation  # noqa: F401
+from app.models.book_dissect_event import BookDissectEvent  # noqa: F401
 from app.models.chapter import Chapter  # noqa: F401
 from app.models.chapter_causal_link import ChapterCausalLink  # noqa: F401
 from app.models.chapter_consistency_issue import ChapterConsistencyIssue  # noqa: F401
@@ -32,6 +38,8 @@ from app.models.plot_card import PlotCard  # noqa: F401
 from app.models.plot_line import PlotLine  # noqa: F401
 from app.models.project import Project  # noqa: F401
 from app.models.project_default_style import ProjectDefaultStyle  # noqa: F401
+from app.models.project_reference_pack import ProjectReferencePack  # noqa: F401
+from app.models.reference_pack import ReferencePack  # noqa: F401
 from app.models.regeneration_task import RegenerationTask  # noqa: F401
 from app.models.relationship import (  # noqa: F401
     CharacterRelationship,

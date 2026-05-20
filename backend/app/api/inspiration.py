@@ -19,7 +19,7 @@ logger = get_logger(__name__)
 INSPIRATION_PROMPTS = {
     "title": {
         "system": """你是一位专业的小说创作顾问。
-用户想写的小说：{description}
+用户原始灵感：{original_idea}
 
 请根据用户的想法，生成6个吸引人的书名建议，要求：
 1. 符合用户的故事构思
@@ -33,11 +33,12 @@ INSPIRATION_PROMPTS = {
 }}
 
 只返回纯JSON，不要有其他文字。""",
-        "user": "用户的想法：{description}\n请生成6个书名建议"
+        "user": "用户的原始灵感：{original_idea}\n请生成6个书名建议"
     },
     
     "description": {
         "system": """你是一位专业的小说创作顾问。
+用户原始灵感：{original_idea}
 用户已经确定了书名：{title}
 
 请生成6个精彩的小说简介，要求：
@@ -50,12 +51,13 @@ INSPIRATION_PROMPTS = {
 {{"prompt":"选择一个简介：","options":["简介1","简介2","简介3","简介4","简介5","简介6"]}}
 
 只返回纯JSON，不要有其他文字，不要换行。""",
-        "user": "书名是：{title}，请生成6个简介选项"
+        "user": "原始灵感：{original_idea}\n书名是：{title}，请生成6个简介选项"
     },
     
     "theme": {
         "system": """你是一位专业的小说创作顾问。
 用户的小说信息：
+- 原始灵感：{original_idea}
 - 书名：{title}
 - 简介：{description}
 
@@ -69,12 +71,13 @@ INSPIRATION_PROMPTS = {
 {{"prompt":"这本书的核心主题是什么？","options":["主题1","主题2","主题3","主题4","主题5","主题6"]}}
 
 只返回纯JSON，不要有其他文字，不要换行。""",
-        "user": "书名：{title}\n简介：{description}\n请生成6个主题选项"
+        "user": "原始灵感：{original_idea}\n书名：{title}\n简介：{description}\n请生成6个主题选项"
     },
     
     "genre": {
         "system": """你是一位专业的小说创作顾问。
 用户的小说信息：
+- 原始灵感：{original_idea}
 - 书名：{title}
 - 简介：{description}
 - 主题：{theme}
@@ -89,7 +92,7 @@ INSPIRATION_PROMPTS = {
 {{"prompt":"选择类型标签（可多选）：","options":["类型1","类型2","类型3","类型4","类型5","类型6"]}}
 
 只返回紧凑的纯JSON，不要换行，不要有其他文字。""",
-        "user": "书名：{title}\n简介：{description}\n主题：{theme}\n请生成6个类型标签"
+        "user": "原始灵感：{original_idea}\n书名：{title}\n简介：{description}\n主题：{theme}\n请生成6个类型标签"
     }
 }
 
@@ -272,6 +275,76 @@ def _normalize_options(options: List[Any], step: str) -> List[str]:
     return normalized[:10]
 
 
+def _coerce_text(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _normalize_text_list(value: Any) -> List[str]:
+    if not value:
+        return []
+
+    raw_items = value if isinstance(value, list) else [value]
+    items: List[str] = []
+    seen = set()
+
+    for item in raw_items:
+        text = _coerce_text(item)
+        if not text:
+            continue
+        if text not in seen:
+            items.append(text)
+            seen.add(text)
+
+    return items
+
+
+def _extract_refinement_context(data: Dict[str, Any], hint: str) -> tuple[List[str], List[str]]:
+    raw_context = data.get("refinement_context") or data.get("refinementContext") or {}
+    if not isinstance(raw_context, dict):
+        raw_context = {}
+
+    requirements = _normalize_text_list(raw_context.get("requirements"))
+    previous_options = _normalize_text_list(
+        raw_context.get("previous_options") or raw_context.get("previousOptions")
+    )
+
+    if hint and (not requirements or requirements[-1] != hint):
+        requirements.append(hint)
+
+    return requirements, previous_options
+
+
+def _build_refinement_instruction(requirements: List[str], previous_options: List[str]) -> str:
+    sections: List[str] = []
+
+    if requirements:
+        requirement_lines = "\n".join(
+            f"{index}. {requirement}" for index, requirement in enumerate(requirements, start=1)
+        )
+        sections.append(
+            "用户连续改稿要求（按时间顺序，必须全部满足；后续要求是在前序基础上追加/收紧，不是替换）：\n"
+            f"{requirement_lines}"
+        )
+
+    if previous_options:
+        option_lines = "\n".join(f"- {option}" for option in previous_options[:10])
+        sections.append(
+            "上一轮候选结果（本轮不要简单重复，除非用户明确要求保留）：\n"
+            f"{option_lines}"
+        )
+
+    if not sections:
+        return ""
+
+    return (
+        "\n\n【连续对话上下文】\n"
+        + "\n\n".join(sections)
+        + "\n请基于原始灵感、已确定信息和以上连续要求重新生成。"
+    )
+
+
 def _salvage_options_response(content: str, step: str) -> Dict[str, Any]:
     cleaned = _strip_code_fence(content)
 
@@ -342,9 +415,15 @@ async def generate_options(
         {
             "step": "title",  // title/description/theme/genre
             "context": {
+                "original_idea": "...",
                 "title": "...",
                 "description": "...",
                 "theme": "..."
+            },
+            "hint": "本轮额外要求（可选）",
+            "refinement_context": {
+                "requirements": ["连续改稿要求1", "连续改稿要求2"],
+                "previous_options": ["上一轮候选1", "上一轮候选2"]
             }
         }
     
@@ -356,12 +435,16 @@ async def generate_options(
     """
     max_retries = 3
     
-    hint = data.get("hint", "").strip()
+    hint = _coerce_text(data.get("hint"))
+    requirements, previous_options = _extract_refinement_context(data, hint)
+    refinement_instruction = _build_refinement_instruction(requirements, previous_options)
 
     for attempt in range(max_retries):
         try:
             step = data.get("step", "title")
             context = data.get("context", {})
+            if not isinstance(context, dict):
+                context = {}
 
             logger.info(f"灵感模式：生成{step}阶段的选项（第{attempt + 1}次尝试）")
 
@@ -376,19 +459,25 @@ async def generate_options(
             prompt_template = INSPIRATION_PROMPTS[step]
 
             # 准备格式化参数（提供默认值避免KeyError）
+            original_idea = _coerce_text(
+                context.get("original_idea")
+                or context.get("originalIdea")
+                or context.get("description")
+            )
             format_params = {
-                "title": context.get("title", ""),
-                "description": context.get("description", ""),
-                "theme": context.get("theme", "")
+                "original_idea": original_idea or "未提供",
+                "title": _coerce_text(context.get("title")),
+                "description": _coerce_text(context.get("description")),
+                "theme": _coerce_text(context.get("theme"))
             }
 
             # 格式化系统提示词
             system_prompt = prompt_template["system"].format(**format_params)
             user_prompt = prompt_template["user"].format(**format_params)
 
-            # 注入用户的额外提示
-            if hint:
-                system_prompt += f"\n\n⚠️ 用户对本轮生成有额外要求：{hint}\n请重点参考此要求来生成选项，确保生成结果符合用户期望。"
+            if refinement_instruction:
+                system_prompt += refinement_instruction
+                user_prompt += "\n\n请把连续改稿要求视为同一段对话历史，不要只参考最后一句。"
             
             # 如果是重试，在提示词中强调格式要求
             if attempt > 0:

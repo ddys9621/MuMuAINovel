@@ -875,6 +875,20 @@ class PromptService:
             return template.format(**kwargs)
         except KeyError as e:
             raise ValueError(f"缺少必需的参数: {e}")
+
+    @staticmethod
+    def apply_project_generation_prompt(base_prompt: str, generation_prompt: str = "") -> str:
+        """追加项目级最终提示词微调。"""
+        prompt_text = (generation_prompt or "").strip()
+        if not prompt_text:
+            return base_prompt
+
+        return f"""{base_prompt}
+
+【用户最终提示词微调】
+以下内容来自项目世界设定页，会作为最终提交给 AI 的补充要求，优先级高于通用写作偏好；如果与本任务的输出格式要求冲突，仍必须遵守本任务的格式要求。
+
+{prompt_text}"""
     
     @classmethod
     def get_world_building_prompt(cls, title: str, theme: str, genre: str = "") -> str:

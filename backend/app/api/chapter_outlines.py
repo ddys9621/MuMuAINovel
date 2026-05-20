@@ -513,7 +513,11 @@ async def generate_chapter_outlines(
             custom_prompt=generate_data.prompt,
             enable_mcp=generate_data.enable_mcp,
             selected_plugins=generate_data.selected_plugins,
-            user_id=getattr(request.state, 'user_id', None)
+            user_id=getattr(request.state, 'user_id', None),
+            # R8 拆书参考包显式参数透传
+            pack_ids=generate_data.pack_ids,
+            dimensions=generate_data.dimensions,
+            strength=generate_data.strength,
         )
         
         for outline in outlines:

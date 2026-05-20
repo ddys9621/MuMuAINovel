@@ -7,6 +7,11 @@ import { useOutlineSync } from '@/store/hooks'
 import { usePlotCardSync, usePlotLineSync, useChapterOutlineSync } from '@/store/plotHooks'
 import { wizardStreamApi, outlineApi, chapterOutlineLinkApi, plotLineApi } from '@/services/api'
 import { MCPSelector } from '@/components/MCPSelector'
+import {
+  ReferencePackSelector,
+  DEFAULT_SELECTOR_VALUE,
+  type ReferencePackSelectorValue,
+} from '@/components/ReferencePackSelector'
 import { Modal as UiModal, type ModalSize } from '@/components/ui/Modal'
 import type {
   Outline, OutlineCreate, OutlineUpdate,
@@ -162,6 +167,8 @@ function OutlinesView({ outlines, projectId, createOutline, updateOutline, delet
   const [genForm, setGenForm] = useState({ narrative_perspective: '第三人称', chapter_count: 30, target_words: 100000, requirements: '' })
   const [genEnableMcp, setGenEnableMcp] = useState(false)
   const [genPlugins, setGenPlugins] = useState<string[]>([])
+  // R8：拆书参考包选择器状态（默认关；disabled 时不传任何 R8 字段走"自动模式"）
+  const [genRefPack, setGenRefPack] = useState<ReferencePackSelectorValue>(DEFAULT_SELECTOR_VALUE)
   const [viewingOutline, setViewingOutline] = useState<Outline | null>(null)
   const [expandedOutlineId, setExpandedOutlineId] = useState<string | null>(null)
   const [linkedPlotLines, setLinkedPlotLines] = useState<Record<string, Array<{ id: string; title: string; description?: string; line_type?: string }>>>({})
@@ -211,6 +218,12 @@ function OutlinesView({ outlines, projectId, createOutline, updateOutline, delet
           requirements: genForm.requirements.trim() || undefined,
           enable_mcp: genEnableMcp,
           selected_plugins: genPlugins,
+          // R8：仅 enabled 时传递拆书参考包参数（否则后端走默认自动模式）
+          ...(genRefPack.enabled ? {
+            pack_ids: genRefPack.packIds.length > 0 ? genRefPack.packIds : undefined,
+            dimensions: genRefPack.dimensions.length > 0 ? genRefPack.dimensions : undefined,
+            strength: genRefPack.strength,
+          } : {}),
         },
         {
           onProgress: (msg) => { toast.info(msg, { id: 'outline-gen' }) },
@@ -355,6 +368,15 @@ function OutlinesView({ outlines, projectId, createOutline, updateOutline, delet
               <textarea value={genForm.requirements} onChange={e => setGenForm(f => ({ ...f, requirements: e.target.value }))} placeholder="对大纲的特殊要求..." rows={2} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand outline-none resize-none" />
             </div>
             <MCPSelector value={{ enable: genEnableMcp, selected: genPlugins }} onChange={({ enable, selected }) => { setGenEnableMcp(enable); setGenPlugins(selected) }} />
+            {projectId && (
+              <ReferencePackSelector
+                projectId={projectId}
+                value={genRefPack}
+                onChange={setGenRefPack}
+                hint="让本次故事大纲参考拆书的方法论/结构/世界观"
+                disabledTitle="使用拆书参考包作为对标书"
+              />
+            )}
           </div>
           <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
             <button onClick={() => setShowGenModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
@@ -1220,6 +1242,8 @@ function ChapterOutlinesView({ chapterOutlines, projectId, createChapterOutline,
   const [genForm, setGenForm] = useState({ chapter_count: 5, target_word_count: 3000, prompt: '', plot_line_id: '', auto_generate_plot_cards: true })
   const [genEnableMcp, setGenEnableMcp] = useState(false)
   const [genPlugins, setGenPlugins] = useState<string[]>([])
+  // R8：拆书参考包选择器
+  const [genRefPack, setGenRefPack] = useState<ReferencePackSelectorValue>(DEFAULT_SELECTOR_VALUE)
 
   // 关联管理
   const [expandedLinkId, setExpandedLinkId] = useState<string | null>(null)
@@ -1327,6 +1351,12 @@ function ChapterOutlinesView({ chapterOutlines, projectId, createChapterOutline,
         prompt: genForm.prompt.trim() || undefined,
         enable_mcp: genEnableMcp,
         selected_plugins: genPlugins,
+        // R8：仅 enabled 时透传拆书参考包参数
+        ...(genRefPack.enabled ? {
+          pack_ids: genRefPack.packIds.length > 0 ? genRefPack.packIds : undefined,
+          dimensions: genRefPack.dimensions.length > 0 ? genRefPack.dimensions : undefined,
+          strength: genRefPack.strength,
+        } : {}),
       })
     } catch { /* hook 已 toast */ } finally { setGenerating(false) }
   }
@@ -1496,6 +1526,15 @@ function ChapterOutlinesView({ chapterOutlines, projectId, createChapterOutline,
               <span>同时自动生成关联剧情卡片</span>
             </label>
             <MCPSelector value={{ enable: genEnableMcp, selected: genPlugins }} onChange={({ enable, selected }) => { setGenEnableMcp(enable); setGenPlugins(selected) }} />
+            {projectId && (
+              <ReferencePackSelector
+                projectId={projectId}
+                value={genRefPack}
+                onChange={setGenRefPack}
+                hint="让本次章纲参考拆书的结构手法/节奏密度"
+                disabledTitle="使用拆书参考包作为对标"
+              />
+            )}
             <p className="text-xs text-content-secondary">将从第 {sorted.length > 0 ? sorted[sorted.length - 1].chapter_number + 1 : 1} 章开始生成。</p>
           </div>
           <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">

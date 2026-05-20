@@ -11,6 +11,7 @@ class ProjectBase(BaseModel):
     theme: Optional[str] = Field(None, description="主题")
     genre: Optional[str] = Field(None, description="小说类型")
     target_words: Optional[int] = Field(None, description="目标字数")
+    generation_prompt: Optional[str] = Field(None, description="最终提交提示词补充")
     narrative_perspective: Optional[str] = Field(None, description="叙事视角")
     chapter_count: Optional[int] = Field(None, ge=1, description="chapter count")
     character_count: Optional[int] = Field(None, ge=1, description="character count")
@@ -34,6 +35,7 @@ class ProjectUpdate(BaseModel):
     world_location: Optional[str] = None
     world_atmosphere: Optional[str] = None
     world_rules: Optional[str] = None
+    generation_prompt: Optional[str] = None
     chapter_count: Optional[int] = None
     narrative_perspective: Optional[str] = None
     character_count: Optional[int] = None
@@ -51,6 +53,7 @@ class ProjectResponse(ProjectBase):
     world_location: Optional[str] = None
     world_atmosphere: Optional[str] = None
     world_rules: Optional[str] = None
+    generation_prompt: Optional[str] = None
     chapter_count: Optional[int] = None
     narrative_perspective: Optional[str] = None
     character_count: Optional[int] = None

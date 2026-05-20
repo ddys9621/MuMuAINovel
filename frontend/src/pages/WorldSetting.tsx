@@ -18,6 +18,11 @@ import { useStore } from '@/store';
 import { useProjectSync } from '@/store/hooks';
 import { wizardStreamApi } from '@/services/api';
 import { MCPSelector } from '@/components/MCPSelector';
+import {
+  ReferencePackSelector,
+  DEFAULT_SELECTOR_VALUE,
+  type ReferencePackSelectorValue,
+} from '@/components/ReferencePackSelector';
 
 interface WorldBlock {
   key: 'world_time_period' | 'world_location' | 'world_atmosphere' | 'world_rules';
@@ -29,6 +34,17 @@ interface WorldBlock {
   glow: string;
   placeholder: string;
   description: string;
+}
+
+interface WorldSettingForm {
+  title: string;
+  theme: string;
+  genre: string;
+  generation_prompt: string;
+  world_time_period: string;
+  world_location: string;
+  world_atmosphere: string;
+  world_rules: string;
 }
 
 const BLOCKS: WorldBlock[] = [
@@ -88,7 +104,13 @@ export default function WorldSetting() {
   const [showRegenModal, setShowRegenModal] = useState(false);
   const [regenEnableMcp, setRegenEnableMcp] = useState(false);
   const [regenPlugins, setRegenPlugins] = useState<string[]>([]);
-  const [form, setForm] = useState({
+  // R8：拆书参考包选择器
+  const [regenRefPack, setRegenRefPack] = useState<ReferencePackSelectorValue>(DEFAULT_SELECTOR_VALUE);
+  const [form, setForm] = useState<WorldSettingForm>({
+    title: '',
+    theme: '',
+    genre: '',
+    generation_prompt: '',
     world_time_period: '',
     world_location: '',
     world_atmosphere: '',
@@ -98,6 +120,10 @@ export default function WorldSetting() {
   useEffect(() => {
     if (currentProject) {
       setForm({
+        title: currentProject.title || '',
+        theme: currentProject.theme || '',
+        genre: currentProject.genre || '',
+        generation_prompt: currentProject.generation_prompt || '',
         world_time_period: currentProject.world_time_period || '',
         world_location: currentProject.world_location || '',
         world_atmosphere: currentProject.world_atmosphere || '',
@@ -116,6 +142,16 @@ export default function WorldSetting() {
         {
           enable_mcp: regenEnableMcp,
           selected_plugins: regenPlugins,
+          title: form.title.trim(),
+          theme: form.theme,
+          genre: form.genre,
+          generation_prompt: form.generation_prompt,
+          // R8：仅 enabled 时透传拆书参考包参数
+          ...(regenRefPack.enabled ? {
+            pack_ids: regenRefPack.packIds.length > 0 ? regenRefPack.packIds : undefined,
+            dimensions: regenRefPack.dimensions.length > 0 ? regenRefPack.dimensions : undefined,
+            strength: regenRefPack.strength,
+          } : {}),
         },
         {
           onProgress: (msg) => toast.info(msg, { id: 'regen-world' }),
@@ -156,9 +192,16 @@ export default function WorldSetting() {
 
   const handleSave = async () => {
     if (!currentProject) return;
+    if (!form.title.trim()) {
+      toast.error('书名不能为空');
+      return;
+    }
     setSaving(true);
     try {
-      await updateProject(currentProject.id, form);
+      await updateProject(currentProject.id, {
+        ...form,
+        title: form.title.trim(),
+      });
       toast.success('世界设定已保存');
       setEditing(false);
     } catch {
@@ -171,6 +214,10 @@ export default function WorldSetting() {
   const handleCancel = () => {
     if (currentProject) {
       setForm({
+        title: currentProject.title || '',
+        theme: currentProject.theme || '',
+        genre: currentProject.genre || '',
+        generation_prompt: currentProject.generation_prompt || '',
         world_time_period: currentProject.world_time_period || '',
         world_location: currentProject.world_location || '',
         world_atmosphere: currentProject.world_atmosphere || '',
@@ -182,6 +229,7 @@ export default function WorldSetting() {
 
   const filledBlocks = BLOCKS.filter((block) => form[block.key].trim()).length;
   const totalChars = BLOCKS.reduce((sum, block) => sum + form[block.key].trim().length, 0);
+  const promptChars = form.generation_prompt.trim().length;
   const hasContent = filledBlocks > 0;
 
   return (
@@ -208,7 +256,7 @@ export default function WorldSetting() {
                 </p>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <SummaryPill
                   label="完成模块"
                   value={`${filledBlocks}/${BLOCKS.length}`}
@@ -223,6 +271,11 @@ export default function WorldSetting() {
                   label="当前状态"
                   value={editing ? '编辑中' : hasContent ? '已成稿' : '空白'}
                   hint={editing ? '可直接修改' : '支持 AI 重生成'}
+                />
+                <SummaryPill
+                  label="提示词"
+                  value={`${promptChars} 字`}
+                  hint={promptChars > 0 ? '已启用微调' : '未填写'}
                 />
               </div>
             </div>
@@ -271,6 +324,66 @@ export default function WorldSetting() {
               </div>
             )}
           </div>
+        </div>
+      </section>
+
+      <section className="rounded-[24px] border border-surface-border bg-white p-5 shadow-card">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-content">项目信息与最终提示词</h2>
+            <p className="mt-1 text-sm leading-6 text-content-secondary">
+              这里会影响后续提交给 AI 的项目上下文。最终提示词会追加到章节、场景、剧情和世界观重生成的最终 prompt 末尾。
+            </p>
+          </div>
+          <span className="rounded-pill bg-brand/6 px-3 py-1 text-xs font-medium text-brand">
+            项目级微调
+          </span>
+        </div>
+
+        <div className="mt-5 grid gap-4 lg:grid-cols-3">
+          <ProjectField
+            label="书名"
+            value={form.title}
+            editing={editing}
+            placeholder="输入书名"
+            onChange={(value) => setForm((prev) => ({ ...prev, title: value }))}
+          />
+          <ProjectField
+            label="主题"
+            value={form.theme}
+            editing={editing}
+            placeholder="输入主题"
+            onChange={(value) => setForm((prev) => ({ ...prev, theme: value }))}
+          />
+          <ProjectField
+            label="类型"
+            value={form.genre}
+            editing={editing}
+            placeholder="如：都市、玄幻、悬疑"
+            onChange={(value) => setForm((prev) => ({ ...prev, genre: value }))}
+          />
+        </div>
+
+        <div className="mt-4">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <label className="text-sm font-medium text-content">最终提示词微调</label>
+            <span className="text-xs text-content-tertiary">{promptChars} 字</span>
+          </div>
+          {editing ? (
+            <textarea
+              value={form.generation_prompt}
+              onChange={(e) => setForm((prev) => ({ ...prev, generation_prompt: e.target.value }))}
+              placeholder="写会影响最终提交 prompt 的补充要求，例如：节奏更快、减少解释、对白更口语、每场戏必须有冲突。"
+              rows={6}
+              className="min-h-[160px] w-full rounded-[18px] border border-surface-border bg-surface/40 px-4 py-3 text-sm leading-7 text-content outline-none transition focus:border-brand/30 focus:bg-white focus:ring-4 focus:ring-brand/10 resize-none"
+            />
+          ) : (
+            <div className="min-h-[120px] rounded-[18px] border border-surface-border bg-surface/40 p-4">
+              <p className="whitespace-pre-wrap text-sm leading-7 text-content-secondary">
+                {form.generation_prompt.trim() || '未填写。'}
+              </p>
+            </div>
+          )}
         </div>
       </section>
 
@@ -371,6 +484,17 @@ export default function WorldSetting() {
                   setRegenPlugins(selected);
                 }}
               />
+              {currentProject?.id && (
+                <div className="mt-3">
+                  <ReferencePackSelector
+                    projectId={currentProject.id}
+                    value={regenRefPack}
+                    onChange={setRegenRefPack}
+                    hint="让本次重生成参考拆书的世界观建模手法"
+                    disabledTitle="使用拆书参考包作为对标"
+                  />
+                </div>
+              )}
             </div>
 
             <div className="mt-6 flex flex-wrap justify-end gap-2">
@@ -390,6 +514,38 @@ export default function WorldSetting() {
               />
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProjectField({
+  label,
+  value,
+  editing,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  editing: boolean;
+  placeholder: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div>
+      <label className="mb-2 block text-sm font-medium text-content">{label}</label>
+      {editing ? (
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className="h-11 w-full rounded-[14px] border border-surface-border bg-surface/40 px-3 text-sm text-content outline-none transition focus:border-brand/30 focus:bg-white focus:ring-4 focus:ring-brand/10"
+        />
+      ) : (
+        <div className="flex min-h-11 items-center rounded-[14px] border border-surface-border bg-surface/40 px-3 text-sm text-content-secondary">
+          {value.trim() || '未填写'}
         </div>
       )}
     </div>

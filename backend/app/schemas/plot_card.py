@@ -68,6 +68,10 @@ class PlotCardGenerateRequest(BaseModel):
     extend_from_card_id: Optional[str] = Field(None, description="基于现有卡片延伸")
     enable_mcp: bool = Field(False, description="是否启用MCP工具增强")
     selected_plugins: Optional[List[str]] = Field(None, description="选择的MCP插件列表")
+    # R6/R8：拆书参考包注入（None=用项目挂载关系自动注入）
+    pack_ids: Optional[List[str]] = Field(None, description="显式参考包 ID 列表")
+    dimensions: Optional[List[str]] = Field(None, description="显式注入维度列表")
+    strength: Optional[str] = Field(None, description="注入强度 light/medium/deep")
 
 
 class PlotCardReorderRequest(BaseModel):
