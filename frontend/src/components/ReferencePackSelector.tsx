@@ -12,7 +12,7 @@
  * 设计文档：@/agent-docs/features/dissect_to_creation_pipeline.md §6.1
  */
 import { useEffect, useMemo, useState } from 'react';
-import { Library, Loader2, Sparkles } from 'lucide-react';
+import { ChevronDown, ChevronRight, Library, Loader2, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { referencePackApi } from '@/services/api';
@@ -153,6 +153,8 @@ export function ReferencePackSelector({
   const [attachments, setAttachments] = useState<ProjectReferencePackItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [errored, setErrored] = useState(false);
+  // V4：默认隐藏维度+强度（V4 后端自动决策），用户可点开'高级设置'查看 V3 兼容选项
+  const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
 
   // 仅当用户首次启用时拉取（懒加载，避免每个对话框打开就请求）
   const shouldLoad = value.enabled && attachments.length === 0 && !errored;
@@ -358,12 +360,20 @@ export function ReferencePackSelector({
         </div>
       </div>
 
-      {/* 维度多选 */}
+      {/* V4 提示 + 高级设置折叠 */}
+      <V4HintAndAdvancedToggle
+        showAdvanced={showAdvanced}
+        onToggle={() => setShowAdvanced((v) => !v)}
+      />
+
+      {showAdvanced && (
+      <>
+      {/* 维度多选（V3 兼容；V4 后端按场景+模型档位自动决策） */}
       <div>
         <div className="mb-1 text-xs font-medium text-content-tertiary">
           参考维度
           <span className="ml-1 text-[11px] text-content-tertiary/70">
-            （不勾选则使用挂载默认值）
+            （不勾选则使用挂载默认值；V4 装配会自适应覆盖）
           </span>
         </div>
         <div className="flex flex-wrap gap-1.5">
@@ -396,7 +406,7 @@ export function ReferencePackSelector({
         </div>
       </div>
 
-      {/* 强度 */}
+      {/* 强度（V3 兼容；V4 后端按场景+模型档位自动决策） */}
       <div>
         <div className="mb-1 text-xs font-medium text-content-tertiary">参考强度</div>
         <div className="flex items-center gap-3">
@@ -420,6 +430,36 @@ export function ReferencePackSelector({
             {STRENGTH_HINT[value.strength]}
           </span>
         </div>
+      </div>
+      </>
+      )}
+    </div>
+  );
+}
+
+// V4 提示 + 高级设置折叠按钮（与 V4 设计 §6 配套）
+function V4HintAndAdvancedToggle({
+  showAdvanced,
+  onToggle,
+}: {
+  showAdvanced: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="rounded border border-blue-100 bg-blue-50/60 px-3 py-2 text-[11px] text-blue-700">
+      <div className="flex items-center justify-between gap-2">
+        <span>
+          <strong className="font-semibold">V4 自动装配</strong>：系统会按章节场景
+          + 所选模型档位（S/M/L/XL）自动决定该用哪些维度、什么强度。无需手工选。
+        </span>
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex shrink-0 items-center gap-1 rounded border border-blue-200 bg-white px-2 py-0.5 text-[11px] text-blue-700 hover:bg-blue-50"
+        >
+          {showAdvanced ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          高级设置（V3 兼容）
+        </button>
       </div>
     </div>
   );
