@@ -225,6 +225,36 @@ class SceneGenerationService:
         except Exception as _e:  # pragma: no cover - 防御性兜底
             logger.warning(f"[R5-场景生成] 拆书参考注入失败（已跳过）: {_e}")
 
+        # 🆕 V4.1 K2 桥段位置约束（章纲含 bridge_id 时追加到 dissect_user_segment）
+        try:
+            from app.services.reference_pack import (
+                build_v4_bridge_constraint_only,
+                fetch_bridge_context,
+            )
+            if chapter_outline and getattr(chapter_outline, "bridge_id", None):
+                _bridge_ctx = await fetch_bridge_context(db, chapter_outline)
+                if _bridge_ctx:
+                    _v4_bridge_seg = await build_v4_bridge_constraint_only(
+                        db, project.id,
+                        scene="scene_generation",
+                        bridge_position=chapter_outline.bridge_position,
+                        bridge_context=_bridge_ctx,
+                        chapter_outline_id=chapter_outline.id,
+                        target_word_count=plot_card.word_count_target or 500,
+                    )
+                    if _v4_bridge_seg:
+                        dissect_user_segment = (
+                            f"{dissect_user_segment}\n\n{_v4_bridge_seg}".strip()
+                            if dissect_user_segment
+                            else _v4_bridge_seg
+                        )
+                        logger.info(
+                            f"🎯 [V4.1 K2 scene] 注入桥段约束 "
+                            f"position={chapter_outline.bridge_position}"
+                        )
+        except Exception as _be:  # pragma: no cover
+            logger.warning(f"[V4.1 K2 scene] 桥段约束注入失败（已跳过）: {_be}")
+
         # ========== 构建提示词 ==========
 
         if previous_content or generated_scenes_content:

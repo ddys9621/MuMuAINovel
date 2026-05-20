@@ -131,3 +131,97 @@ def _extract_dissect_only(prompt: AssembledPrompt) -> str:
         return ""
 
     return "\n\n".join(out)
+
+
+async def build_v4_bridge_constraint_only(
+    db: AsyncSession,
+    project_id: str,
+    scene: str = "chapter_content",
+    model_name: str = "deepseek-v3",
+    *,
+    bridge_position: Optional[str] = None,
+    bridge_context: Optional[dict[str, Any]] = None,
+    chapter_outline_id: Optional[str] = None,
+    target_word_count: int = 3000,
+) -> str:
+    """V4 K2 桥段位置约束适配器 — 仅返回桥段约束块，不返回拆书维度。
+
+    使用场景：现有挂载点已经在用 v3 ReferencePackInjector（cherry-pick 恢复），
+    职责分工：
+    - v3 ReferencePackInjector 负责拆书维度（methodology / style / structure / ...）
+    - V4 此函数负责 K2 桥段位置约束（C1/C2/C3/C4 模板）
+
+    Returns:
+        K2 桥段约束字符串。无桥段（bridge_position 为空）→ ""
+    """
+    if not bridge_position or not bridge_context:
+        return ""
+
+    try:
+        ctx = AssemblyContext(
+            scene=scene,
+            model_name=model_name,
+            project_id=project_id,
+            chapter_outline_id=chapter_outline_id,
+            target_word_count=target_word_count,
+            bridge_position=bridge_position,
+            bridge_context=bridge_context,
+        )
+        prompt = await PromptAssembler().assemble(db, ctx)
+    except Exception as exc:
+        logger.warning(
+            "[v4_compat] 桥段约束装配失败: scene=%s position=%s err=%s",
+            scene, bridge_position, exc,
+        )
+        return ""
+
+    # 只取以【🎯 开头的桥段约束段
+    out: list[str] = []
+    for block in prompt.user_blocks:
+        text = block.get("text", "")
+        if text.lstrip().startswith("【🎯"):
+            out.append(text)
+
+    return "\n\n".join(out)
+
+
+async def fetch_bridge_context(
+    db: AsyncSession, chapter_outline: Any
+) -> Optional[dict[str, Any]]:
+    """根据 ChapterOutline 取出桥段上下文（含 next_bridge_goal）。
+
+    Args:
+        chapter_outline: ChapterOutline ORM 对象（含 bridge_id）
+
+    Returns:
+        bridge_context dict，或 None（章纲无 bridge_id / 桥段不存在）
+    """
+    if not chapter_outline or not getattr(chapter_outline, "bridge_id", None):
+        return None
+
+    try:
+        from sqlalchemy import select
+        from app.models.plot_bridge import PlotBridge
+
+        bridge = (await db.execute(
+            select(PlotBridge).where(PlotBridge.id == chapter_outline.bridge_id)
+        )).scalar_one_or_none()
+        if not bridge:
+            return None
+
+        # 查下一桥段
+        next_bridge = (await db.execute(
+            select(PlotBridge)
+            .where(PlotBridge.project_id == bridge.project_id)
+            .where(PlotBridge.bridge_number == bridge.bridge_number + 1)
+        )).scalar_one_or_none()
+
+        return {
+            "title": bridge.title,
+            "goal": bridge.goal,
+            "showoff_point": bridge.showoff_point,
+            "next_bridge_goal": next_bridge.goal if next_bridge else "（下一桥段未设定）",
+        }
+    except Exception as exc:
+        logger.warning("[v4_compat] fetch_bridge_context 失败: %s", exc)
+        return None
