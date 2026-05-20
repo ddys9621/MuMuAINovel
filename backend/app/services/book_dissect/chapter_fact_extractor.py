@@ -124,6 +124,10 @@ class ChapterFactExtractor:
                 system_prompt=sys_prompt,
                 temperature=self.DEFAULT_TEMPERATURE,
                 max_tokens=self.MAX_TOKENS,
+                # P2 修复：启用 JSON mode，强制模型输出合法 JSON
+                # （DeepSeek/Qwen/OpenAI 都支持；Anthropic 自动忽略）
+                # 配合 json-repair 本地兜底 + prompt 中文引号规则，三层防护
+                response_format={"type": "json_object"},
             )
         except Exception as exc:
             logger.error("[拆书V2-章节抽取-%s] LLM 调用失败: %s", segment_label, exc)
