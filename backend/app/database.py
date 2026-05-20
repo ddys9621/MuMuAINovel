@@ -34,6 +34,7 @@ from app.models.character_known_info import CharacterKnownInfo  # noqa: F401
 from app.models.generation_history import GenerationHistory  # noqa: F401
 from app.models.memory import PlotAnalysis, StoryMemory  # noqa: F401
 from app.models.narrative_promise import NarrativePromise  # noqa: F401
+from app.models.plot_bridge import PlotBridge  # noqa: F401
 from app.models.plot_card import PlotCard  # noqa: F401
 from app.models.plot_line import PlotLine  # noqa: F401
 from app.models.project import Project  # noqa: F401

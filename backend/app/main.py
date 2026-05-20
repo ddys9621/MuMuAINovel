@@ -245,6 +245,10 @@ app.include_router(plot_cards.router, prefix="/api")
 app.include_router(plot_lines.router, prefix="/api")
 app.include_router(chapter_outlines.router, prefix="/api")
 
+# V4.1 K2 桥段四章结构 API
+from app.api import plot_bridges as _plot_bridges
+app.include_router(_plot_bridges.router, prefix="/api")
+
 # 世界规则系统API
 app.include_router(world_rules.router, prefix="/api")
 
