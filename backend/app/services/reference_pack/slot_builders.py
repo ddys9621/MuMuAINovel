@@ -133,29 +133,25 @@ async def build_chapter_outline(db: AsyncSession, ctx: Any) -> str:
 async def build_bridge_position(db: AsyncSession, ctx: Any) -> str:
     """K2 桥段位置约束（章节级，不缓存）。
 
-    Phase 1 骨架：返回基础约束模板。完整 4 套 prompt 模板留 Phase 2 P2-3 补全。
+    Phase 2 完整版：使用 bridge_position_prompts 的 4 套 prompt 模板。
     """
     if not ctx.bridge_position or not ctx.bridge_context:
         return ""
 
-    pos = ctx.bridge_position
-    bridge_title = ctx.bridge_context.get("title", "未命名桥段")
-    bridge_goal = ctx.bridge_context.get("goal", "")
-    showoff = ctx.bridge_context.get("showoff_point", "")
+    from app.services.reference_pack.bridge_position_prompts import (
+        format_position_constraint,
+    )
 
-    POSITION_NAMES = {
-        "intro": "C1 代入+信息差（5:5）",
-        "build": "C2 拉扯+开装（9:1）",
-        "payoff": "C3 兑现爽点（无钩子）",
-        "aftermath": "C4 善后+下一目标",
-    }
-    pos_name = POSITION_NAMES.get(pos, pos)
-
-    return f"""本章 = 桥段「{bridge_title}」 {pos_name}
-- 桥段目标：{bridge_goal}
-- 桥段装逼点：{showoff}
-
-【V4.3 骨架版本，完整 4 套位置约束模板见 Phase 2 P2-3】"""
+    return format_position_constraint(
+        position=ctx.bridge_position,
+        bridge_title=ctx.bridge_context.get("title", "未命名桥段"),
+        bridge_goal=ctx.bridge_context.get("goal", ""),
+        bridge_showoff=ctx.bridge_context.get("showoff_point", ""),
+        target_word_count=ctx.target_word_count or 3000,
+        next_bridge_goal=ctx.bridge_context.get(
+            "next_bridge_goal", "（下一桥段未设定）"
+        ),
+    )
 
 
 async def build_history_full(db: AsyncSession, ctx: Any) -> str:
