@@ -78,6 +78,10 @@ class ChapterOutlineGenerateRequest(BaseModel):
     enable_mcp: bool = Field(False, description="是否启用MCP工具增强")
     selected_plugins: Optional[List[str]] = Field(None, description="选择的MCP插件列表")
     auto_generate_plot_cards: bool = Field(True, description="是否自动生成剧情卡片（章纲生成时同时生成关联的剧情卡片）")
+    # R8 拆书参考包显式参数（任一为空则走 injector 默认）
+    pack_ids: Optional[List[str]] = Field(None, description="显式选中的拆书参考包 ID 列表")
+    dimensions: Optional[List[str]] = Field(None, description="显式选中的参考维度")
+    strength: Optional[str] = Field(None, description="参考强度：light/medium/deep")
 
 
 class ChapterOutlineReorderRequest(BaseModel):

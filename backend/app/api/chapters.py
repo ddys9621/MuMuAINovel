@@ -1815,7 +1815,51 @@ async def generate_chapter_content_stream(
                     logger.info(f"📚 MCP工具收集参考资料：{len(mcp_reference_materials)} 字符")
                     logger.info(f"  - 使用的工具: {', '.join(tools_used)}")
                     logger.info(f"  - 规划耗时: {planning_time:.2f}秒")
-                
+
+                # 拆书参考注入（R5-S3）：把已挂载参考包的 style/methodology/corpus 等拼到生成参数
+                # user_segment → mcp_references；system_segment（style 维度）→ style_content
+                # 设计文档：@/agent-docs/features/dissect_to_creation_pipeline.md §A.2
+                try:
+                    from app.services.reference_pack_injector import ReferencePackInjector
+                    _injector = ReferencePackInjector()
+                    _anchor = (
+                        f"{current_chapter.title or ''} "
+                        f"{current_outline_content[:300] if current_outline_content else ''}"
+                    ).strip() or "章节正文"
+                    _ref_block = await _injector.build_reference_block(
+                        db_session, project.id,
+                        scene="chapter_content",
+                        pack_ids=generate_request.pack_ids,
+                        dimensions=generate_request.dimensions,
+                        strength=generate_request.strength,
+                        anchor_query=_anchor,
+                    )
+                    if _ref_block.user_segment:
+                        mcp_reference_materials = (
+                            f"{mcp_reference_materials}\n\n{_ref_block.user_segment}".strip()
+                            if mcp_reference_materials
+                            else _ref_block.user_segment
+                        )
+                    if _ref_block.system_segment:
+                        # 拆书 style 维度并入项目内已有 writing_style（叠加注入，互不冲突）
+                        style_content = (
+                            f"{style_content}\n\n{_ref_block.system_segment}".strip()
+                            if style_content
+                            else _ref_block.system_segment
+                        )
+                    if not _ref_block.is_empty:
+                        logger.info(
+                            f"📚 [R5-章节正文] 注入拆书参考包 {len(_ref_block.used_packs)} 个，"
+                            f"维度={_ref_block.used_dimensions}，强度={_ref_block.used_strength}"
+                        )
+                        _dims_label = ','.join(_ref_block.used_dimensions)
+                        yield f"data: {json.dumps({'type': 'progress', 'message': f'📚 已注入拆书参考包（{_dims_label}）', 'progress': 33}, ensure_ascii=False)}\n\n"
+                except ValueError:
+                    # 项目未挂载参考包 → 优雅跳过
+                    pass
+                except Exception as _e:  # pragma: no cover - 防御性兜底
+                    logger.warning(f"[R5-章节正文] 拆书参考注入失败（已跳过）: {_e}")
+
                 # 根据是否有前置内容选择不同的提示词，并应用写作风格、记忆增强、剧情卡片和MCP参考资料
                 if previous_content:
                     prompt = prompt_service.get_chapter_generation_with_context_prompt(
@@ -1860,6 +1904,11 @@ async def generate_chapter_content_stream(
                         linked_cards_context=linked_cards_context,
                         mcp_references=mcp_reference_materials
                     )
+
+                prompt = prompt_service.apply_project_generation_prompt(
+                    prompt,
+                    project.generation_prompt or ''
+                )
                 
                 if mcp_reference_materials:
                     logger.info(f"📖 已整合MCP参考资料（{len(mcp_reference_materials)}字符）到章节生成提示词")
@@ -3021,6 +3070,11 @@ async def generate_single_chapter_for_batch(
             target_word_count=target_word_count,
             memory_context=memory_context
         )
+
+    prompt = prompt_service.apply_project_generation_prompt(
+        prompt,
+        project.generation_prompt or ''
+    )
     
     # 非流式生成内容
     full_content = ""
@@ -3147,8 +3201,41 @@ async def regenerate_chapter_stream(
                 for c in characters
             ]) if characters else '暂无角色信息',
             'chapter_outline': outline.summary if outline else chapter.summary or '暂无大纲',
-            'previous_context': ''  # 可以后续扩展添加前置章节上下文
+            'previous_context': '',  # 可以后续扩展添加前置章节上下文
+            'generation_prompt': project.generation_prompt if project else ''
         }
+
+        # 拆书参考注入（R5-S5）：通过 project_context 把已挂载参考包的 user/system 段传进 regenerator
+        # 设计文档：@/agent-docs/features/dissect_to_creation_pipeline.md §A.2
+        try:
+            from app.services.reference_pack_injector import ReferencePackInjector
+            _injector = ReferencePackInjector()
+            _anchor = (
+                f"{chapter.title or ''} "
+                f"{(outline.summary if outline else (chapter.summary or ''))[:300]}"
+            ).strip() or "章节重生成"
+            _ref_block = await _injector.build_reference_block(
+                db, chapter.project_id,
+                scene="chapter_regenerate",
+                pack_ids=regenerate_request.pack_ids,
+                dimensions=regenerate_request.dimensions,
+                strength=regenerate_request.strength,
+                anchor_query=_anchor,
+            )
+            if _ref_block.user_segment:
+                project_context['dissect_reference_user'] = _ref_block.user_segment
+            if _ref_block.system_segment:
+                project_context['dissect_reference_system'] = _ref_block.system_segment
+            if not _ref_block.is_empty:
+                logger.info(
+                    f"📚 [R5-章节重生成] 注入拆书参考包 {len(_ref_block.used_packs)} 个，"
+                    f"维度={_ref_block.used_dimensions}，强度={_ref_block.used_strength}"
+                )
+        except ValueError:
+            # 项目未挂载参考包 → 优雅跳过
+            pass
+        except Exception as _e:  # pragma: no cover - 防御性兜底
+            logger.warning(f"[R5-章节重生成] 拆书参考注入失败（已跳过）: {_e}")
     except Exception as e:
         logger.error(f"获取项目上下文失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"获取项目上下文失败: {str(e)}")
