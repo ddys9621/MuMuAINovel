@@ -37,6 +37,7 @@ from app.services.reference_pack.policy_tables import (
     get_policy,
     get_corpus_top_k,
 )
+from app.services.reference_pack.v4_compat import build_v4_dissect_segment
 
 __all__ = [
     "AssemblyContext",
@@ -52,4 +53,5 @@ __all__ = [
     "get_model_tier",
     "get_policy",
     "get_corpus_top_k",
+    "build_v4_dissect_segment",
 ]
