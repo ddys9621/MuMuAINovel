@@ -200,29 +200,36 @@ async def build_output_spec(db: AsyncSession, ctx: Any) -> str:
 def _make_dissect_builder(dimension: str) -> Callable[[AsyncSession, Any], Awaitable[str]]:
     """工厂：生成读取指定维度预压缩字段的 builder。
 
-    优先级：
-    1. 优先返回 V4.4 K5 三档预压缩字段（pack.<dim>_<strength>）
-    2. fallback：如果预压缩字段为空，返回对应 _json 字段截断版
-       （Phase 1 期间预压缩生成器还没写，先用 fallback 让链路跑通）
+    优先级（V4.4 K5 三档预压缩生效后）：
+    1. 优先返回预压缩字段（pack.<dim>_<strength>）→ 由拆书时一次性生成 + 写 DB
+    2. fallback：实时调 dimension_compressor 从 _json 字段计算（首次访问）
+       - 比之前的"粗暴 substring 截断"质量高得多
+       - 性能：纯字典遍历 + 字符串拼接，几毫秒级
+       - 对 204 章已有拆书数据无需迁移
     """
-    # strength → 大致截断字符数（与 STRENGTH_BUDGET 1.5 倍换算）
-    STRENGTH_CHAR_LIMIT = {"light": 130, "medium": 400, "deep": 1000}
-
     async def _builder(db: AsyncSession, ctx: Any) -> str:
         pack = await _get_first_attached_pack(db, ctx.project_id)
         if not pack:
             return ""
         strength = _get_strength_for(ctx, dimension)
-        # 1. 优先取预压缩
+        # 1. 优先取已写 DB 的预压缩
         text = pack.get_precompressed(dimension, strength)
         if text:
             return text
-        # 2. fallback：取 _json 字段截断版
+        # 2. fallback：实时调 compressor
         json_text = getattr(pack, f"{dimension}_json", None)
         if not json_text:
             return ""
-        max_chars = STRENGTH_CHAR_LIMIT.get(strength, 400)
-        return json_text[:max_chars] + ("…(截断)" if len(json_text) > max_chars else "")
+        from app.services.reference_pack.dimension_compressor import compress_dimension
+        try:
+            return compress_dimension(json_text, dimension, strength) or ""
+        except Exception as exc:  # pragma: no cover - 防御性
+            logger.warning(
+                "compressor 失败 dim=%s strength=%s err=%s", dimension, strength, exc
+            )
+            # 极端情况降级：粗暴 substring（旧 fallback）
+            max_chars = {"light": 130, "medium": 400, "deep": 1000}.get(strength, 400)
+            return json_text[:max_chars] + ("…(截断)" if len(json_text) > max_chars else "")
 
     _builder.__name__ = f"build_dissect_{dimension}"
     return _builder
