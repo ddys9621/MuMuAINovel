@@ -37,7 +37,11 @@ from app.services.reference_pack.policy_tables import (
     get_policy,
     get_corpus_top_k,
 )
-from app.services.reference_pack.v4_compat import build_v4_dissect_segment
+from app.services.reference_pack.v4_compat import (
+    build_v4_dissect_segment,
+    build_v4_bridge_constraint_only,
+    fetch_bridge_context,
+)
 
 __all__ = [
     "AssemblyContext",
@@ -50,6 +54,8 @@ __all__ = [
     "CORPUS_TOPK",
     "HISTORICAL_CONTEXT_TABLE",
     "MEMORY_TOPK_TABLE",
+    "build_v4_bridge_constraint_only",
+    "fetch_bridge_context",
     "get_model_tier",
     "get_policy",
     "get_corpus_top_k",

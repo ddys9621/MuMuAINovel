@@ -1860,6 +1860,39 @@ async def generate_chapter_content_stream(
                 except Exception as _e:  # pragma: no cover - 防御性兜底
                     logger.warning(f"[R5-章节正文] 拆书参考注入失败（已跳过）: {_e}")
 
+                # 🆕 V4.1 K2 桥段位置约束注入（chapter_outline 含 bridge_id 时自动启用）
+                # 与上方 v3 拆书注入互补：v3 管拆书维度，V4 管桥段位置约束
+                try:
+                    from app.services.reference_pack import (
+                        build_v4_bridge_constraint_only,
+                        fetch_bridge_context,
+                    )
+                    if current_outline and getattr(current_outline, "bridge_id", None):
+                        _bridge_ctx = await fetch_bridge_context(db_session, current_outline)
+                        if _bridge_ctx:
+                            _v4_bridge_seg = await build_v4_bridge_constraint_only(
+                                db_session, project.id,
+                                scene="chapter_content",
+                                model_name=getattr(generate_request, "model", None) or "deepseek-v3",
+                                bridge_position=current_outline.bridge_position,
+                                bridge_context=_bridge_ctx,
+                                chapter_outline_id=current_outline.id,
+                                target_word_count=target_word_count,
+                            )
+                            if _v4_bridge_seg:
+                                mcp_reference_materials = (
+                                    f"{mcp_reference_materials}\n\n{_v4_bridge_seg}".strip()
+                                    if mcp_reference_materials
+                                    else _v4_bridge_seg
+                                )
+                                logger.info(
+                                    f"🎯 [V4.1 K2] 注入桥段位置约束 "
+                                    f"position={current_outline.bridge_position} "
+                                    f"bridge={_bridge_ctx.get('title','?')}"
+                                )
+                except Exception as _be:  # pragma: no cover
+                    logger.warning(f"[V4.1 K2] 桥段约束注入失败（已跳过）: {_be}")
+
                 # 根据是否有前置内容选择不同的提示词，并应用写作风格、记忆增强、剧情卡片和MCP参考资料
                 if previous_content:
                     prompt = prompt_service.get_chapter_generation_with_context_prompt(
@@ -3075,7 +3108,33 @@ async def generate_single_chapter_for_batch(
         prompt,
         project.generation_prompt or ''
     )
-    
+
+    # 🆕 V4.1 K2 桥段位置约束（章纲含 bridge_id 时自动追加到 prompt 末尾）
+    try:
+        from app.services.reference_pack import (
+            build_v4_bridge_constraint_only,
+            fetch_bridge_context,
+        )
+        if outline and getattr(outline, "bridge_id", None):
+            _bridge_ctx = await fetch_bridge_context(db_session, outline)
+            if _bridge_ctx:
+                _v4_bridge_seg = await build_v4_bridge_constraint_only(
+                    db_session, project.id,
+                    scene="chapter_content",
+                    bridge_position=outline.bridge_position,
+                    bridge_context=_bridge_ctx,
+                    chapter_outline_id=outline.id,
+                    target_word_count=target_word_count,
+                )
+                if _v4_bridge_seg:
+                    prompt = f"{prompt}\n\n{_v4_bridge_seg}"
+                    logger.info(
+                        f"🎯 [V4.1 K2 generate] 注入桥段位置约束 "
+                        f"position={outline.bridge_position}"
+                    )
+    except Exception as _be:  # pragma: no cover
+        logger.warning(f"[V4.1 K2 generate] 桥段约束注入失败（已跳过）: {_be}")
+
     # 非流式生成内容
     full_content = ""
     async for chunk in ai_service.generate_text_stream(prompt=prompt):
