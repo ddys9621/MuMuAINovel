@@ -1,10 +1,25 @@
-"""JSON 清理工具 - 用于处理 AI 返回的不规范 JSON"""
+"""JSON 清理工具 - 用于处理 AI 返回的不规范 JSON
+
+三层 fallback：
+1. 本地 clean_and_parse_json（regex + json.loads）
+2. json-repair 库本地修复（处理未转义双引号、缺逗号、未闭合括号等 90% 常见 bug）
+3. （可选）repair_json_with_llm 二次修复（需调用 LLM）
+"""
 import json
 import re
 from typing import Any, Optional
+
 from app.logger import get_logger
 
 logger = get_logger(__name__)
+
+# 本地 JSON 修复库（处理 LLM 输出未转义引号等典型问题）
+try:
+    from json_repair import repair_json as _repair_json
+    _HAS_JSON_REPAIR = True
+except ImportError:  # pragma: no cover - 兜底
+    _HAS_JSON_REPAIR = False
+    logger.warning("json_repair 包未安装，将跳过本地 JSON 修复 fallback")
 
 
 def clean_and_parse_json(
@@ -79,16 +94,34 @@ def clean_and_parse_json(
         return result
         
     except json.JSONDecodeError as e:
-        # 记录详细的错误信息
+        # 第五步：JSON 解析失败时，先尝试 json-repair 本地修复
+        # （处理 LLM 输出的未转义引号 / 缺逗号 / 未闭合括号等常见 bug）
+        if _HAS_JSON_REPAIR and 'json_text' in locals() and json_text:
+            try:
+                repaired_text = _repair_json(json_text)
+                repaired_result = json.loads(repaired_text) if isinstance(repaired_text, str) else repaired_text
+                if log_prefix:
+                    logger.info(
+                        f"{log_prefix} - json-repair 本地修复成功 "
+                        f"(原始错误 line {e.lineno} col {e.colno})"
+                    )
+                return repaired_result
+            except Exception as repair_err:
+                if log_prefix:
+                    logger.warning(
+                        f"{log_prefix} - json-repair 本地修复也失败: {repair_err}"
+                    )
+
+        # 记录详细的错误信息（修复失败才打日志）
         error_msg = f"JSON 解析失败: {str(e)}"
         if log_prefix:
             error_msg = f"{log_prefix} - {error_msg}"
-        
+
         logger.error(error_msg)
         logger.error(f"  错误位置: line {e.lineno}, column {e.colno}")
         logger.error(f"  原始内容（前 500 字符）: {response[:500]}")
         logger.error(f"  清理后内容（前 500 字符）: {json_text[:500] if 'json_text' in locals() else 'N/A'}")
-        
+
         raise
     
     except Exception as e:

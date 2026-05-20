@@ -140,7 +140,8 @@ class AIService:
         max_tokens: Optional[int] = None,
         system_prompt: Optional[str] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
-        tool_choice: Optional[str] = None
+        tool_choice: Optional[str] = None,
+        response_format: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         生成文本（支持工具调用）
@@ -154,6 +155,8 @@ class AIService:
             system_prompt: 系统提示词
             tools: 可用工具列表（MCP工具格式）
             tool_choice: 工具选择策略 (auto/required/none)
+            response_format: 响应格式约束，例如 {"type": "json_object"} 强制 JSON 输出
+                             （DeepSeek/Qwen/OpenAI 兼容；Anthropic 会被忽略）
             
         Returns:
             Dict包含:
@@ -169,9 +172,13 @@ class AIService:
 
         if provider == "openai":
             return await self._generate_openai_with_tools(
-                prompt, model, temperature, max_tokens, system_prompt, tools, tool_choice
+                prompt, model, temperature, max_tokens, system_prompt, tools, tool_choice,
+                response_format=response_format,
             )
         elif provider == "anthropic":
+            # Anthropic 不支持 response_format，需要 JSON 强制请使用 tool_use 模式
+            if response_format:
+                logger.debug("Anthropic provider 忽略 response_format 参数")
             return await self._generate_anthropic_with_tools(
                 prompt, model, temperature, max_tokens, system_prompt, tools, tool_choice
             )
@@ -325,7 +332,8 @@ class AIService:
         max_tokens: int,
         system_prompt: Optional[str],
         tools: Optional[List[Dict[str, Any]]] = None,
-        tool_choice: Optional[str] = None
+        tool_choice: Optional[str] = None,
+        response_format: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """使用OpenAI生成文本（支持工具调用）"""
         if not self.openai_http_client:
@@ -352,7 +360,13 @@ class AIService:
                 "temperature": temperature,
                 "max_tokens": max_tokens
             }
-            
+
+            # 响应格式约束（DeepSeek/Qwen/OpenAI 兼容）：
+            # 传 {"type": "json_object"} 后模型必返合法 JSON，大幅减少未转义引号等问题
+            if response_format:
+                payload["response_format"] = response_format
+                logger.info(f"  - response_format: {response_format}")
+
             # 添加工具参数
             if tools:
                 payload["tools"] = tools

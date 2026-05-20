@@ -15,6 +15,9 @@ aiosqlite==0.20.0    # SQLite异步驱动（嵌入式数据库，无需独立服
 pydantic==2.12.4
 pydantic-settings==2.11.0
 
+# JSON 修复（LLM 输出未转义引号/格式错误的本地兜底）
+json-repair==0.59.10
+
 # AI服务（OpenAI 兼容接口，支持本地 Ollama）
 openai==2.7.0
 anthropic==0.72.0
