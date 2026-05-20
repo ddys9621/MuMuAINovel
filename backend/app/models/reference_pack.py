@@ -120,6 +120,68 @@ class ReferencePack(Base):
         ),
     )
 
+    # ---- V4.1 新增维度（桥段反推 + 角色档案，详见 v4_design.md §11）----
+    bridges_json = Column(
+        Text,
+        nullable=True,
+        comment=(
+            "桥段范本库 JSON（V4.1 新增）："
+            "{total_bridges_detected, standard_bridges, variant_bridges, "
+            "bridge_types: [{type, count, typical_examples: [{chapters, goal, "
+            "showoff_point, golden_finger_mode, chapter_summaries}]}], "
+            "rhythm_stats, golden_finger_diversity}。"
+            "由 BridgeDetector + BridgePatternAggregator 从 ChapterFact + Event 反推产出。"
+        ),
+    )
+    character_archive_json = Column(
+        Text,
+        nullable=True,
+        comment=(
+            "完整角色档案 JSON（V4.1 新增）："
+            "{protagonist_archetypes: [{name, intro_chapter, intro_technique, "
+            "personality_arc, ability_progression, key_relationships, memorable_actions}], "
+            "antagonist_progression, support_character_techniques}。"
+            "由 CharacterArchiveBuilder 聚合 Entity + Relation + Event 产出。"
+        ),
+    )
+
+    # ---- V4.4 K5 三档预压缩字段（详见 v4_design.md §10.1.1）----
+    # 每维度三档：light≤200 token / medium≤600 token / deep≤1500 token
+    # 由 DimensionPrecompressor 在拆书阶段一次性生成，运行时直接 SELECT 注入 prompt
+    # 8 维度 × 3 档 = 24 个字段（corpus 不预压缩，依赖动态 BM25 检索）
+
+    methodology_light = Column(Text, nullable=True, comment="V4.4 写作方法论 light 预压缩 ≤200 token")
+    methodology_medium = Column(Text, nullable=True, comment="V4.4 写作方法论 medium 预压缩 ≤600 token")
+    methodology_deep = Column(Text, nullable=True, comment="V4.4 写作方法论 deep 预压缩 ≤1500 token")
+
+    style_light = Column(Text, nullable=True, comment="V4.4 文风范本 light 预压缩 ≤200 token")
+    style_medium = Column(Text, nullable=True, comment="V4.4 文风范本 medium 预压缩 ≤600 token")
+    style_deep = Column(Text, nullable=True, comment="V4.4 文风范本 deep 预压缩 ≤1500 token")
+
+    structure_light = Column(Text, nullable=True, comment="V4.4 结构手法 light 预压缩 ≤200 token")
+    structure_medium = Column(Text, nullable=True, comment="V4.4 结构手法 medium 预压缩 ≤600 token")
+    structure_deep = Column(Text, nullable=True, comment="V4.4 结构手法 deep 预压缩 ≤1500 token")
+
+    archetypes_light = Column(Text, nullable=True, comment="V4.4 角色塑造手法 light 预压缩 ≤200 token")
+    archetypes_medium = Column(Text, nullable=True, comment="V4.4 角色塑造手法 medium 预压缩 ≤600 token")
+    archetypes_deep = Column(Text, nullable=True, comment="V4.4 角色塑造手法 deep 预压缩 ≤1500 token")
+
+    worldbuilding_light = Column(Text, nullable=True, comment="V4.4 世界观建模 light 预压缩 ≤200 token")
+    worldbuilding_medium = Column(Text, nullable=True, comment="V4.4 世界观建模 medium 预压缩 ≤600 token")
+    worldbuilding_deep = Column(Text, nullable=True, comment="V4.4 世界观建模 deep 预压缩 ≤1500 token")
+
+    synopsis_light = Column(Text, nullable=True, comment="V4.4 全书弧线 light 预压缩 ≤200 token")
+    synopsis_medium = Column(Text, nullable=True, comment="V4.4 全书弧线 medium 预压缩 ≤600 token")
+    synopsis_deep = Column(Text, nullable=True, comment="V4.4 全书弧线 deep 预压缩 ≤1500 token")
+
+    bridges_light = Column(Text, nullable=True, comment="V4.4 桥段范本 light 预压缩 ≤200 token")
+    bridges_medium = Column(Text, nullable=True, comment="V4.4 桥段范本 medium 预压缩 ≤600 token")
+    bridges_deep = Column(Text, nullable=True, comment="V4.4 桥段范本 deep 预压缩 ≤1500 token")
+
+    character_archive_light = Column(Text, nullable=True, comment="V4.4 角色档案 light 预压缩 ≤200 token")
+    character_archive_medium = Column(Text, nullable=True, comment="V4.4 角色档案 medium 预压缩 ≤600 token")
+    character_archive_deep = Column(Text, nullable=True, comment="V4.4 角色档案 deep 预压缩 ≤1500 token")
+
     # ---- 生成状态 ----
     status = Column(
         String(20),
@@ -130,9 +192,40 @@ class ReferencePack(Base):
     generated_dimensions = Column(
         Text,
         nullable=True,
-        comment="JSON 数组：已成功生成的维度列表，如 ['methodology','style']",
+        comment="JSON 数组：已成功生成的维度列表，如 ['methodology','style','bridges','character_archive']",
     )
     error_message = Column(Text, nullable=True, comment="失败信息（partial/failed 时填充）")
+
+    # ---- V4.4 K5 辅助方法：统一访问预压缩字段 ----
+    DIMENSIONS_WITH_PRECOMPRESSION = (
+        "methodology", "style", "structure", "archetypes",
+        "worldbuilding", "synopsis", "bridges", "character_archive",
+    )
+    STRENGTH_LEVELS = ("light", "medium", "deep")
+
+    def get_precompressed(self, dimension: str, strength: str) -> str | None:
+        """读取指定维度+档位的预压缩文本。
+
+        Args:
+            dimension: 维度名（methodology/style/.../character_archive）
+            strength: 档位（light/medium/deep）
+
+        Returns:
+            预压缩文本，未生成则返回 None
+        """
+        if dimension not in self.DIMENSIONS_WITH_PRECOMPRESSION:
+            return None
+        if strength not in self.STRENGTH_LEVELS:
+            return None
+        return getattr(self, f"{dimension}_{strength}", None)
+
+    def set_precompressed(self, dimension: str, strength: str, text: str | None) -> None:
+        """写入指定维度+档位的预压缩文本。"""
+        if dimension not in self.DIMENSIONS_WITH_PRECOMPRESSION:
+            raise ValueError(f"unknown dimension: {dimension}")
+        if strength not in self.STRENGTH_LEVELS:
+            raise ValueError(f"unknown strength: {strength}")
+        setattr(self, f"{dimension}_{strength}", text)
 
     # ---- 时间戳 ----
     created_at = Column(DateTime, server_default=func.now(), comment="创建时间")
