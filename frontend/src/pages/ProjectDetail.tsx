@@ -19,6 +19,7 @@ import {
   Loader2,
   Sparkles,
   Library,
+  Rocket,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useStore } from '@/store/index'
@@ -32,6 +33,7 @@ const NAV_ITEMS = [
   { label: '角色与组织', icon: Users, path: 'characters' },
   { label: '关系管理', icon: GitBranch, path: 'relationships' },
   { label: '故事大纲', icon: FileText, path: 'outline' },
+  { label: '桥段规划', icon: Rocket, path: 'plot-bridges' },
   { label: '章节管理', icon: BookOpen, path: 'chapters' },
   { label: '剧情分析', icon: BarChart3, path: 'chapter-analysis' },
   { label: '写作风格', icon: Palette, path: 'writing-styles' },
