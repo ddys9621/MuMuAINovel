@@ -1,5 +1,5 @@
 """项目数据模型"""
-from sqlalchemy import Column, String, Text, DateTime, Integer
+from sqlalchemy import Boolean, Column, String, Text, DateTime, Integer
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.db_base import Base
@@ -20,8 +20,8 @@ class Project(Base):
     current_words = Column(Integer, default=0, comment="当前字数")
     status = Column(String(20), default="planning", comment="创作状态")
     wizard_status = Column(String(20), default="incomplete", comment="向导完成状态: incomplete/completed")
-    wizard_step = Column(Integer, default=0, comment="向导当前步骤: 0-4")
-    
+    wizard_step = Column(Integer, default=0, comment="向导当前步骤: 0-4 (3.5 桥段规划在 wizard_step=3 完成后通过 enable_bridge_planning 路由)")
+
     # 世界构建字段
     world_time_period = Column(Text, comment="时间背景")
     world_location = Column(Text, comment="地理位置")
@@ -33,7 +33,16 @@ class Project(Base):
     chapter_count = Column(Integer, comment="章节数量")
     narrative_perspective = Column(String(50), comment="叙事视角：first_person/third_person/omniscient")
     character_count = Column(Integer, default=5, comment="角色数量")
-    
+
+    # F3 (T2.1)：是否在 step 3 之后进入 step 3.5 桥段规划再生成章纲
+    enable_bridge_planning = Column(
+        Boolean,
+        default=True,
+        server_default="1",
+        nullable=False,
+        comment="是否启用桥段规划阶段（step 3.5）；True 时章纲按桥段展开，False 走传统线性路径",
+    )
+
     created_at = Column(DateTime, server_default=func.now(), comment="创建时间")
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), comment="更新时间")
     

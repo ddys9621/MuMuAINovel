@@ -5,6 +5,8 @@
  */
 import api from '@/services/api';
 import type {
+  ExpandAllBridgesRequest,
+  ExpandAllBridgesResponse,
   ExpandBridgeRequest,
   ExpandBridgeResponse,
   PlanBridgesRequest,
@@ -58,6 +60,16 @@ export const plotBridgesApi = {
   expand: (bridgeId: string, payload: ExpandBridgeRequest) =>
     api.post<unknown, ExpandBridgeResponse>(
       `/bridges/${bridgeId}/expand`,
+      payload,
+    ),
+
+  /**
+   * T2.1：批量展开项目下所有 status='ready' 的桥段为章纲
+   * POST /api/projects/{projectId}/bridges/expand-all
+   */
+  expandAll: (projectId: string, payload: ExpandAllBridgesRequest = {}) =>
+    api.post<unknown, ExpandAllBridgesResponse>(
+      `/projects/${projectId}/bridges/expand-all`,
       payload,
     ),
 };

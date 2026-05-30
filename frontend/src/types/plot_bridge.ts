@@ -51,11 +51,21 @@ export interface PlotBridge {
   next_bridge_hook: string | null;
   status: BridgeStatus;
   order_index: number | null;
+  // V4.1 方案 C：桥段 ↔ 剧情线节点绑定字段
+  plot_line_id?: string | null;
+  beat_index?: number | null;
+  beat_coverage_start?: number | null;
+  beat_coverage_end?: number | null;
 }
+
+/** V4.1 方案 C：桥段规划模式 */
+export type BridgePlanMode = 'by_plot_line' | 'free';
 
 export interface PlanBridgesRequest {
   bridge_count?: number;
   model?: string;
+  /** 'by_plot_line'（默认）按主线节点权重分配桥段；'free' 自由规划不绑节点 */
+  mode?: BridgePlanMode;
 }
 
 export interface ExpandBridgeRequest {
@@ -81,4 +91,19 @@ export interface UpdateBridgeRequest {
   c4_aftermath?: string;
   next_bridge_hook?: string;
   status?: BridgeStatus;
+}
+
+/** T2.1 批量展开请求。 */
+export interface ExpandAllBridgesRequest {
+  model?: string;
+  start_chapter_number?: number;
+}
+
+/** T2.1 批量展开响应。 */
+export interface ExpandAllBridgesResponse {
+  success: boolean;
+  total: number;
+  succeeded: string[];
+  failed: Array<{ bridge_id: string; error: string }>;
+  created_chapter_count: number;
 }

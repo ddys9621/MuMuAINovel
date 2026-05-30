@@ -87,6 +87,24 @@ class ReferencePackDetail(BaseModel):
         description="事件节奏与类型分布；仅统计，不暴露具体事件标题。",
     )
 
+    # V4.1：桥段反推 + 角色档案（详见 v4_design.md §11）
+    bridges: Optional[Dict[str, Any]] = Field(
+        None,
+        description=(
+            "V4.1 桥段范本库：total_bridges_detected / standard_bridges / variant_bridges / "
+            "bridge_types / rhythm_stats / golden_finger_diversity。"
+            "由 BridgeDetector + BridgePatternAggregator 反推产出，给桥段规划场景做范本参考。"
+        ),
+    )
+    character_archive: Optional[Dict[str, Any]] = Field(
+        None,
+        description=(
+            "V4.1 完整角色档案：protagonist_archetypes / antagonist_progression / "
+            "support_character_techniques。"
+            "由 CharacterArchiveBuilder 聚合 Entity+Relation+Event 产出，给角色生成场景做范本。"
+        ),
+    )
+
     attached_project_count: int = 0
     created_at: datetime
     updated_at: Optional[datetime] = None

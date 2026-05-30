@@ -7,6 +7,8 @@
 - 多段抽取后自动合并 ChapterFact
 - LLM 输出非 JSON 时由 safe_parse_json 兜底
 - 单章失败返回带 extraction_failed 标记的空 ChapterFact，不阻断后续章节
+- T2.3 (2026-05-21)：段级失败自动切两半重试一次，配合 ai_service 的网络
+  重试形成"瞬时网络（ai_service 3 次）→ 业务失败（本层切半 1 次）"的两层兜底
 """
 
 from __future__ import annotations
@@ -55,6 +57,11 @@ class ChapterFactExtractor:
     DEFAULT_TEMPERATURE = 0.2
     MAX_TOKENS = 4000
 
+    # ----- T2.3 段级切半重试阈值 -----
+    # 段长度 > 这个阈值时，失败后会切两半再重试一次
+    # 阈值取 2000：低于这个长度切半收益很低（prompt 体积差不多）
+    MIN_RETRY_SPLIT_LEN = 2000
+
     def __init__(self, ai_service):
         self.ai_service = ai_service
 
@@ -75,7 +82,8 @@ class ChapterFactExtractor:
         any_success = False
         for i, seg in enumerate(segments, start=1):
             seg_label = f"{chapter_number}.{i}/{len(segments)}" if len(segments) > 1 else f"{chapter_number}"
-            fact, ok = await self._extract_one_segment(
+            # T2.3: 改走 _extract_with_split_retry，段级失败时自动切半重试
+            fact, ok = await self._extract_with_split_retry(
                 segment_label=seg_label,
                 chapter_number=chapter_number,
                 chapter_title=chapter_title,
@@ -173,6 +181,111 @@ class ChapterFactExtractor:
             new_concepts=_parse_concepts(result.get("new_concepts")),
         )
         return fact, True
+
+    # ------------------------------------------------------------------
+    # T2.3: 段级切半重试
+    # ------------------------------------------------------------------
+
+    async def _extract_with_split_retry(
+        self,
+        segment_label: str,
+        chapter_number: int,
+        chapter_title: str,
+        segment_text: str,
+        dictionary: list[DictionaryEntry],
+        prior_summary: Optional[str],
+    ) -> tuple[ChapterFact, bool]:
+        """段抽取 + 失败切半重试。
+
+        流程：
+        1. 调 _extract_one_segment 正常抽取（ai_service 内部已 retry 3 次网络）
+        2. 成功 → 返回 (fact, True)
+        3. 失败 + 段长度 < MIN_RETRY_SPLIT_LEN → 放弃，返回 (空 fact, False)
+        4. 失败 + 段长度足够 → 切两半，每半独立调一次 LLM，合并子段结果
+           - 任一子段成功 → 合并返回 (merged, True)
+           - 全部子段失败 → 返回 (空 fact, False)
+
+        注意：切半的子段**不递归切**，避免无限递归 / 过度调用 LLM。
+        """
+        fact, ok = await self._extract_one_segment(
+            segment_label=segment_label,
+            chapter_number=chapter_number,
+            chapter_title=chapter_title,
+            segment_text=segment_text,
+            dictionary=dictionary,
+            prior_summary=prior_summary,
+        )
+        if ok:
+            return fact, True
+
+        # 段太短，切半收益很低，直接放弃
+        if len(segment_text) < self.MIN_RETRY_SPLIT_LEN:
+            logger.warning(
+                "[拆书V2-章节抽取-%s] 段抽取失败且段长度 %d < %d，放弃切半重试",
+                segment_label, len(segment_text), self.MIN_RETRY_SPLIT_LEN,
+            )
+            return fact, False
+
+        # 切两半，每半独立调一次
+        halves = self._split_segment_half(segment_text)
+        if len(halves) < 2:
+            # 边界保护：切半失败（极端短文本）
+            return fact, False
+
+        logger.warning(
+            "[拆书V2-章节抽取-%s] 段抽取失败，切两半重试（原段长度=%d，子段=%d）",
+            segment_label, len(segment_text), len(halves),
+        )
+
+        sub_facts: list[ChapterFact] = []
+        any_sub_ok = False
+        for j, sub_seg in enumerate(halves, start=1):
+            sub_label = f"{segment_label}.r{j}"  # 例如 "1.3/3.r1" / "1.3/3.r2"
+            sub_fact, sub_ok = await self._extract_one_segment(
+                segment_label=sub_label,
+                chapter_number=chapter_number,
+                chapter_title=chapter_title,
+                segment_text=sub_seg,
+                dictionary=dictionary,
+                prior_summary=prior_summary,
+            )
+            sub_facts.append(sub_fact)
+            if sub_ok:
+                any_sub_ok = True
+
+        if not any_sub_ok:
+            logger.error(
+                "[拆书V2-章节抽取-%s] 切半重试仍全部失败（%d 子段），段数据丢失",
+                segment_label, len(halves),
+            )
+            return fact, False
+
+        # 至少一个子段成功，合并子段为最终 fact
+        if len(sub_facts) == 1:
+            merged = sub_facts[0]
+        else:
+            merged = self._merge_segment_facts(
+                sub_facts, chapter_number, chapter_title,
+            )
+        success_count = sum(1 for f in sub_facts if (f.summary or f.events))
+        logger.info(
+            "[拆书V2-章节抽取-%s] 切半重试成功（%d/%d 子段有数据）",
+            segment_label, success_count, len(halves),
+        )
+        return merged, True
+
+    @classmethod
+    def _split_segment_half(cls, text: str) -> list[str]:
+        """把单段切成两半，沿段落边界对齐。短文本（<200 字）原样返回。"""
+        n = len(text)
+        if n < 200:
+            return [text]
+        target = n // 2
+        split_at = cls._find_paragraph_break(text, target)
+        # 防御：如果切点退化到 0 或末尾，按硬中点切
+        if split_at <= 0 or split_at >= n:
+            split_at = target
+        return [text[:split_at], text[split_at:]]
 
     # ------------------------------------------------------------------
     # 长章节切分

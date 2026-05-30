@@ -16,7 +16,7 @@
 """
 import uuid
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -40,6 +40,26 @@ class PlotBridge(Base):
         ForeignKey("plot_lines.id", ondelete="SET NULL"),
         nullable=True,
         comment="所属剧情线（可选，桥段可独立存在）",
+    )
+
+    # ---- V4.1 K2 分层契合：桥段 ↔ 剧情线节点（beat）绑定 ----
+    # 设计：方案 C（分层契合）— 桥段是「主线节点的展开形式」，
+    # 一个 beat 按 weight × estimated_chapters 分配章数，再按 4 章/桥段切成 N 个桥段。
+    # 这些字段在 by_plot_line 规划模式下由 LLM 填充；free 模式下保持 NULL（向后兼容）。
+    beat_index = Column(
+        Integer,
+        nullable=True,
+        comment="所属节点 index（对应 PlotLine.timeline_data.beats[].index）；NULL 表示桥段不绑节点",
+    )
+    beat_coverage_start = Column(
+        Float,
+        nullable=True,
+        comment="本桥段覆盖该节点的起始进度（0.0-1.0），用于章纲生成时推进 beat coverage",
+    )
+    beat_coverage_end = Column(
+        Float,
+        nullable=True,
+        comment="本桥段覆盖该节点的结束进度（0.0-1.0）",
     )
 
     bridge_number = Column(

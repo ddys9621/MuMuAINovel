@@ -57,11 +57,12 @@ services:
       SESSION_REFRESH_THRESHOLD_MINUTES: ${SESSION_REFRESH_THRESHOLD_MINUTES:-30}
     restart: unless-stopped
     healthcheck:
+      # 启动期需加载 sentence-transformers 模型 + 数据库迁移 + chromadb 初始化，预留 60s
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 60s
     secrets:
       - local_auth_password
 

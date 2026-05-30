@@ -530,12 +530,13 @@ class PlotGenerationService:
             
             generation_start_time = time.time()
             
-            # 使用普通 generate_text 生成内容（不再使用 MCP）
-            response = await self.ai_service.generate_text(
+            # 流式累积调 LLM（免疫中转代理 30s 网关 timeout，与桥段规划路径一致）
+            response = await self.ai_service.generate_text_stream_collect(
                 prompt=final_prompt,
                 provider=provider,
                 model=model,
-                temperature=0.8
+                temperature=0.8,
+                context=f"PlotCardGen-{model or 'default'}"
             )
             
             generation_time = time.time() - generation_start_time
@@ -1014,11 +1015,13 @@ class PlotGenerationService:
 
                 start_time = time.time()
 
-                response = await self.ai_service.generate_text(
+                # 流式累积调 LLM（免疫中转代理 timeout）
+                response = await self.ai_service.generate_text_stream_collect(
                     prompt=prompt,
                     provider=provider,
                     model=model,
-                    temperature=0.7
+                    temperature=0.7,
+                    context=f"PlotLineBeats-{model or 'default'}"
                 )
 
                 generation_time = time.time() - start_time
@@ -1335,14 +1338,15 @@ class PlotGenerationService:
                     project.generation_prompt or ''
                 )
 
-                # 调用 AI 生成单条剧情线结构
+                # 调用 AI 生成单条剧情线结构（流式累积）
                 generation_start_time = time.time()
 
-                response = await self.ai_service.generate_text(
+                response = await self.ai_service.generate_text_stream_collect(
                     prompt=final_prompt,
                     provider=provider,
                     model=model,
-                    temperature=0.7
+                    temperature=0.7,
+                    context=f"PlotLineStruct-{model or 'default'}"
                 )
 
                 generation_time = time.time() - generation_start_time
@@ -1851,12 +1855,13 @@ class PlotGenerationService:
             
             generation_start_time = time.time()
             
-            # 使用普通 generate_text 生成内容
-            response = await self.ai_service.generate_text(
+            # 流式累积调 LLM（免疫中转代理 timeout，与桥段路径同策略）
+            response = await self.ai_service.generate_text_stream_collect(
                 prompt=final_prompt,
                 provider=provider,
                 model=model,
-                temperature=0.6
+                temperature=0.6,
+                context=f"ChapterOutlineGen-{model or 'default'}"
             )
             
             generation_time = time.time() - generation_start_time

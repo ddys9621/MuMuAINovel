@@ -48,6 +48,9 @@ const DIMENSION_LABEL: Record<ReferenceDimension, string> = {
   structure: '章节结构',
   archetypes: '角色塑造',
   worldbuilding: '世界观建模',
+  // V4.1 维度：桥段反推 + 角色档案
+  bridges: '桥段范本',
+  character_archive: '角色档案',
   corpus: '灵感语料',
 };
 
@@ -59,7 +62,8 @@ const STRENGTH_LABEL: Record<ReferenceStrength, string> = {
 
 function inferDefaultDimensions(strength: ReferenceStrength): ReferenceDimension[] {
   if (strength === 'light') return ['style'];
-  // V3.2 deep：5 手法 + Story Bible(synopsis) + 模式三维度(entities/relations/events) + corpus
+  // V4.1 deep：5 手法 + Story Bible(synopsis) + 模式三维度(entities/relations/events)
+  //         + V4.1 桥段范本(bridges) + V4.1 角色档案(character_archive) + corpus
   if (strength === 'deep')
     return [
       'synopsis',
@@ -71,6 +75,8 @@ function inferDefaultDimensions(strength: ReferenceStrength): ReferenceDimension
       'structure',
       'archetypes',
       'worldbuilding',
+      'bridges',            // V4.1
+      'character_archive',  // V4.1
       'corpus',
     ];
   // V3.2 medium：保留与后端 _wizard_infer_default_dimensions 一致：synopsis + methodology + style + corpus

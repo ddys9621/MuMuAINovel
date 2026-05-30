@@ -42,10 +42,11 @@ logger = get_logger(__name__)
 def _wizard_infer_default_dimensions(strength: str) -> list:
     """与 reference_pack._infer_default_dimensions 保持一致的默认维度推断。
 
-    V3.2 / V3.2-P2：
+    V4.1：
     - light: 仅文风
     - medium: + synopsis（Story Bible 全局引导）
     - deep: + 模式三维度（entities/relations/events）+ 5 手法全开
+            + V4.1 桥段范本(bridges) + V4.1 角色档案(character_archive)
     """
     if strength == "light":
         return ["style"]
@@ -60,6 +61,8 @@ def _wizard_infer_default_dimensions(strength: str) -> list:
             "structure",
             "archetypes",
             "worldbuilding",
+            "bridges",            # V4.1
+            "character_archive",  # V4.1
             "corpus",
         ]
     # medium
@@ -1736,12 +1739,19 @@ async def outline_generator(
         # 更新项目向导状态
         project.wizard_step = 3
         project.wizard_status = "incomplete"
-        
+
         await db.commit()
         await db.refresh(outline)
+        await db.refresh(project)
         db_committed = True
 
         logger.info(f"故事前提大纲生成完成 - 项目: {project_id}")
+
+        # T2.1: 根据 enable_bridge_planning 路由到 step 3.5 桥段规划页或直接进章纲页
+        # 注意：wizard_step=3 含义保持「大纲完成」不变（向后兼容旧 DB）；
+        # next_wizard_route 字段给前端做即时跳转使用，
+        # 重启浏览器时前端可通过 (project.enable_bridge_planning + 是否已有 plot_bridges) 判断。
+        next_wizard_route = "bridge_planning" if project.enable_bridge_planning else "chapter_outlines"
 
         # 发送最终结果
         yield await SSEResponse.send_result({
@@ -1755,7 +1765,10 @@ async def outline_generator(
                 "created_at": outline.created_at.isoformat() if outline.created_at else None,
                 "updated_at": outline.updated_at.isoformat() if outline.updated_at else None
             },
-            "total_chapters": 1
+            "total_chapters": 1,
+            # T2.1：前端根据此字段决定 step 3 完成后是跳桥段规划页（step 3.5）还是章纲页（step 4）
+            "next_wizard_route": next_wizard_route,
+            "enable_bridge_planning": bool(project.enable_bridge_planning),
         })
         
         yield await SSEResponse.send_progress("完成!", 100, "success")

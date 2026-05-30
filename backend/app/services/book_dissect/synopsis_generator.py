@@ -18,18 +18,24 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
+from app.services.book_dissect._base_v3_generator import BaseV3Generator
 from app.services.book_dissect.event_timeline_builder import TimelineEvent
 from app.services.book_dissect.prompts import (
     SYNOPSIS_PROMPT_V3,
     SYSTEM_PROMPT_V3,
 )
 from app.services.book_dissect.v2_types import EntityProfile
-from app.utils.json_cleaner import safe_parse_json
 
 logger = logging.getLogger(__name__)
 
+_LABEL = "[拆书V3.2-梗概]"
+_SCHEMA_HINT = (
+    "genre_tag, core_premise, golden_finger_concept, power_system_overview, "
+    "central_conflict, ultimate_goal, selling_points, target_audience_signals"
+)
 
-class SynopsisGenerator:
+
+class SynopsisGenerator(BaseV3Generator):
     """故事类型骨架生成器（V3.2 复活版，原 V2 SynopsisGenerator 已废弃删除）"""
 
     DEFAULT_TEMPERATURE = 0.4
@@ -72,32 +78,16 @@ class SynopsisGenerator:
             key_events=events_text,
         )
 
-        try:
-            resp = await self.ai_service.generate_text(
-                prompt=user_prompt,
-                system_prompt=SYSTEM_PROMPT_V3,
-                temperature=self.DEFAULT_TEMPERATURE,
-                max_tokens=self.MAX_TOKENS,
-            )
-        except Exception as exc:
-            logger.error("[拆书V3.2-梗概] LLM 调用失败: %s", exc)
-            return None
-
-        content = (resp or {}).get("content") if isinstance(resp, dict) else None
-        if not content:
-            logger.warning("[拆书V3.2-梗概] LLM 返回空内容")
-            return None
-
-        result = safe_parse_json(
-            content,
-            default=None,
-            expected_type="object",
-            log_prefix="[拆书V3.2-梗概]",
+        result = await self._call_and_parse_object(
+            prompt=user_prompt,
+            system_prompt=SYSTEM_PROMPT_V3,
+            temperature=self.DEFAULT_TEMPERATURE,
+            max_tokens=self.MAX_TOKENS,
+            label=_LABEL,
+            schema_hint=_SCHEMA_HINT,
         )
-        if not isinstance(result, dict):
-            logger.warning("[拆书V3.2-梗概] JSON 解析非 object")
+        if result is None:
             return None
-
         return self._sanitize(result)
 
     @staticmethod

@@ -15,13 +15,16 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
+from app.services.book_dissect._base_v3_generator import BaseV3Generator
 from app.services.book_dissect.prompts import STYLE_PROMPT, SYSTEM_PROMPT
-from app.utils.json_cleaner import safe_parse_json
 
 logger = logging.getLogger(__name__)
 
+_LABEL = "[拆书V3-文风]"
+_SCHEMA_HINT = "name, description, prompt_content, traits"
 
-class StyleGenerator:
+
+class StyleGenerator(BaseV3Generator):
     """文风范本生成器（Tab2）。"""
 
     DEFAULT_TEMPERATURE = 0.5
@@ -42,35 +45,20 @@ class StyleGenerator:
 
         prompt = STYLE_PROMPT.format(samples=samples)
 
-        try:
-            resp = await self.ai_service.generate_text(
-                prompt=prompt,
-                system_prompt=SYSTEM_PROMPT,
-                temperature=self.DEFAULT_TEMPERATURE,
-                max_tokens=self.MAX_TOKENS,
-            )
-        except Exception as exc:
-            logger.error("[拆书V3-文风] LLM 调用失败: %s", exc)
-            return None
-
-        content = (resp or {}).get("content") if isinstance(resp, dict) else None
-        if not content:
-            logger.warning("[拆书V3-文风] LLM 返回空内容")
-            return None
-
-        result = safe_parse_json(
-            content,
-            default=None,
-            expected_type="object",
-            log_prefix="[拆书V3-文风]",
+        result = await self._call_and_parse_object(
+            prompt=prompt,
+            system_prompt=SYSTEM_PROMPT,
+            temperature=self.DEFAULT_TEMPERATURE,
+            max_tokens=self.MAX_TOKENS,
+            label=_LABEL,
+            schema_hint=_SCHEMA_HINT,
         )
-        if not isinstance(result, dict):
-            logger.warning("[拆书V3-文风] JSON 解析非 object")
+        if result is None:
             return None
 
         # 必填字段校验：prompt_content 缺失则视为失败（V1 同样语义）
         if not result.get("prompt_content"):
-            logger.warning("[拆书V3-文风] prompt_content 缺失，舍弃")
+            logger.warning("%s prompt_content 缺失，舍弃", _LABEL)
             return None
 
         return self._sanitize(result)

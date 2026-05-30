@@ -14,18 +14,24 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
+from app.services.book_dissect._base_v3_generator import BaseV3Generator
 from app.services.book_dissect.event_timeline_builder import TimelineEvent
 from app.services.book_dissect.prompts import (
     METHODOLOGY_PROMPT_V3,
     SYSTEM_PROMPT_V3,
 )
 from app.services.book_dissect.v2_types import EntityProfile
-from app.utils.json_cleaner import safe_parse_json
 
 logger = logging.getLogger(__name__)
 
+_LABEL = "[拆书V3-方法论]"
+_SCHEMA_HINT = (
+    "golden_finger_pattern, opening_hook_pattern, facepunch_rhythm, "
+    "power_progression, highlight_density"
+)
 
-class MethodologyGenerator:
+
+class MethodologyGenerator(BaseV3Generator):
     """写作方法论生成器（Tab1）"""
 
     DEFAULT_TEMPERATURE = 0.4
@@ -74,32 +80,16 @@ class MethodologyGenerator:
             locations=locs_text,
         )
 
-        try:
-            resp = await self.ai_service.generate_text(
-                prompt=user_prompt,
-                system_prompt=SYSTEM_PROMPT_V3,
-                temperature=self.DEFAULT_TEMPERATURE,
-                max_tokens=self.MAX_TOKENS,
-            )
-        except Exception as exc:
-            logger.error("[拆书V3-方法论] LLM 调用失败: %s", exc)
-            return None
-
-        content = (resp or {}).get("content") if isinstance(resp, dict) else None
-        if not content:
-            logger.warning("[拆书V3-方法论] LLM 返回空内容")
-            return None
-
-        result = safe_parse_json(
-            content,
-            default=None,
-            expected_type="object",
-            log_prefix="[拆书V3-方法论]",
+        result = await self._call_and_parse_object(
+            prompt=user_prompt,
+            system_prompt=SYSTEM_PROMPT_V3,
+            temperature=self.DEFAULT_TEMPERATURE,
+            max_tokens=self.MAX_TOKENS,
+            label=_LABEL,
+            schema_hint=_SCHEMA_HINT,
         )
-        if not isinstance(result, dict):
-            logger.warning("[拆书V3-方法论] JSON 解析非 object")
+        if result is None:
             return None
-
         return self._sanitize(result)
 
     @staticmethod

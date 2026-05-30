@@ -39,6 +39,10 @@ class ProjectUpdate(BaseModel):
     chapter_count: Optional[int] = None
     narrative_perspective: Optional[str] = None
     character_count: Optional[int] = None
+    enable_bridge_planning: Optional[bool] = Field(
+        None,
+        description="是否启用桥段规划阶段（step 3.5）；默认 True，关闭后章纲走传统线性生成",
+    )
     # current_words 由章节内容自动计算，不允许手动修改
 
 
@@ -57,6 +61,10 @@ class ProjectResponse(ProjectBase):
     chapter_count: Optional[int] = None
     narrative_perspective: Optional[str] = None
     character_count: Optional[int] = None
+    enable_bridge_planning: bool = Field(
+        True,
+        description="是否启用桥段规划阶段（step 3.5）",
+    )
     created_at: datetime
     updated_at: datetime
     

@@ -17,6 +17,8 @@ export type ReferenceDimension =
   | 'entities' // V3.2-P2：实体类型分布/命名风格信号
   | 'relations' // V3.2-P2：关系类型频谱
   | 'events' // V3.2-P2：事件节奏与类型分布
+  | 'bridges' // V4.1：桥段范本库
+  | 'character_archive' // V4.1：完整角色档案
   | 'corpus'; // tab 6：灵感语料（来自 V2 表）
 
 export type ReferenceStrength = 'light' | 'medium' | 'deep';
@@ -55,6 +57,9 @@ export interface ReferencePackDetail extends ReferencePackSummary {
   entities?: Record<string, unknown> | null;
   relations?: Record<string, unknown> | null;
   events?: Record<string, unknown> | null;
+  // V4.1 桥段反推 + 角色档案
+  bridges?: Record<string, unknown> | null;
+  character_archive?: Record<string, unknown> | null;
 }
 
 /**
@@ -157,6 +162,30 @@ export interface WorldbuildingData {
   era_design?: Record<string, unknown> | null;
   location_hierarchy_design?: Record<string, unknown> | null;
   rule_balance_design?: Record<string, unknown> | null;
+}
+
+// V4.1 桥段范本库（BridgePatternAggregator 产出）
+export interface BridgesData {
+  total_bridges_detected?: number;
+  standard_bridges?: number;
+  variant_bridges?: number;
+  bridge_types?: Array<{
+    type: string;
+    count: number;
+    avg_score?: number;
+    typical_examples?: Array<Record<string, unknown>>;
+  }>;
+  rhythm_stats?: Record<string, unknown> | null;
+  golden_finger_diversity?: Record<string, unknown> | null;
+  [k: string]: unknown;
+}
+
+// V4.1 完整角色档案（CharacterArchiveBuilder 产出）
+export interface CharacterArchiveData {
+  protagonist_archetypes?: Array<Record<string, unknown>>;
+  antagonist_progression?: Array<Record<string, unknown>>;
+  support_character_techniques?: Array<Record<string, unknown>>;
+  [k: string]: unknown;
 }
 
 // ============================================================

@@ -1,5 +1,6 @@
 """AI服务封装 - 统一的OpenAI和Claude接口"""
-from typing import Optional, AsyncGenerator, List, Dict, Any
+import asyncio
+from typing import Optional, AsyncGenerator, AsyncIterator, List, Dict, Any, Awaitable, Callable
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
 from app.config import settings as app_settings
@@ -8,6 +9,169 @@ import httpx
 import json
 
 logger = get_logger(__name__)
+
+
+# ============================================================
+# 重试机制（T2.3，2026-05-21 加入；T2.3.2 流式扩展）
+# ----------------------------------------------------------------
+# 触发原因：单章 27368 tokens 长正文调用 LLM 时 httpx 抛
+# RemoteProtocolError: "Server disconnected without sending a
+# response"，下游章节抽取段级失败但被业务层吞掉，导致 1/3 段
+# 数据静默丢失。
+# ----------------------------------------------------------------
+# 设计：
+# - 只重试"瞬时网络错误"和"服务端 5xx / 429"
+# - 4xx（参数错、API key 错、prompt too long）一律不重试
+# - 指数 backoff: 1s → 2s → 4s（总等待 7s，可接受）
+# - T2.3.2 流式重试关键约束：只在"尚未输出任何 chunk"时重试，
+#   一旦 yield 过内容再失败必须抛出（避免消费方收到重复开头）
+# - Anthropic 非流式不加（AsyncAnthropic SDK 内置 max_retries=2），
+#   流式仍接入（SDK 的 retry 只覆盖建连握手）
+# ============================================================
+
+RETRIABLE_HTTPX_ERRORS: tuple = (
+    httpx.RemoteProtocolError,    # Server disconnected without sending a response
+    httpx.ReadTimeout,             # 读超时
+    httpx.ConnectTimeout,          # 连接超时
+    httpx.WriteTimeout,            # 写超时
+    httpx.PoolTimeout,             # 连接池超时
+    httpx.ConnectError,            # DNS / TCP 连接失败
+)
+RETRIABLE_STATUS_CODES: set[int] = {429, 500, 502, 503, 504}
+DEFAULT_MAX_RETRIES: int = 3
+DEFAULT_BASE_DELAY: float = 1.0
+
+
+async def _call_with_retry(
+    coro_factory: Callable[[], Awaitable[Any]],
+    *,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    base_delay: float = DEFAULT_BASE_DELAY,
+    context: str = "LLM",
+) -> Any:
+    """通用 retry helper：网络瞬断 / 5xx / 429 重试，4xx 不重试。
+
+    Args:
+        coro_factory: 无参 async 函数（lambda 或 async def），每次重试时调用
+            生成新的 coroutine（关键：coroutine 不能复用，所以传 factory）
+        max_retries: 最大尝试次数（含首次），3 = 首次 + 重试 2 次
+        base_delay: 指数 backoff 基数（秒），实际延迟 = base * 2^attempt
+        context: 日志标记（用于区分不同调用源，如 "OpenAI-deepseek-v3"）
+
+    Returns:
+        coro_factory() 的返回值
+
+    Raises:
+        非可重试异常：立即抛出
+        可重试异常：达到 max_retries 后抛出最后一次的异常
+    """
+    last_exc: Optional[BaseException] = None
+    for attempt in range(max_retries):
+        try:
+            return await coro_factory()
+        except RETRIABLE_HTTPX_ERRORS as exc:
+            last_exc = exc
+        except httpx.HTTPStatusError as exc:
+            # 4xx 错误（参数错 / API key 错 / 超长 prompt）不重试
+            if exc.response.status_code not in RETRIABLE_STATUS_CODES:
+                raise
+            last_exc = exc
+
+        if attempt < max_retries - 1:
+            delay = base_delay * (2 ** attempt)
+            logger.warning(
+                "⏳ [%s] LLM 瞬时失败 (尝试 %d/%d)，%.0fs 后重试: %s: %s",
+                context, attempt + 1, max_retries, delay,
+                type(last_exc).__name__, last_exc,
+            )
+            await asyncio.sleep(delay)
+
+    # 所有尝试都失败 → 抛出最后一次的异常
+    logger.error(
+        "❌ [%s] LLM 重试 %d 次仍失败: %s: %s",
+        context, max_retries,
+        type(last_exc).__name__ if last_exc else "Unknown",
+        last_exc,
+    )
+    assert last_exc is not None  # 类型守护
+    raise last_exc
+
+
+async def _stream_with_retry(
+    stream_factory: Callable[[], AsyncIterator[str]],
+    *,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    base_delay: float = DEFAULT_BASE_DELAY,
+    context: str = "LLM-Stream",
+) -> AsyncIterator[str]:
+    """流式 retry helper：仅在尚未输出任何 chunk 时安全重试（T2.3.2）。
+
+    关键设计：
+    - chunks_yielded == 0 时失败 → 可以安全重试（消费方还没收到任何内容）
+    - chunks_yielded > 0 时失败 → 立即抛出，绝不重试
+      （否则消费方会收到重复的开头部分，对 SSE / 章节生成等场景是致命的）
+
+    Args:
+        stream_factory: 无参函数，每次调用返回一个全新的 async iterator
+            （关键：每次 retry 必须重新建立流，不能复用同一个 iterator）
+        max_retries: 最大尝试次数（含首次），3 = 首次 + 重试 2 次
+        base_delay: 指数 backoff 基数（秒），实际延迟 = base * 2^attempt
+        context: 日志标记（如 "OpenAI-Stream-deepseek-v3"）
+
+    Yields:
+        从底层流转发的文本 chunk
+
+    Raises:
+        非可重试异常 / 已输出 chunk 后的任何异常 / 达到 max_retries 后的异常
+    """
+    last_exc: Optional[BaseException] = None
+    for attempt in range(max_retries):
+        chunks_yielded = 0
+        try:
+            async for chunk in stream_factory():
+                chunks_yielded += 1
+                yield chunk
+            # 成功完成整个流
+            return
+        except RETRIABLE_HTTPX_ERRORS as exc:
+            last_exc = exc
+            if chunks_yielded > 0:
+                logger.error(
+                    "❌ [%s] 流式中途断（已输出 %d chunks），不重试避免重复内容: %s: %s",
+                    context, chunks_yielded, type(exc).__name__, exc,
+                )
+                raise
+        except httpx.HTTPStatusError as exc:
+            # 4xx 立即抛；5xx/429 可重试（但只在 0 chunk 时）
+            if exc.response.status_code not in RETRIABLE_STATUS_CODES:
+                raise
+            last_exc = exc
+            if chunks_yielded > 0:
+                logger.error(
+                    "❌ [%s] 流式中途断（已输出 %d chunks），不重试避免重复内容: HTTP %d",
+                    context, chunks_yielded, exc.response.status_code,
+                )
+                raise
+
+        # 仅 0 chunk 失败到这里 → 准备 backoff 重试
+        if attempt < max_retries - 1:
+            delay = base_delay * (2 ** attempt)
+            logger.warning(
+                "⏳ [%s] 流式连接瞬时失败 (尝试 %d/%d, 0 chunk)，%.0fs 后重试: %s: %s",
+                context, attempt + 1, max_retries, delay,
+                type(last_exc).__name__, last_exc,
+            )
+            await asyncio.sleep(delay)
+
+    # 所有尝试都失败 → 抛出最后一次的异常
+    logger.error(
+        "❌ [%s] 流式重试 %d 次仍失败: %s: %s",
+        context, max_retries,
+        type(last_exc).__name__ if last_exc else "Unknown",
+        last_exc,
+    )
+    assert last_exc is not None
+    raise last_exc
 
 
 class AIService:
@@ -226,7 +390,62 @@ class AIService:
                 yield chunk
         else:
             raise ValueError(f"不支持的AI提供商: {provider}")
-    
+
+    async def generate_text_stream_collect(
+        self,
+        prompt: str,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        system_prompt: Optional[str] = None,
+        context: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """流式生成 + 累积内容 = 一次性返完整 content（取代 generate_text 用于长 JSON 输出）。
+
+        设计目的：
+        - 中转代理网关常对非流式请求 30-60s 就 504/断连（首字节没到就掐）
+        - 流式请求只要持续有 chunk 到 client，timeout 计时器就重置，可输出 10+ 分钟
+        - 本方法对调用方提供与 `generate_text` 完全一致的返回格式（{"content", "finish_reason"}），
+          但底层走 `generate_text_stream`，自动免疫中转代理 timeout 问题
+        - 已内置 `_stream_with_retry`：未输出任何 chunk 时可安全重试，已输出后中途断直接抛
+          （避免重复内容污染 JSON 解析）
+
+        Args:
+            prompt / provider / model / temperature / max_tokens / system_prompt: 同 generate_text
+            context: 仅用于日志标记（不影响逻辑），便于排查跨调用方的流式累积日志
+
+        Returns:
+            {"content": <累积后的完整文本>, "finish_reason": "stream_complete"}
+
+        Raises:
+            底层流式异常会原样抛出；调用方应像 `generate_text` 一样捕获并处理。
+        """
+        label = context or f"stream-collect-{model or self.default_model}"
+        accumulated_chunks: list[str] = []
+        chunk_count = 0
+        async for chunk in self.generate_text_stream(
+            prompt=prompt,
+            provider=provider,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            system_prompt=system_prompt,
+        ):
+            if chunk:
+                accumulated_chunks.append(chunk)
+                chunk_count += 1
+
+        content = "".join(accumulated_chunks)
+        logger.info(
+            "✅ [%s] 流式累积完成: chunks=%d, content_len=%d",
+            label, chunk_count, len(content),
+        )
+        return {
+            "content": content,
+            "finish_reason": "stream_complete",
+        }
+
     async def _generate_openai(
         self,
         prompt: str,
@@ -266,12 +485,19 @@ class AIService:
             
             logger.debug(f"  - 请求URL: {url}")
             logger.debug(f"  - 请求头: Authorization=Bearer ***")
-            
-            response = await self.openai_http_client.post(url, headers=headers, json=payload)
-            response.raise_for_status()
-            
+
+            # T2.3: 用 retry helper 包裹 HTTP 请求，瞬时失败自动重试 3 次
+            async def _do_request():
+                resp = await self.openai_http_client.post(url, headers=headers, json=payload)
+                resp.raise_for_status()
+                return resp
+
+            response = await _call_with_retry(
+                _do_request, context=f"OpenAI-{model}",
+            )
+
             data = response.json()
-            
+
             logger.info(f"✅ OpenAI API调用成功")
             logger.info(f"  - 响应ID: {data.get('id', 'N/A')}")
             logger.info(f"  - 选项数量: {len(data.get('choices', []))}")
@@ -385,12 +611,19 @@ class AIService:
                     elif tool_choice == "none":
                         payload["tool_choice"] = "none"
                         logger.info(f"  - tool_choice: none（禁用工具）")
-            
-            response = await self.openai_http_client.post(url, headers=headers, json=payload)
-            response.raise_for_status()
-            
+
+            # T2.3: 用 retry helper 包裹 HTTP 请求，瞬时失败自动重试 3 次
+            async def _do_request():
+                resp = await self.openai_http_client.post(url, headers=headers, json=payload)
+                resp.raise_for_status()
+                return resp
+
+            response = await _call_with_retry(
+                _do_request, context=f"OpenAI-{model}-tools",
+            )
+
             data = response.json()
-            
+
             logger.info(f"✅ OpenAI API调用成功")
             logger.debug(f"  - 完整API响应: {data}")
             
@@ -516,79 +749,88 @@ class AIService:
         max_tokens: int,
         system_prompt: Optional[str]
     ) -> AsyncGenerator[str, None]:
-        """使用OpenAI流式生成文本"""
+        """使用OpenAI流式生成文本（T2.3.2 已接入流式 retry）"""
         if not self.openai_http_client:
             raise ValueError("OpenAI客户端未初始化，请检查API key配置")
-        
+
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
-        
-        try:
-            logger.info(f"🔵 开始调用OpenAI流式API（直接HTTP请求）")
-            logger.info(f"  - 模型: {model}")
-            logger.info(f"  - Prompt长度: {len(prompt)} 字符")
-            logger.info(f"  - 最大tokens: {max_tokens}")
-            
-            url = f"{self.openai_base_url}/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {self.openai_api_key}",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "model": model,
-                "messages": messages,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                "stream": True
-            }
-            
-            async with self.openai_http_client.stream('POST', url, headers=headers, json=payload) as response:
+
+        logger.info(f"🔵 开始调用OpenAI流式API（直接HTTP请求）")
+        logger.info(f"  - 模型: {model}")
+        logger.info(f"  - Prompt长度: {len(prompt)} 字符")
+        logger.info(f"  - 最大tokens: {max_tokens}")
+
+        url = f"{self.openai_base_url}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.openai_api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True
+        }
+
+        async def _stream_once() -> AsyncIterator[str]:
+            """单次建流 + 转发 chunk 的内部生成器。每次 retry 都会重新调用。"""
+            async with self.openai_http_client.stream(
+                'POST', url, headers=headers, json=payload,
+            ) as response:
                 response.raise_for_status()
                 logger.info(f"✅ OpenAI流式API连接成功，开始接收数据...")
-                
+
                 chunk_count = 0
                 has_content = False
                 finish_reason = None
-                
+
                 async for line in response.aiter_lines():
-                    if line.startswith('data: '):
-                        data_str = line[6:]
-                        if data_str.strip() == '[DONE]':
-                            break
-                        
-                        try:
-                            import json
-                            data = json.loads(data_str)
-                            if 'choices' in data and len(data['choices']) > 0:
-                                choice = data['choices'][0]
-                                delta = choice.get('delta', {})
-                                finish_reason = choice.get('finish_reason') or finish_reason
-                                
-                                # DeepSeek R1特殊处理：只收集content（最终答案），忽略reasoning_content（思考过程）
-                                # reasoning_content是AI的思考过程，不是我们需要的JSON结果
-                                content = delta.get('content', '')
-                                
-                                if content:
-                                    chunk_count += 1
-                                    has_content = True
-                                    yield content
-                        except json.JSONDecodeError:
-                            continue
-                
-                # 检查是否因长度限制截断
+                    if not line.startswith('data: '):
+                        continue
+                    data_str = line[6:]
+                    if data_str.strip() == '[DONE]':
+                        break
+
+                    try:
+                        data = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+
+                    if not data.get('choices'):
+                        continue
+                    choice = data['choices'][0]
+                    delta = choice.get('delta', {})
+                    finish_reason = choice.get('finish_reason') or finish_reason
+
+                    # DeepSeek R1: 只取 content，忽略 reasoning_content
+                    content = delta.get('content', '')
+                    if content:
+                        chunk_count += 1
+                        has_content = True
+                        yield content
+
                 if finish_reason == 'length':
                     logger.warning(f"⚠️  流式响应因达到max_tokens限制而被截断")
                     logger.warning(f"  - 当前max_tokens: {max_tokens}")
                     logger.warning(f"  - 建议: 增加max_tokens参数（推荐2000+）")
-                
+
                 if not has_content:
                     logger.warning(f"⚠️  流式响应未返回任何内容")
                     logger.warning(f"  - 完成原因: {finish_reason}")
-                
-                logger.info(f"✅ OpenAI流式生成完成，共接收 {chunk_count} 个chunk，完成原因: {finish_reason}")
-            
+
+                logger.info(
+                    f"✅ OpenAI流式生成完成，共接收 {chunk_count} 个chunk，完成原因: {finish_reason}"
+                )
+
+        try:
+            async for chunk in _stream_with_retry(
+                _stream_once, context=f"OpenAI-Stream-{model}",
+            ):
+                yield chunk
         except httpx.TimeoutException as e:
             logger.error(f"❌ OpenAI流式API超时")
             logger.error(f"  - 错误: {str(e)}")
@@ -596,7 +838,11 @@ class AIService:
             raise TimeoutError(f"AI服务超时（180秒），请稍后重试或减少上下文长度") from e
         except httpx.HTTPStatusError as e:
             logger.error(f"❌ OpenAI流式API调用失败 (HTTP {e.response.status_code})")
-            logger.error(f"  - 错误信息: {await e.response.aread()}")
+            try:
+                body_preview = await e.response.aread()
+            except Exception:
+                body_preview = b"(unable to read body)"
+            logger.error(f"  - 错误信息: {body_preview}")
             raise
         except Exception as e:
             logger.error(f"❌ OpenAI流式API调用失败: {str(e)}")
@@ -636,16 +882,17 @@ class AIService:
         max_tokens: int,
         system_prompt: Optional[str]
     ) -> AsyncGenerator[str, None]:
-        """使用Anthropic流式生成文本"""
+        """使用Anthropic流式生成文本（T2.3.2 已接入流式 retry）"""
         if not self.anthropic_client:
             raise ValueError("Anthropic客户端未初始化，请检查API key配置")
-        
-        try:
-            logger.info(f"🔵 开始调用Anthropic流式API")
-            logger.info(f"  - 模型: {model}")
-            logger.info(f"  - Prompt长度: {len(prompt)} 字符")
-            logger.info(f"  - 最大tokens: {max_tokens}")
-            
+
+        logger.info(f"🔵 开始调用Anthropic流式API")
+        logger.info(f"  - 模型: {model}")
+        logger.info(f"  - Prompt长度: {len(prompt)} 字符")
+        logger.info(f"  - 最大tokens: {max_tokens}")
+
+        async def _stream_once() -> AsyncIterator[str]:
+            """单次建流 + 转发 chunk 的内部生成器。每次 retry 都会重新调用。"""
             async with self.anthropic_client.messages.stream(
                 model=model,
                 max_tokens=max_tokens,
@@ -654,14 +901,17 @@ class AIService:
                 messages=[{"role": "user", "content": prompt}]
             ) as stream:
                 logger.info(f"✅ Anthropic流式API连接成功，开始接收数据...")
-                
                 chunk_count = 0
                 async for text in stream.text_stream:
                     chunk_count += 1
                     yield text
-                
                 logger.info(f"✅ Anthropic流式生成完成，共接收 {chunk_count} 个chunk")
-                
+
+        try:
+            async for chunk in _stream_with_retry(
+                _stream_once, context=f"Anthropic-Stream-{model}",
+            ):
+                yield chunk
         except httpx.TimeoutException as e:
             logger.error(f"❌ Anthropic流式API超时")
             logger.error(f"  - 错误: {str(e)}")

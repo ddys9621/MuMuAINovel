@@ -36,7 +36,11 @@ import type { MCPSelectorValue } from '@/components/MCPSelector';
 interface InspirationDrawerProps {
   open: boolean;
   onClose: () => void;
-  onEnterProject: (projectId: string) => void;
+  /** T2.1：第二参带上 outline 完成时后端给的下一步路由建议 */
+  onEnterProject: (
+    projectId: string,
+    options?: { nextRoute?: 'bridge_planning' | 'chapter_outlines' },
+  ) => void;
   onProjectCreated?: (projectId: string) => void | Promise<void>;
 }
 
@@ -423,7 +427,13 @@ export default function InspirationDrawer({
                 state={state}
                 wizardData={wizardData}
                 originalBrief={originalBrief}
-                onEnterProject={() => state.projectId && onEnterProject(state.projectId)}
+                onEnterProject={() =>
+                  state.projectId &&
+                  onEnterProject(
+                    state.projectId,
+                    state.nextWizardRoute ? { nextRoute: state.nextWizardRoute } : undefined,
+                  )
+                }
               />
             ) : flowStep === 'confirm' ? (
               <ConfirmStageCard
@@ -910,7 +920,9 @@ function GenerationStageCard({
             《{wizardData.title || state.projectTitle || '项目'}》创建完成
           </h3>
           <p className="mt-2 text-sm leading-7 text-content-secondary">
-            世界观、角色和故事大纲都已生成完毕，可以进入项目开始创作了。
+            {state.nextWizardRoute === 'bridge_planning'
+              ? '世界观、角色和故事大纲均已生成。下一步进入「桥段规划页」让 AI 设计桥段（C1→C4 四章结构），完成后可一键展开为完整章纲。'
+              : '世界观、角色和故事大纲都已生成完毕，可以进入项目开始创作了。'}
           </p>
           {state.projectId && (
             <button
@@ -918,7 +930,9 @@ function GenerationStageCard({
               className="mt-5 inline-flex items-center gap-2 rounded-xl bg-brand px-8 py-3.5 text-base font-medium text-white shadow-lg shadow-brand/20 transition hover:bg-brand-600 active:scale-[0.98]"
             >
               <Sparkles className="h-5 w-5" />
-              进入项目开始写作
+              {state.nextWizardRoute === 'bridge_planning'
+                ? '进入桥段规划'
+                : '进入项目开始写作'}
             </button>
           )}
         </div>

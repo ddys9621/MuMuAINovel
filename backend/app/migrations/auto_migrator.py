@@ -331,6 +331,50 @@ async def ensure_project_generation_prompt_column(engine: AsyncEngine):
             logger.info("✅ projects.generation_prompt already exists")
 
 
+async def ensure_project_bridge_planning_column(engine: AsyncEngine):
+    """Ensure F3 projects.enable_bridge_planning column exists (T2.1 prereq).
+
+    场景：旧 DB 升级到引入桥段规划阶段（step 3.5）的版本。默认 True，
+    确保新拆书向导自动进入桥段规划；用户可在前端关闭以走传统线性章纲路径。
+    """
+    async with engine.begin() as conn:
+        if not await column_exists(conn, "projects", "enable_bridge_planning"):
+            logger.info("🔧 Adding projects.enable_bridge_planning column (F3/T2.1)")
+            await apply_sql(conn, [
+                """ALTER TABLE projects
+                ADD COLUMN enable_bridge_planning BOOLEAN NOT NULL DEFAULT 1""",
+            ])
+        else:
+            logger.info("✅ projects.enable_bridge_planning already exists")
+
+
+async def ensure_plot_bridge_beat_columns(engine: AsyncEngine):
+    """Ensure V4.1 K2 分层契合字段在 plot_bridges 表存在（方案 C 前置）。
+
+    新增 3 列：
+    - beat_index INTEGER NULL  所属节点 index（对应 PlotLine.timeline_data.beats[].index）
+    - beat_coverage_start REAL NULL  本桥段覆盖该节点的起始进度（0.0-1.0）
+    - beat_coverage_end   REAL NULL  本桥段覆盖该节点的结束进度（0.0-1.0）
+
+    场景：旧 DB 升级到引入「桥段按主线节点分配」的版本。所有列都允许 NULL，
+    free 模式（不绑节点）旧桥段记录无影响。
+    """
+    beat_columns = [
+        ("beat_index", "INTEGER"),
+        ("beat_coverage_start", "REAL"),
+        ("beat_coverage_end", "REAL"),
+    ]
+    async with engine.begin() as conn:
+        for col_name, col_def in beat_columns:
+            if not await column_exists(conn, "plot_bridges", col_name):
+                logger.info("🔧 Adding plot_bridges.%s column (V4.1 方案 C)", col_name)
+                await apply_sql(conn, [
+                    f"ALTER TABLE plot_bridges ADD COLUMN {col_name} {col_def}",
+                ])
+            else:
+                logger.info("✅ plot_bridges.%s already exists", col_name)
+
+
 async def run_auto_migrations(engine: AsyncEngine):
     try:
         await ensure_chapter_outline_columns(engine)
@@ -343,6 +387,8 @@ async def run_auto_migrations(engine: AsyncEngine):
         await ensure_book_dissect_v31_columns(engine)  # 拆书 V3.1 字段
         await ensure_reference_pack_v32_columns(engine)  # 拆书 V3.2 synopsis 复活
         await ensure_project_generation_prompt_column(engine)
+        await ensure_project_bridge_planning_column(engine)  # F3：桥段规划开关（T2.1 前置）
+        await ensure_plot_bridge_beat_columns(engine)  # V4.1 方案 C：桥段绑定剧情线节点
         logger.info("✅ Auto migrations finished")
     except Exception as exc:
         logger.error("❌ Auto migrations failed: %s", exc, exc_info=True)

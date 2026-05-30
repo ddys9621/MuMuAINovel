@@ -37,6 +37,13 @@ from app.models.reference_pack import ReferencePack
 from app.services.ai_service import AIService
 from app.services.book_dissect.alias_resolver import AliasResolver
 from app.services.book_dissect.archetype_generator import ArchetypeGenerator
+from app.services.book_dissect.bridge_detector import BridgeDetector  # V4.1
+from app.services.book_dissect.bridge_pattern_aggregator import (  # V4.1
+    BridgePatternAggregator,
+)
+from app.services.book_dissect.character_archive_builder import (  # V4.1
+    CharacterArchiveBuilder,
+)
 from app.services.book_dissect.chapter_fact_extractor import (
     ChapterExtractionError,
     ChapterFactExtractor,
@@ -236,7 +243,6 @@ async def run_extraction_v2_background(
             await db_session.commit()
 
             # 调一次 LLM 抽取整本
-            dictionary: list[DictionaryEntry] = []
             try:
                 lc_extractor = LongContextExtractor(ai_service=ai_service)
                 extracted_facts = await lc_extractor.extract_all(target_chapters)
@@ -246,6 +252,16 @@ async def run_extraction_v2_background(
                     f"长上下文抽取失败：{exc}",
                 )
                 return
+
+            # V3.1 长上下文路径修复（F1）：
+            # 长上下文模式跳过了 V2 字典分类阶段（省 1 次 LLM），但 EntityAggregator
+            # 依赖字典提供 entity_type 信息。从 ChapterFact 反推一个简单字典，避免
+            # type_by_name 为空导致所有实体走 fallback 默认值，造成数据质量降级。
+            dictionary: list[DictionaryEntry] = _build_dictionary_from_facts(extracted_facts)
+            logger.info(
+                "[V3.1-长上下文] task=%s 从 ChapterFact 反推字典 entries=%d",
+                task_id, len(dictionary),
+            )
 
             # 写章节事实表
             for fact in extracted_facts:
@@ -420,6 +436,94 @@ async def run_extraction_v2_background(
             for k in ("entities", "relations", "events"):
                 pack_payload.setdefault(k, None)
 
+        # ============================================================
+        # V4.1 Phase 0：桥段反推 + 角色档案聚合（无 LLM，纯算法）
+        # 设计：v4_design.md §11.2 (BridgeDetector + BridgePatternAggregator)
+        #       v4_design.md §11.4 (CharacterArchiveBuilder)
+        # 输入：已聚合的 entities / relations / timeline + extracted_facts
+        # 输出：bridges_json / character_archive_json 两个 V4.1 维度
+        # 失败策略：聚合失败 → 该维度为 None，不阻塞主流程
+        # ============================================================
+        try:
+            # V4.2 重构：传入 ai_service 启用 LLM 主驱动模式
+            # detect_bridges 已改为 async；LLM 失败会自动回退到 rule 模式
+            # V4.2.2：传入 target_chapters（原文）让 short_form 路径用正文喂 LLM，
+            # 绕过 summary 压缩限制 → 单章场景能识别多个独立桥段
+            bridge_detector = BridgeDetector(
+                ai_service=ai_service,
+                enable_llm=True,
+            )
+            bridges = await bridge_detector.detect_bridges(
+                extracted_facts,
+                raw_chapters=target_chapters,  # V4.2.2 新增
+            )
+            bridge_agg = BridgePatternAggregator()
+            bridges_payload = bridge_agg.aggregate(
+                bridges,
+                chapter_facts=extracted_facts,
+                events=timeline,
+            )
+            if bridges_payload:
+                pack_payload["bridges"] = bridges_payload
+                generated_dims.append("bridges")
+                # V4.2 日志：按 detection_origin 分类统计
+                llm_count = sum(1 for b in bridges if b.detection_origin == "llm")
+                rule_count = len(bridges) - llm_count
+                logger.info(
+                    "[V4.2-bridges] task=%s 总数=%d 标准=%d 来源(LLM=%d, rule=%d)",
+                    task_id, len(bridges),
+                    sum(1 for b in bridges if b.is_standard),
+                    llm_count, rule_count,
+                )
+            else:
+                pack_payload["bridges"] = None
+        except Exception as _bridge_err:  # pragma: no cover
+            logger.warning(
+                "[V4.2-bridges] task=%s 聚合失败（已跳过）：%s", task_id, _bridge_err,
+            )
+            pack_payload["bridges"] = None
+
+        try:
+            arch_builder = CharacterArchiveBuilder()
+            arch_payload = arch_builder.build(
+                entities=entities,
+                relations=relations,
+                events=timeline,
+                chapter_facts=extracted_facts,
+                total_chapters=task.chapters_total or 0,
+            )
+            # V4.2.3：宽松判定 —— 三大子档案任一非空都算有效
+            # 原逻辑只要求 protagonist_archetypes 非空，过于严格
+            # 经过 L2/L3 双兜底后理论上 protagonist 必有，但极端场景（无 person 实体）
+            # 仍可能空；此时只要有 antagonist / supporting 也有展示价值
+            has_data = bool(arch_payload and (
+                arch_payload.get("protagonist_archetypes")
+                or arch_payload.get("antagonist_progression")
+                or arch_payload.get("support_character_techniques")
+            ))
+            if has_data:
+                pack_payload["character_archive"] = arch_payload
+                generated_dims.append("character_archive")
+                logger.info(
+                    "[V4.1-char_archive] task=%s protagonists=%d antagonists=%d supports=%d",
+                    task_id,
+                    len(arch_payload.get("protagonist_archetypes", [])),
+                    len(arch_payload.get("antagonist_progression", [])),
+                    len(arch_payload.get("support_character_techniques", [])),
+                )
+            else:
+                pack_payload["character_archive"] = None
+                logger.warning(
+                    "[V4.1-char_archive] task=%s 无任何角色数据（entities=%d 含 person=%d）",
+                    task_id, len(entities),
+                    sum(1 for e in entities if getattr(e, "entity_type", "") == "person"),
+                )
+        except Exception as _arch_err:  # pragma: no cover
+            logger.warning(
+                "[V4.1-char_archive] task=%s 聚合失败（已跳过）：%s", task_id, _arch_err,
+            )
+            pack_payload["character_archive"] = None
+
         # 7. 写入 ReferencePack
         pack_id = await _write_reference_pack(
             db_session=db_session,
@@ -427,6 +531,36 @@ async def run_extraction_v2_background(
             payload=pack_payload,
             generated_dims=generated_dims,
         )
+
+        # ============================================================
+        # V4.4 K5：一次性产出全部预压缩字段（8 维 × 3 档 = 24 个字段）
+        # 设计：v4_design.md §10.1.1
+        # 时机：所有 _json 字段已写入 DB 之后，运行时注入直接 SELECT 读
+        # 失败策略：预压缩失败 → 24 字段保持 NULL，注入端 fallback 实时压缩
+        # ============================================================
+        try:
+            # 重新查 pack，确保拿到最新的 _json 字段
+            _pack_row = await db_session.execute(
+                select(ReferencePack).where(ReferencePack.id == pack_id)
+            )
+            _pack = _pack_row.scalar_one_or_none()
+            if _pack is not None:
+                from app.services.reference_pack.dimension_compressor import (
+                    compress_pack_to_db,
+                )
+                precompressed = compress_pack_to_db(_pack)
+                for field_name, text in precompressed.items():
+                    setattr(_pack, field_name, text)
+                await db_session.flush()
+                logger.info(
+                    "[V4.4-K5] task=%s 预压缩生成 %d 字段",
+                    task_id, len(precompressed),
+                )
+        except Exception as _precomp_err:  # pragma: no cover
+            logger.warning(
+                "[V4.4-K5] task=%s 预压缩失败（已跳过，运行时 fallback）：%s",
+                task_id, _precomp_err,
+            )
 
         # 8. 收尾
         # task.result_json 改为精简版：只存元信息和指针，详细内容在 ReferencePack
@@ -504,6 +638,84 @@ def _serialize_chapter_fact(fact: ChapterFact) -> str:
     """把 ChapterFact 序列化为 JSON 字符串（dataclass → dict）。"""
     from dataclasses import asdict
     return json.dumps(asdict(fact), ensure_ascii=False)
+
+
+def _build_dictionary_from_facts(
+    facts: list[ChapterFact],
+) -> list[DictionaryEntry]:
+    """V3.1 长上下文路径专用：从 ChapterFact 反推一个简单字典（F1 修复）。
+
+    长上下文模式跳过了 V2 的字典分类阶段（节省 1 次 LLM 调用），但
+    EntityAggregator 依赖字典提供 entity_type 信息。本函数从 ChapterFact
+    各结构化字段（characters / locations / item_events / org_events /
+    new_concepts）直接反推 entity_type，避免 EntityAggregator 拿到空字典
+    只能 fallback 到默认值的数据降级。
+
+    同名实体出现在多类时按优先级取最高优先级（与 _entity_type_priority 一致）：
+      person > location > org > item > concept
+
+    Args:
+        facts: 长上下文抽取产出的 ChapterFact 列表
+
+    Returns:
+        list[DictionaryEntry] —— 直接喂给 EntityAggregator.aggregate 的字典
+    """
+    from collections import defaultdict
+    from app.services.book_dissect.v2_types import EntityType
+
+    types_by_name: dict[str, set[str]] = defaultdict(set)
+    freq_by_name: dict[str, int] = defaultdict(int)
+
+    for fact in facts:
+        # 角色（含别名）→ person
+        for c in fact.characters:
+            if c.name:
+                types_by_name[c.name].add(EntityType.PERSON.value)
+                freq_by_name[c.name] += 1
+            for alias in c.new_aliases:
+                if alias:
+                    types_by_name[alias].add(EntityType.PERSON.value)
+                    freq_by_name[alias] += 1
+        # 地点 → location
+        for loc in fact.locations:
+            if loc.name:
+                types_by_name[loc.name].add(EntityType.LOCATION.value)
+                freq_by_name[loc.name] += 1
+        # 物品 → item
+        for ie in fact.item_events:
+            if ie.name:
+                types_by_name[ie.name].add(EntityType.ITEM.value)
+                freq_by_name[ie.name] += 1
+        # 组织 → org
+        for oe in fact.org_events:
+            if oe.name:
+                types_by_name[oe.name].add(EntityType.ORG.value)
+                freq_by_name[oe.name] += 1
+        # 概念 → concept
+        for nc in fact.new_concepts:
+            if nc.name:
+                types_by_name[nc.name].add(EntityType.CONCEPT.value)
+                freq_by_name[nc.name] += 1
+
+    # 优先级（与 entity_aggregator._entity_type_priority 一致）
+    PRIORITY = (
+        EntityType.PERSON.value,
+        EntityType.LOCATION.value,
+        EntityType.ORG.value,
+        EntityType.ITEM.value,
+        EntityType.CONCEPT.value,
+    )
+
+    entries: list[DictionaryEntry] = []
+    for name, types in types_by_name.items():
+        chosen = next((t for t in PRIORITY if t in types), EntityType.PERSON.value)
+        entries.append(DictionaryEntry(
+            name=name,
+            entity_type=chosen,
+            frequency=freq_by_name[name],
+            confidence="medium",  # 反推置信度中等（无 LLM 二次确认）
+        ))
+    return entries
 
 
 async def _write_entities(
@@ -659,6 +871,8 @@ async def _write_reference_pack(
             entities_json=_dump("entities"),  # V3.2-P2
             relations_json=_dump("relations"),  # V3.2-P2
             events_json=_dump("events"),  # V3.2-P2
+            bridges_json=_dump("bridges"),  # V4.1
+            character_archive_json=_dump("character_archive"),  # V4.1
             status=status,
             generated_dimensions=json.dumps(generated_dims, ensure_ascii=False),
             error_message=error_message,
@@ -676,6 +890,8 @@ async def _write_reference_pack(
         pack.entities_json = _dump("entities")  # V3.2-P2
         pack.relations_json = _dump("relations")  # V3.2-P2
         pack.events_json = _dump("events")  # V3.2-P2
+        pack.bridges_json = _dump("bridges")  # V4.1
+        pack.character_archive_json = _dump("character_archive")  # V4.1
         pack.status = status
         pack.generated_dimensions = json.dumps(generated_dims, ensure_ascii=False)
         pack.error_message = error_message

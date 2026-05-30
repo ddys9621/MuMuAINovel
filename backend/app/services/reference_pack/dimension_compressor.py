@@ -31,7 +31,8 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-# 6 个支持预压缩的维度（corpus 不预压缩，依赖动态 BM25）
+# 8 个支持预压缩的维度（corpus 不预压缩，依赖动态 BM25）
+# V4.1 加入 bridges + character_archive，与 ReferencePack.DIMENSIONS_WITH_PRECOMPRESSION 对齐
 COMPRESSIBLE_DIMENSIONS = (
     "methodology",
     "style",
@@ -39,6 +40,8 @@ COMPRESSIBLE_DIMENSIONS = (
     "archetypes",
     "worldbuilding",
     "synopsis",
+    "bridges",            # V4.1：桥段范本（_compress_generic_dim 处理顶层 dict，子级有 list 自动 fallback）
+    "character_archive",  # V4.1：角色档案（同上）
 )
 
 # 三档配额（字符数，比 token 大约 1.5 倍）
@@ -80,6 +83,17 @@ HUMANIZE_KEY = {
     "name": "风格名",
     "traits": "特征",
     "description": "描述",
+    # V4.1 bridges
+    "bridge_types": "桥段类型分布",
+    "rhythm_stats": "节奏指标",
+    "golden_finger_diversity": "金手指多样性",
+    "total_bridges_detected": "桥段总数",
+    "standard_bridges": "标准桥段数",
+    "variant_bridges": "变体桥段数",
+    # V4.1 character_archive
+    "protagonist_archetypes": "主角范式",
+    "antagonist_progression": "反派演进",
+    "support_character_techniques": "配角手法",
 }
 
 

@@ -85,6 +85,8 @@ export interface WizardState {
   generationMeta: GenerationMeta;
   refinementContexts: Partial<Record<OptionGenerationStep, RefinementContext>>;
   retryContext: RetryContext | null;
+  /** T2.1：outline 完成后后端建议的下一步路由（bridge_planning 或 chapter_outlines） */
+  nextWizardRoute: 'bridge_planning' | 'chapter_outlines' | null;
 }
 
 export type WizardAction =
@@ -106,6 +108,7 @@ export type WizardAction =
   | { type: 'GEN_ACTIVITY' }
   | { type: 'GEN_TICK' }
   | { type: 'GEN_PROJECT_CREATED'; payload: string }
+  | { type: 'GEN_NEXT_ROUTE'; payload: 'bridge_planning' | 'chapter_outlines' }
   | { type: 'GEN_COMPLETE' }
   | { type: 'GEN_ERROR'; payload: string }
   | { type: 'SET_WIZARD_DATA'; payload: Partial<WizardData> }
@@ -133,4 +136,5 @@ export const createInitialState = (): WizardState => ({
   generationMeta: { startedAt: null, lastUpdateAt: null, elapsedSec: 0, chunks: 0, stallLevel: 'none' },
   refinementContexts: {},
   retryContext: null,
+  nextWizardRoute: null,
 });
