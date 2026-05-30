@@ -12,9 +12,10 @@
  *
  * K2 设计：桥段四章结构（C1 代入+信息差 / C2 拉扯+开装 / C3 兑现爽点 / C4 善后+下一目标）
  */
-import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
+  Alert,
   Button,
   Card,
   Empty,
@@ -23,6 +24,7 @@ import {
   InputNumber,
   Modal,
   Popconfirm,
+  Radio,
   Select,
   Spin,
   Tag,
@@ -37,10 +39,12 @@ import {
   ReloadOutlined,
   PlusOutlined,
   RocketOutlined,
+  CheckCircleOutlined,
 } from '@ant-design/icons';
 import { toast } from 'sonner';
 
 import { plotBridgesApi } from '@/services/plotBridgesApi';
+import { settingsApi } from '@/services/api';
 import {
   BRIDGE_STATUS_COLOR,
   BRIDGE_STATUS_LABEL,
@@ -50,8 +54,10 @@ import {
 
 const { Text, Paragraph } = Typography;
 
-// 模型选项（与 backend MODEL_TIERS 对齐的主流模型）
-const MODEL_OPTIONS = [
+type ModelOption = { value: string; label: string };
+
+// 兜底候选：用户未配置 API、加载失败、或使用 Anthropic（无公开 /models 接口）时显示
+const FALLBACK_MODEL_OPTIONS: ModelOption[] = [
   { value: 'deepseek-v3', label: 'DeepSeek V3（推荐，64K 大窗口）' },
   { value: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5（旗舰，200K）' },
   { value: 'qwen-max', label: '通义千问 Max（32K）' },
@@ -60,14 +66,89 @@ const MODEL_OPTIONS = [
   { value: 'glm-4', label: 'GLM-4（64K）' },
 ];
 
+/**
+ * 拉取用户在「设置」中配置的 API 的真实可用模型列表。
+ * - 默认模型 = Settings 里的 llm_model（如有）
+ * - Anthropic 没公开 /models 接口 → 走 fallback + 补上用户的默认模型
+ * - 拉取失败 → 静默降级到 fallback，不阻塞 UI
+ */
+function useAvailableModels() {
+  const [options, setOptions] = useState<ModelOption[]>(FALLBACK_MODEL_OPTIONS);
+  const [defaultModel, setDefaultModel] = useState<string>('');
+  const [loading, setLoading] = useState(false);
+
+  const loadModels = useCallback(async (showToast: boolean) => {
+    try {
+      setLoading(true);
+      const settings = await settingsApi.getSettings();
+      const userDefault = settings?.llm_model || '';
+      if (userDefault) setDefaultModel(userDefault);
+
+      const provider = settings?.api_provider || 'openai';
+
+      // Anthropic 没公开 /models 接口
+      if (provider === 'anthropic') {
+        if (userDefault && !FALLBACK_MODEL_OPTIONS.some((o) => o.value === userDefault)) {
+          setOptions([{ value: userDefault, label: `${userDefault}（设置中默认）` }, ...FALLBACK_MODEL_OPTIONS]);
+        }
+        return;
+      }
+
+      if (!settings?.api_key || !settings?.api_base_url) {
+        // 未配置 API → 保留 fallback
+        return;
+      }
+
+      const res = await settingsApi.getAvailableModels({
+        api_key: settings.api_key,
+        api_base_url: settings.api_base_url,
+        provider,
+      });
+      const fetched = (res.models || []).map((m) => ({ value: m.value, label: m.label }));
+      if (fetched.length) {
+        // 若用户默认模型不在返回列表里，补到最前（避免下拉框看不到当前默认）
+        const finalList =
+          userDefault && !fetched.some((o) => o.value === userDefault)
+            ? [{ value: userDefault, label: `${userDefault}（设置中默认）` }, ...fetched]
+            : fetched;
+        setOptions(finalList);
+        if (showToast) toast.success(`已加载 ${fetched.length} 个可用模型`);
+      } else if (showToast) {
+        toast.warning('API 未返回模型列表，使用内置候选');
+      }
+    } catch (err) {
+      console.warn('[PlotBridges] 加载用户模型失败，使用内置候选:', err);
+      if (showToast) toast.warning('加载模型列表失败，使用内置候选');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadModels(false);
+  }, [loadModels]);
+
+  return { options, defaultModel, loading, refresh: () => void loadModels(true) };
+}
+
 export default function PlotBridgesPage() {
   const { projectId } = useParams<{ projectId: string }>();
+  const navigate = useNavigate();
   const [bridges, setBridges] = useState<PlotBridge[]>([]);
   const [loading, setLoading] = useState(true);
   const [planning, setPlanning] = useState(false);
   const [planModalOpen, setPlanModalOpen] = useState(false);
+  const [expandingAll, setExpandingAll] = useState(false);
   const [editingBridge, setEditingBridge] = useState<PlotBridge | null>(null);
   const [expandingBridge, setExpandingBridge] = useState<PlotBridge | null>(null);
+
+  // 从用户配置的 API 拉取真实可用模型列表（plan/expand 弹窗共用）
+  const {
+    options: modelOptions,
+    defaultModel,
+    loading: loadingModels,
+    refresh: refreshModels,
+  } = useAvailableModels();
 
   const fetchBridges = useCallback(async () => {
     if (!projectId) return;
@@ -87,12 +168,17 @@ export default function PlotBridgesPage() {
   }, [fetchBridges]);
 
   const handlePlan = useCallback(
-    async (values: { bridge_count: number; model: string }) => {
+    async (values: {
+      bridge_count: number;
+      model: string;
+      mode: 'by_plot_line' | 'free';
+    }) => {
       if (!projectId) return;
       setPlanning(true);
       try {
         const newBridges = await plotBridgesApi.plan(projectId, values);
-        toast.success(`AI 已生成 ${newBridges.length} 个桥段`);
+        const modeLabel = values.mode === 'by_plot_line' ? '按主线节点' : '自由';
+        toast.success(`AI 已${modeLabel}生成 ${newBridges.length} 个桥段`);
         setPlanModalOpen(false);
         await fetchBridges();
       } catch (err) {
@@ -116,6 +202,55 @@ export default function PlotBridgesPage() {
     },
     [],
   );
+
+  // T2.1：桥段状态统计 + 批量展开
+  const stats = useMemo(() => {
+    const ready = bridges.filter((b) => b.status === 'ready').length;
+    const completed = bridges.filter((b) => b.status === 'completed').length;
+    return {
+      total: bridges.length,
+      ready,
+      completed,
+      allCompleted: bridges.length > 0 && ready === 0 && completed === bridges.length,
+    };
+  }, [bridges]);
+
+  const handleExpandAll = useCallback(async () => {
+    if (!projectId || stats.ready === 0) return;
+    if (
+      !window.confirm(
+        `将展开 ${stats.ready} 个 ready 状态的桥段为 ${stats.ready * 4} 个章纲。\n` +
+          `单个桥段失败不影响其他桥段。是否继续？`,
+      )
+    ) {
+      return;
+    }
+    setExpandingAll(true);
+    try {
+      const res = await plotBridgesApi.expandAll(projectId, {
+        model: defaultModel || undefined,
+      });
+      if (res.failed.length === 0) {
+        toast.success(
+          `成功展开 ${res.succeeded.length} 个桥段，共创建 ${res.created_chapter_count} 个章纲`,
+        );
+      } else {
+        toast.warning(
+          `部分完成：${res.succeeded.length}/${res.total} 成功，${res.failed.length} 失败`,
+        );
+      }
+      await fetchBridges();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '批量展开失败');
+    } finally {
+      setExpandingAll(false);
+    }
+  }, [projectId, stats.ready, defaultModel, fetchBridges]);
+
+  const handleGoToChapterOutlines = useCallback(() => {
+    if (!projectId) return;
+    navigate(`/project/${projectId}/outline`);
+  }, [navigate, projectId]);
 
   if (!projectId) return null;
 
@@ -148,8 +283,53 @@ export default function PlotBridgesPage() {
           >
             AI 规划桥段
           </Button>
+          {stats.ready > 0 && (
+            <Button
+              type="primary"
+              icon={<ExpandAltOutlined />}
+              onClick={handleExpandAll}
+              loading={expandingAll}
+              danger={false}
+              style={{ background: '#16a34a', borderColor: '#16a34a' }}
+            >
+              {expandingAll
+                ? '正在展开...'
+                : `一键展开全部（${stats.ready}）`}
+            </Button>
+          )}
         </div>
       </header>
+
+      {/* T2.1：状态总览 + 完成跳转提示 */}
+      {stats.total > 0 && (
+        <Alert
+          type={stats.allCompleted ? 'success' : 'info'}
+          showIcon
+          icon={stats.allCompleted ? <CheckCircleOutlined /> : undefined}
+          message={
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <span>
+                共 {stats.total} 个桥段：
+                <Tag color="processing" className="ml-1">就绪 {stats.ready}</Tag>
+                <Tag color="success">已展开 {stats.completed}</Tag>
+                {stats.allCompleted && (
+                  <span className="ml-2 text-green-700">
+                    全部桥段已展开为章纲，可前往章纲页继续创作。
+                  </span>
+                )}
+              </span>
+              {stats.allCompleted && (
+                <Button
+                  type="primary"
+                  onClick={handleGoToChapterOutlines}
+                >
+                  进入章纲页 →
+                </Button>
+              )}
+            </div>
+          }
+        />
+      )}
 
       {/* List */}
       {loading ? (
@@ -173,17 +353,12 @@ export default function PlotBridgesPage() {
           </Button>
         </Empty>
       ) : (
-        <div className="space-y-3">
-          {bridges.map((bridge) => (
-            <BridgeCard
-              key={bridge.id}
-              bridge={bridge}
-              onEdit={() => setEditingBridge(bridge)}
-              onExpand={() => setExpandingBridge(bridge)}
-              onDelete={() => handleDelete(bridge.id)}
-            />
-          ))}
-        </div>
+        <BridgeListByBeat
+          bridges={bridges}
+          onEdit={(b) => setEditingBridge(b)}
+          onExpand={(b) => setExpandingBridge(b)}
+          onDelete={(id) => handleDelete(id)}
+        />
       )}
 
       {/* AI 规划桥段弹窗 */}
@@ -196,10 +371,27 @@ export default function PlotBridgesPage() {
         width={480}
       >
         <Form
+          // 用 defaultModel 作为 key：异步加载完成后强制重渲染，让 initialValues 生效
+          key={`plan-form-${defaultModel || 'pending'}`}
           layout="vertical"
-          initialValues={{ bridge_count: 25, model: 'deepseek-v3' }}
+          initialValues={{
+            bridge_count: 25,
+            model: defaultModel || modelOptions[0]?.value || 'deepseek-v3',
+            mode: 'by_plot_line',
+          }}
           onFinish={handlePlan}
         >
+          <Form.Item
+            label="规划模式"
+            name="mode"
+            extra="按主线节点：桥段绑定剧情线节点，按权重自动分配配额（推荐）；自由：忽略主线节点独立规划"
+            rules={[{ required: true }]}
+          >
+            <Radio.Group>
+              <Radio.Button value="by_plot_line">按主线节点（方案 C）</Radio.Button>
+              <Radio.Button value="free">自由规划</Radio.Button>
+            </Radio.Group>
+          </Form.Item>
           <Form.Item
             label="桥段数量"
             name="bridge_count"
@@ -209,12 +401,30 @@ export default function PlotBridgesPage() {
             <InputNumber min={1} max={300} step={5} className="w-full" />
           </Form.Item>
           <Form.Item
-            label="使用模型"
+            label={
+              <div className="flex items-center gap-2">
+                <span>使用模型</span>
+                <Tooltip title="重新从「设置」中配置的 API 拉取模型列表">
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<ReloadOutlined spin={loadingModels} />}
+                    onClick={refreshModels}
+                  />
+                </Tooltip>
+              </div>
+            }
             name="model"
             rules={[{ required: true }]}
-            extra="档位越高（XL > L > M > S），AI 能参考的拆书内容越深"
+            extra="列表来自「设置」中配置的 API；下拉所选模型会同时用于推理 + 决定 prompt 档位（XL/L/M/S）"
           >
-            <Select options={MODEL_OPTIONS} />
+            <Select
+              options={modelOptions}
+              loading={loadingModels}
+              showSearch
+              optionFilterProp="label"
+              placeholder={loadingModels ? '加载模型中...' : '选择模型'}
+            />
           </Form.Item>
           <Form.Item className="!mb-0 text-right">
             <Button onClick={() => setPlanModalOpen(false)} className="mr-2">
@@ -247,6 +457,10 @@ export default function PlotBridgesPage() {
       {/* 展开为 4 章弹窗 */}
       <ExpandBridgeModal
         bridge={expandingBridge}
+        modelOptions={modelOptions}
+        defaultModel={defaultModel}
+        loadingModels={loadingModels}
+        refreshModels={refreshModels}
         onClose={() => setExpandingBridge(null)}
         onExpanded={() => {
           setExpandingBridge(null);
@@ -256,6 +470,120 @@ export default function PlotBridgesPage() {
     </div>
   );
 }
+
+// ============================================================
+// 按节点分组列表（V4.1 方案 C）
+// ============================================================
+
+interface BridgeListByBeatProps {
+  bridges: PlotBridge[];
+  onEdit: (b: PlotBridge) => void;
+  onExpand: (b: PlotBridge) => void;
+  onDelete: (id: string) => void;
+}
+
+/**
+ * 按 (plot_line_id, beat_index) 把桥段分组渲染。
+ *
+ * 分组规则：
+ * - 同 plot_line_id + 同 beat_index → 同一个节点组（按 beat_coverage_start 排序）
+ * - plot_line_id / beat_index 缺失 → 落入「未绑节点」分组（free 模式 / 老数据）
+ * - 节点组按 (plot_line_id, beat_index) 自然顺序排列，未绑节点组排最后
+ *
+ * 节点 title / 剧情线 title 用 plot_line_id 短哈希做 fallback —— 完整剧情线数据
+ * 可在后续版本通过 plotLinesApi 拉来填充更友好的 label。
+ */
+function BridgeListByBeat({
+  bridges,
+  onEdit,
+  onExpand,
+  onDelete,
+}: BridgeListByBeatProps) {
+  // 分组
+  const groups = useMemo(() => {
+    const map = new Map<string, PlotBridge[]>();
+    const KEY_UNBOUND = '__unbound__';
+    for (const b of bridges) {
+      const key =
+        b.plot_line_id && b.beat_index != null
+          ? `${b.plot_line_id}::${b.beat_index}`
+          : KEY_UNBOUND;
+      const arr = map.get(key) ?? [];
+      arr.push(b);
+      map.set(key, arr);
+    }
+    // 节点组内按 coverage_start asc → bridge_number asc 排序
+    for (const arr of map.values()) {
+      arr.sort((a, b) => {
+        const ca = a.beat_coverage_start ?? 0;
+        const cb = b.beat_coverage_start ?? 0;
+        if (ca !== cb) return ca - cb;
+        return (a.bridge_number ?? 0) - (b.bridge_number ?? 0);
+      });
+    }
+    return map;
+  }, [bridges]);
+
+  // 渲染顺序：先所有绑节点的组（按 plot_line_id + beat_index），再未绑组
+  const orderedKeys = useMemo(() => {
+    const bound: string[] = [];
+    let unbound: string | null = null;
+    for (const key of groups.keys()) {
+      if (key === '__unbound__') unbound = key;
+      else bound.push(key);
+    }
+    bound.sort((a, b) => {
+      const [la, ia] = a.split('::');
+      const [lb, ib] = b.split('::');
+      if (la !== lb) return la.localeCompare(lb);
+      return Number(ia) - Number(ib);
+    });
+    return unbound ? [...bound, unbound] : bound;
+  }, [groups]);
+
+  return (
+    <div className="space-y-5">
+      {orderedKeys.map((key) => {
+        const groupBridges = groups.get(key) ?? [];
+        const isUnbound = key === '__unbound__';
+        const first = groupBridges[0];
+        const groupLabel = isUnbound
+          ? '未绑节点（free 模式 / 老桥段）'
+          : `剧情线 ${first?.plot_line_id?.slice(0, 8) ?? '?'}… · 节点 ${first?.beat_index ?? '?'}（${groupBridges.length} 桥段）`;
+        return (
+          <div key={key} className="space-y-2">
+            <div
+              className={`flex items-center gap-2 rounded px-3 py-1.5 text-sm font-medium ${
+                isUnbound
+                  ? 'bg-gray-50 text-gray-500'
+                  : 'bg-geekblue-50 text-geekblue-700'
+              }`}
+              style={
+                isUnbound
+                  ? undefined
+                  : { background: '#f0f5ff', color: '#1d39c4' }
+              }
+            >
+              {isUnbound ? '🔓' : '🎯'} {groupLabel}
+            </div>
+            <div className="space-y-3 pl-3">
+              {groupBridges.map((bridge) => (
+                <BridgeCard
+                  key={bridge.id}
+                  bridge={bridge}
+                  onEdit={() => onEdit(bridge)}
+                  onExpand={() => onExpand(bridge)}
+                  onDelete={() => onDelete(bridge.id)}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 
 // ============================================================
 // 桥段卡片组件
@@ -270,12 +598,22 @@ interface BridgeCardProps {
 
 function BridgeCard({ bridge, onEdit, onExpand, onDelete }: BridgeCardProps) {
   const isCompleted = bridge.status === 'completed';
+  // V4.1 方案 C：桥段绑定剧情线节点时显示节点信息 Tag
+  const hasBeatBinding =
+    bridge.beat_index != null &&
+    bridge.beat_coverage_start != null &&
+    bridge.beat_coverage_end != null;
+  const coveragePct = hasBeatBinding
+    ? `${Math.round((bridge.beat_coverage_start ?? 0) * 100)}%-${Math.round(
+        (bridge.beat_coverage_end ?? 0) * 100,
+      )}%`
+    : null;
   return (
     <Card
       size="small"
       className="hover:shadow-md transition-shadow"
       title={
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="rounded bg-blue-50 px-2 py-0.5 text-sm font-medium text-blue-600">
             #{bridge.bridge_number}
           </span>
@@ -283,6 +621,18 @@ function BridgeCard({ bridge, onEdit, onExpand, onDelete }: BridgeCardProps) {
           <Tag color={BRIDGE_STATUS_COLOR[bridge.status]}>
             {BRIDGE_STATUS_LABEL[bridge.status]}
           </Tag>
+          {hasBeatBinding && (
+            <Tooltip
+              title={
+                `本桥段绑定到剧情线节点 ${bridge.beat_index}，覆盖该节点进度 ${coveragePct}。` +
+                ' 章节正文生成时会按节点权重推进，避免主线节奏失控。'
+              }
+            >
+              <Tag color="geekblue" className="!ml-0">
+                节点 {bridge.beat_index} · {coveragePct}
+              </Tag>
+            </Tooltip>
+          )}
         </div>
       }
       extra={
@@ -485,13 +835,28 @@ function ExpandBridgeModal({
   bridge,
   onClose,
   onExpanded,
+  modelOptions,
+  defaultModel,
+  loadingModels,
+  refreshModels,
 }: {
   bridge: PlotBridge | null;
   onClose: () => void;
   onExpanded: () => void;
+  modelOptions: ModelOption[];
+  defaultModel: string;
+  loadingModels: boolean;
+  refreshModels: () => void;
 }) {
   const [form] = Form.useForm<{ start_chapter_number: number; model: string }>();
   const [expanding, setExpanding] = useState(false);
+
+  // 异步加载完成、或弹窗打开时，把表单 model 字段同步到用户默认模型
+  useEffect(() => {
+    if (!bridge) return;
+    const target = defaultModel || modelOptions[0]?.value;
+    if (target) form.setFieldValue('model', target);
+  }, [bridge, defaultModel, modelOptions, form]);
 
   const handleExpand = async (values: { start_chapter_number: number; model: string }) => {
     if (!bridge) return;
@@ -521,7 +886,10 @@ function ExpandBridgeModal({
       <Form
         layout="vertical"
         form={form}
-        initialValues={{ start_chapter_number: 1, model: 'deepseek-v3' }}
+        initialValues={{
+          start_chapter_number: 1,
+          model: defaultModel || modelOptions[0]?.value || 'deepseek-v3',
+        }}
         onFinish={handleExpand}
       >
         <Form.Item
@@ -532,8 +900,31 @@ function ExpandBridgeModal({
         >
           <InputNumber min={1} className="w-full" />
         </Form.Item>
-        <Form.Item label="使用模型" name="model" rules={[{ required: true }]}>
-          <Select options={MODEL_OPTIONS} />
+        <Form.Item
+          label={
+            <div className="flex items-center gap-2">
+              <span>使用模型</span>
+              <Tooltip title="重新从「设置」中配置的 API 拉取模型列表">
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<ReloadOutlined spin={loadingModels} />}
+                  onClick={refreshModels}
+                />
+              </Tooltip>
+            </div>
+          }
+          name="model"
+          rules={[{ required: true }]}
+          extra="列表来自「设置」中配置的 API"
+        >
+          <Select
+            options={modelOptions}
+            loading={loadingModels}
+            showSearch
+            optionFilterProp="label"
+            placeholder={loadingModels ? '加载模型中...' : '选择模型'}
+          />
         </Form.Item>
         <Form.Item className="!mb-0 text-right">
           <Button onClick={onClose} className="mr-2">取消</Button>

@@ -53,6 +53,7 @@ const PHASE_LABELS: Record<string, string> = {
   scanning: '实体扫描',
   dictionary: '字典分类',
   extracting: '逐章抽取',
+  long_context_extraction: '长上下文一次抽取（V3.1）', // 后端长上下文路径写入此值
   aggregating: '全书聚合',
   synthesizing: '生成概览',
   done: '完成',
@@ -434,11 +435,11 @@ function TopEntitiesPanel({ entities }: { entities: BookDissectV2Entity[] }) {
               <span className="w-20 shrink-0 truncate font-medium text-content">
                 {e.canonical_name}
               </span>
-              {e.role_type && ROLE_LABEL[e.role_type] && (
-                <span className="shrink-0 border border-brand/30 bg-brand/5 px-1 text-[10px] text-brand">
-                  {ROLE_LABEL[e.role_type]}
-                </span>
-              )}
+              <RoleBadge
+                roleType={e.role_type}
+                size="xs"
+                {...extractFallbackMeta(e.profile)}
+              />
               <div className="relative h-2 flex-1 bg-surface">
                 <div
                   className="absolute inset-y-0 left-0 bg-brand/70"
@@ -809,11 +810,98 @@ const ENTITY_TYPE_META: Record<
   concept: { icon: '💡', label: '概念' },
 }
 
+// V4.2.3 角色标签元数据（color = 背景/边框色系，textColor = 文字色）
 const ROLE_LABEL: Record<string, string> = {
   protagonist: '主角',
   supporting: '配角',
   antagonist: '反派',
   minor: '次要',
+}
+
+const ROLE_STYLE: Record<
+  string,
+  { bg: string; border: string; text: string }
+> = {
+  protagonist: {
+    bg: 'bg-amber-50',
+    border: 'border-amber-300',
+    text: 'text-amber-700',
+  },
+  antagonist: {
+    bg: 'bg-rose-50',
+    border: 'border-rose-300',
+    text: 'text-rose-700',
+  },
+  supporting: {
+    bg: 'bg-surface',
+    border: 'border-surface-border',
+    text: 'text-content-secondary',
+  },
+  minor: {
+    bg: 'bg-surface',
+    border: 'border-surface-border',
+    text: 'text-content-tertiary',
+  },
+}
+
+/**
+ * 从实体 profile 中提取 V4.2.3 兜底元信息
+ * 后端 entity_aggregator.py L242-250 写入 profile_extras["_role_type_fallback"]
+ * 序列化到 profile_json 后前端读取
+ */
+function extractFallbackMeta(
+  profile: Record<string, unknown> | undefined | null,
+): { fallback?: boolean; originalRole?: string | null } {
+  if (!profile || typeof profile !== 'object') return {}
+  const fallback = profile['_role_type_fallback']
+  if (fallback !== true) return {}
+  const original = profile['_role_type_original']
+  return {
+    fallback: true,
+    originalRole:
+      typeof original === 'string' && original.length > 0 ? original : null,
+  }
+}
+
+/**
+ * V4.2.3 角色标签组件
+ * - 主角金色醒目 / 反派玫红 / 配角次要弱化
+ * - fallback=true 加 ⚙ 标记 + tooltip 显示原 LLM 标记
+ */
+function RoleBadge({
+  roleType,
+  size = 'xs',
+  fallback,
+  originalRole,
+}: {
+  roleType: string | null | undefined
+  size?: 'xs' | 'sm'
+  fallback?: boolean
+  originalRole?: string | null
+}) {
+  if (!roleType) return null
+  const label = ROLE_LABEL[roleType] ?? roleType
+  const style = ROLE_STYLE[roleType] ?? ROLE_STYLE.minor
+  const sizeCls =
+    size === 'sm'
+      ? 'px-2 py-0.5 text-[11px]'
+      : 'px-1.5 py-0 text-[10px]'
+
+  const tooltip = fallback
+    ? originalRole
+      ? `系统推断主角（原 LLM 标记：${ROLE_LABEL[originalRole] ?? originalRole}）`
+      : '系统推断主角（LLM 未标记）'
+    : undefined
+
+  return (
+    <span
+      className={`inline-flex items-center gap-0.5 border ${style.bg} ${style.border} ${style.text} ${sizeCls}`}
+      title={tooltip}
+    >
+      {label}
+      {fallback ? <span className="opacity-70">⚙</span> : null}
+    </span>
+  )
 }
 
 const ROW_HEIGHT = 56
@@ -1138,11 +1226,11 @@ function EntityRow({
           >
             {entity.canonical_name}
           </span>
-          {entity.role_type && ROLE_LABEL[entity.role_type] && (
-            <span className="shrink-0 border border-brand/30 bg-brand/5 px-1 text-[10px] text-brand">
-              {ROLE_LABEL[entity.role_type]}
-            </span>
-          )}
+          <RoleBadge
+            roleType={entity.role_type}
+            size="xs"
+            {...extractFallbackMeta(entity.profile)}
+          />
         </div>
         <div className="mt-0.5 flex items-center gap-2 text-[11px] text-content-tertiary">
           <span className="tabular-nums">{entity.appearance_count}×</span>
@@ -1206,11 +1294,11 @@ function EntityDetailPanel({
             <span className="border border-surface-border bg-white px-1.5 py-0.5 text-[10px] text-content-secondary">
               {meta?.label ?? entity.entity_type}
             </span>
-            {entity.role_type && ROLE_LABEL[entity.role_type] && (
-              <span className="border border-brand/30 bg-brand/5 px-1.5 py-0.5 text-[10px] text-brand">
-                {ROLE_LABEL[entity.role_type]}
-              </span>
-            )}
+            <RoleBadge
+              roleType={entity.role_type}
+              size="sm"
+              {...extractFallbackMeta(entity.profile)}
+            />
           </div>
           <p className="mt-1 text-xs text-content-secondary">
             出场 <strong className="tabular-nums text-content">{entity.appearance_count}</strong> 次

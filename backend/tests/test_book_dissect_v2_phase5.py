@@ -189,7 +189,12 @@ class TestEntityAggregator:
         assert lin.profile_extras["appearance"] == "青衣少年"
 
     def test_role_type_voting(self):
-        """role_hint 投票：3 票 supporting + 1 票 protagonist → supporting。"""
+        """role_hint 投票：3 票 supporting + 1 票 protagonist → 投票阶段 supporting。
+
+        V4.2.3 后续：因为这场景只有 1 个 person 且无 protagonist，
+        F4 兜底会把它升级为 protagonist，原投票结果存入 _role_type_original。
+        本测试同时验证投票算法 + 兜底升级的联动。
+        """
         agg = EntityAggregator()
         facts = []
         for ch in (1, 2, 3):
@@ -203,7 +208,41 @@ class TestEntityAggregator:
         ))
         result = agg.aggregate(facts, {"陆天": "陆天"}, [])
         lu = next(p for p in result if p.canonical_name == "陆天")
-        assert lu.role_type == "supporting"
+        # 兜底后 role_type = protagonist（场景里没有别的 protagonist 候选）
+        assert lu.role_type == "protagonist"
+        # 但兜底标记保留：投票原始结果 = supporting
+        assert lu.profile_extras.get("_role_type_fallback") is True
+        assert lu.profile_extras.get("_role_type_original") == "supporting"
+
+    def test_role_type_voting_no_fallback_when_protagonist_exists(self):
+        """V4.2.3 新增：当场景中已有 protagonist 时，投票结果不被兜底覆盖。
+
+        2 个 person：'陆天' 投 3 supporting 1 protagonist → 投票 supporting
+        '林七' 投 1 protagonist → 投票 protagonist
+        因为已有 protagonist，'陆天' 不会被兜底升级。
+        """
+        agg = EntityAggregator()
+        facts = []
+        for ch in (1, 2, 3):
+            facts.append(ChapterFact(
+                chapter_number=ch,
+                characters=[CharacterFact(name="陆天", role_hint="supporting")],
+            ))
+        facts.append(ChapterFact(
+            chapter_number=4,
+            characters=[
+                CharacterFact(name="陆天", role_hint="protagonist"),
+                CharacterFact(name="林七", role_hint="protagonist"),
+            ],
+        ))
+        result = agg.aggregate(facts, {"陆天": "陆天", "林七": "林七"}, [])
+        lu_lt = next(p for p in result if p.canonical_name == "陆天")
+        lu_lq = next(p for p in result if p.canonical_name == "林七")
+        # '陆天' 投票 supporting 胜出 → 不被兜底
+        assert lu_lt.role_type == "supporting"
+        assert "_role_type_fallback" not in lu_lt.profile_extras
+        # '林七' 投票 protagonist
+        assert lu_lq.role_type == "protagonist"
 
     def test_aggregate_locations(self):
         agg = EntityAggregator()

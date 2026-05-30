@@ -121,11 +121,20 @@ class ConflictDetector:
         }
         appearance_count_map = {e.canonical_name: e.appearance_count for e in entities}
 
+        # V4.2.3：收集已被 L2 兜底升级为 protagonist 的角色，跳过仲裁保护
+        fallback_protected = {
+            e.canonical_name for e in entities
+            if e.entity_type == EntityType.PERSON.value
+            and e.profile_extras.get("_role_type_fallback") is True
+            and e.role_type == "protagonist"
+        }
+
         conflicts: list[EntityConflict] = []
 
-        # 1. role_type 冲突（仅 person）
+        # 1. role_type 冲突（仅 person，且跳过 L2 兜底锁定的）
         conflicts.extend(self._detect_role_type_conflicts(
             chapter_facts, alias_map, person_names, appearance_count_map,
+            fallback_protected=fallback_protected,
         ))
 
         # 2. appearance 冲突（仅 person）
@@ -154,8 +163,15 @@ class ConflictDetector:
         alias_map: dict[str, str],
         person_names: set[str],
         appearance_count_map: dict[str, int],
+        fallback_protected: set[str] | None = None,
     ) -> list[EntityConflict]:
-        """role_type 投票分散即冲突。"""
+        """role_type 投票分散即冲突。
+
+        Args:
+            fallback_protected: V4.2.3 — 已被 L2 兜底升级为 protagonist 的角色名集合，
+                这些角色的 role_type 已被锁定，跳过仲裁池避免 LLM 推翻。
+        """
+        fallback_protected = fallback_protected or set()
         # canonical -> Counter[role_hint -> 票数]
         votes: dict[str, Counter] = defaultdict(Counter)
         # canonical -> role_hint -> {chapter_numbers, evidence_texts}
@@ -179,6 +195,14 @@ class ConflictDetector:
 
         out: list[EntityConflict] = []
         for canon, ctr in votes.items():
+            # V4.2.3 兜底保护：已被 L2 升级为 protagonist 的角色，
+            # role_type 已锁定，跳过仲裁池（即便投票分散也不进入）
+            if canon in fallback_protected:
+                logger.debug(
+                    "[ConflictDetector] '%s' 已被 L2 兜底升级 protagonist，跳过 role_type 仲裁",
+                    canon,
+                )
+                continue
             total = sum(ctr.values())
             if total < ROLE_TYPE_MIN_VOTES:
                 continue
@@ -493,6 +517,9 @@ def apply_resolutions(
 
     final_value=None 表示 LLM 拿不准，保留静态合并结果，但仍记录 verified=true（已经过仲裁）。
 
+    F4-extension：role_type 字段仲裁前后记录 INFO 审计日志，
+    便于追踪反英雄 / 视角主导场景的判定过程与最终结果。
+
     Returns:
         同一个 entities list（原地修改后返回，便于链式调用）
     """
@@ -505,6 +532,27 @@ def apply_resolutions(
             continue
         if final_value is not None:
             if field == "role_type":
+                # V4.2.3 双保险：即便 ConflictDetector 漏拦（不应该），
+                # 已被 L2 升级为 protagonist 的角色也不允许被推翻
+                if (
+                    e.profile_extras.get("_role_type_fallback") is True
+                    and e.role_type == "protagonist"
+                    and final_value != "protagonist"
+                ):
+                    logger.info(
+                        "[apply_resolutions] LLM 仲裁 '%s' → %s 被拦截，"
+                        "保持 L2 兜底 protagonist 不变",
+                        name, final_value,
+                    )
+                    continue
+                # F4-extension 审计日志：记录 role_type 实际改动
+                old_role = e.role_type
+                if old_role != final_value:
+                    logger.info(
+                        "[apply_resolutions] role_type 仲裁通过 '%s': %s → %s "
+                        "(appearance_count=%d)",
+                        name, old_role, final_value, e.appearance_count,
+                    )
                 e.role_type = final_value
             elif field == "appearance":
                 e.profile_extras["appearance"] = final_value
@@ -513,6 +561,13 @@ def apply_resolutions(
             else:
                 # 未知字段，跳过
                 continue
+        elif field == "role_type":
+            # final_value=None 但是 role_type 字段：LLM 拿不准
+            logger.info(
+                "[apply_resolutions] role_type 仲裁未决 '%s' (current=%s)，"
+                "保留静态合并结果",
+                name, e.role_type,
+            )
         # 即使 final_value=None 也记 verified（已仲裁过）
         verified_fields = e.profile_extras.setdefault("verified_fields", [])
         if field not in verified_fields:

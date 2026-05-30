@@ -21,10 +21,12 @@ import {
   Download,
   FileText,
   Flame,
+  GitBranch,
   Loader2,
   Palette,
   Quote,
   Sparkles,
+  UserSquare,
   Users,
   X,
 } from 'lucide-react';
@@ -45,6 +47,8 @@ import type {
 } from '@/types';
 import type {
   ArchetypeData,
+  BridgesData,
+  CharacterArchiveData,
   MethodologyData,
   ReferencePackDetail,
   ReferencePackStatus,
@@ -64,6 +68,8 @@ type TabKey =
   | 'structure'
   | 'archetypes'
   | 'worldbuilding'
+  | 'bridges' // V4.1：桥段范本库
+  | 'character_archive' // V4.1：完整角色档案
   | 'corpus'
   | 'chapters';
 
@@ -82,8 +88,11 @@ const TABS: TabConfig[] = [
   { key: 'structure', label: '3. 章节结构', hint: '开篇 / 中段冲突 / 结尾钩', icon: FileText },
   { key: 'archetypes', label: '4. 角色塑造', hint: '主角 / 配角 / 反派的塑造手法', icon: Users },
   { key: 'worldbuilding', label: '5. 世界观建模', hint: '时代 / 地点层级 / 规则平衡', icon: Compass },
-  { key: 'corpus', label: '6. 灵感语料', hint: '具体角色 / 地点 / 事件可作为灵感素材', icon: Quote },
-  { key: 'chapters', label: '7. 原书章节', hint: '回查原书章节摘要', icon: BookOpen },
+  // V4.1 维度：桥段反推 + 角色档案
+  { key: 'bridges', label: '6. 桥段范本', hint: 'V4.1：原书桥段反推（4 章结构 + 装逼类型分布）', icon: GitBranch },
+  { key: 'character_archive', label: '7. 角色档案', hint: 'V4.1：完整角色档案（主角/反派/配角全维度）', icon: UserSquare },
+  { key: 'corpus', label: '8. 灵感语料', hint: '具体角色 / 地点 / 事件可作为灵感素材', icon: Quote },
+  { key: 'chapters', label: '9. 原书章节', hint: '回查原书章节摘要', icon: BookOpen },
 ];
 
 const STATUS_CLASS: Record<ReferencePackStatus, string> = {
@@ -186,6 +195,8 @@ export default function ReferencePackDetailPage() {
         {tab === 'structure' && <StructureTab data={pack.structure as StructureData | null} />}
         {tab === 'archetypes' && <ArchetypeTab data={pack.archetypes as ArchetypeData | null} />}
         {tab === 'worldbuilding' && <WorldbuildingTab data={pack.worldbuilding as WorldbuildingData | null} />}
+        {tab === 'bridges' && <BridgesTab data={pack.bridges as BridgesData | null} />}
+        {tab === 'character_archive' && <CharacterArchiveTab data={pack.character_archive as CharacterArchiveData | null} />}
         {tab === 'corpus' && <CorpusTab taskId={pack.task_id} />}
         {tab === 'chapters' && <ChaptersTab taskId={pack.task_id} />}
       </div>
@@ -1001,6 +1012,32 @@ interface DimensionCardProps {
   fields?: Array<[string, string]>;
 }
 
+/**
+ * 把任意 dimension value 安全渲染为字符串（支持嵌套 dict / array / primitive）。
+ *
+ * 修复 V4.1/V4.2 bridge_length_distribution 等嵌套 dict 字段渲染为
+ * "[object Object]" 的 bug。
+ */
+function renderDimensionValue(v: unknown): string {
+  if (v == null) return '';
+  if (Array.isArray(v)) {
+    return v
+      .map((item) =>
+        typeof item === 'object' && item !== null
+          ? renderDimensionValue(item)
+          : String(item),
+      )
+      .join('、');
+  }
+  if (typeof v === 'object') {
+    // 嵌套对象：键值对扁平化为 "key: value" 形式，逗号分隔
+    return Object.entries(v as Record<string, unknown>)
+      .map(([k, val]) => `${k}: ${renderDimensionValue(val)}`)
+      .join('，');
+  }
+  return String(v);
+}
+
 function DimensionCard({ icon: Icon, title, data, fields }: DimensionCardProps) {
   if (!data) {
     return (
@@ -1041,12 +1078,249 @@ function DimensionCard({ icon: Icon, title, data, fields }: DimensionCardProps) 
                 {label}
               </div>
               <div className="mt-0.5 whitespace-pre-wrap text-sm leading-6 text-content">
-                {Array.isArray(v) ? v.join('、') : String(v)}
+                {renderDimensionValue(v)}
               </div>
             </div>
           );
         })}
       </div>
     </Card>
+  );
+}
+
+// ============================================================
+// Tab 6（V4.1）：桥段范本库
+// ============================================================
+
+function BridgesTab({ data }: { data: BridgesData | null }) {
+  if (!data) return <NoDataHint label="桥段范本库（V4.1）" />;
+
+  const total = (data.total_bridges_detected as number | undefined) ?? 0;
+  const standard = (data.standard_bridges as number | undefined) ?? 0;
+  const variant = (data.variant_bridges as number | undefined) ?? 0;
+  const types = Array.isArray(data.bridge_types) ? data.bridge_types : [];
+
+  return (
+    <div className="space-y-4">
+      <SectionTip>
+        <strong>V4.1 桥段反推</strong>：从原书 ChapterFact 用 4 章滑动窗口反推标准桥段（代入/拉扯/兑现/善后）。
+        <strong>用于桥段规划场景做范本参考</strong>，让 AI 不是凭空想，而是参考原书装逼节奏。
+      </SectionTip>
+
+      {/* 总览 3 数字 */}
+      <div className="grid grid-cols-3 gap-3">
+        <Card>
+          <div className="text-xs text-content-tertiary">识别桥段总数</div>
+          <div className="mt-1 text-2xl font-semibold text-brand">{total}</div>
+        </Card>
+        <Card>
+          <div className="text-xs text-content-tertiary">标准 4 章桥段</div>
+          <div className="mt-1 text-2xl font-semibold text-emerald-300">{standard}</div>
+        </Card>
+        <Card>
+          <div className="text-xs text-content-tertiary">变体桥段</div>
+          <div className="mt-1 text-2xl font-semibold text-amber-300">{variant}</div>
+        </Card>
+      </div>
+
+      {/* 桥段类型分布 */}
+      {types.length > 0 && (
+        <Card>
+          <h3 className="mb-3 flex items-center gap-2 text-sm font-medium text-content">
+            <GitBranch className="h-4 w-4 text-brand" />
+            桥段类型分布（按出现次数排序）
+          </h3>
+          <div className="space-y-2">
+            {types.map((t, i) => {
+              const typeName = String((t as Record<string, unknown>).type ?? '未分类');
+              const count = (t as Record<string, unknown>).count as number | undefined;
+              const avgScore = (t as Record<string, unknown>).avg_score as number | undefined;
+              const examples = Array.isArray((t as Record<string, unknown>).typical_examples)
+                ? ((t as Record<string, unknown>).typical_examples as Array<Record<string, unknown>>)
+                : [];
+              return (
+                <div key={`${typeName}-${i}`} className="rounded-lg bg-surface-deeper px-3 py-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium text-content">{typeName}</span>
+                    <span className="text-xs text-content-tertiary">
+                      {count ?? 0} 次 · 平均评分 {avgScore != null ? avgScore.toFixed(2) : '-'}
+                    </span>
+                  </div>
+                  {examples.length > 0 && (
+                    <ul className="mt-2 space-y-1">
+                      {examples.slice(0, 3).map((ex, j) => {
+                        const chapters = Array.isArray(ex.chapters) ? ex.chapters.join('-') : '';
+                        const goal = ex.goal ? String(ex.goal) : '';
+                        const showoff = ex.showoff_point ? String(ex.showoff_point) : '';
+                        return (
+                          <li key={j} className="rounded bg-surface px-2 py-1 text-xs text-content-secondary">
+                            <span className="text-content-tertiary">第 {chapters} 章</span>
+                            {goal && <span className="ml-2">· 目标：{goal}</span>}
+                            {showoff && <span className="ml-2">· 装逼点：{showoff}</span>}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
+      {/* 节奏指标 */}
+      {data.rhythm_stats != null && (
+        <DimensionCard
+          icon={Flame}
+          title="节奏指标"
+          data={data.rhythm_stats as Record<string, unknown>}
+        />
+      )}
+
+      {/* 金手指多样性 */}
+      {data.golden_finger_diversity != null && (
+        <DimensionCard
+          icon={Sparkles}
+          title="金手指多样性"
+          data={data.golden_finger_diversity as Record<string, unknown>}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// Tab 7（V4.1）：完整角色档案
+// ============================================================
+
+function CharacterArchiveTab({ data }: { data: CharacterArchiveData | null }) {
+  if (!data) return <NoDataHint label="完整角色档案（V4.1）" />;
+
+  const protagonists = Array.isArray(data.protagonist_archetypes)
+    ? data.protagonist_archetypes
+    : [];
+  const antagonists = Array.isArray(data.antagonist_progression)
+    ? data.antagonist_progression
+    : [];
+  const supports = Array.isArray(data.support_character_techniques)
+    ? data.support_character_techniques
+    : [];
+
+  // V4.2.3：统计 fallback 兜底升级的主角数量（前端可见 hint）
+  const inferredCount = protagonists.filter(
+    (p) => (p as Record<string, unknown>)._inferred === true,
+  ).length;
+
+  return (
+    <div className="space-y-4">
+      <SectionTip>
+        <strong>V4.1 完整角色档案</strong>：从 Entity + Relation + Event 聚合的全维度角色信息。
+        <strong>给角色生成场景做范本</strong>，让 AI 知道原书是怎么塑造主角/反派/配角的。
+      </SectionTip>
+
+      {inferredCount > 0 && (
+        <div className="rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          <strong>⚙ 系统推断提示</strong>：本档案中 {inferredCount} 位主角是因 LLM 未明确标注 protagonist
+          而由系统按出场频次兜底升级（短篇 / 反派当主角 / 反英雄故事常见）。
+          鼠标悬停 ⚙ 标记可查看原 LLM 标记。
+        </div>
+      )}
+
+      {/* 主角范式 */}
+      <section>
+        <h3 className="mb-2 flex items-center gap-2 text-sm font-medium text-content">
+          <UserSquare className="h-4 w-4 text-brand" />
+          主角范式 <span className="text-xs text-content-tertiary">({protagonists.length})</span>
+        </h3>
+        {protagonists.length === 0 ? (
+          <Card>
+            <p className="text-xs text-content-tertiary">
+              未识别主角（V4.2.3 三层兜底后理论上不会发生，除非无任何 person 实体）
+            </p>
+          </Card>
+        ) : (
+          <div className="space-y-3">
+            {protagonists.map((p, i) => {
+              const rec = p as Record<string, unknown>;
+              const isInferred = rec._inferred === true;
+              const origRole =
+                typeof rec._inferred_original_role === 'string'
+                  ? (rec._inferred_original_role as string)
+                  : null;
+              const ORIG_LABEL: Record<string, string> = {
+                protagonist: '主角',
+                supporting: '配角',
+                antagonist: '反派',
+                minor: '次要',
+              };
+              const baseName = String(rec.name ?? `主角 ${i + 1}`);
+              // 标题字符串内嵌 ⚙ 标记（保持 DimensionCard.title: string 不变）
+              const title = isInferred ? `${baseName} ⚙` : baseName;
+              const wrapperTooltip = isInferred
+                ? `系统推断主角（原 LLM 标记：${origRole && ORIG_LABEL[origRole] ? ORIG_LABEL[origRole] : origRole ?? '未标记'}）`
+                : undefined;
+              return (
+                <div
+                  key={i}
+                  className={isInferred ? 'rounded-lg border border-amber-300/40 p-0.5' : ''}
+                  title={wrapperTooltip}
+                >
+                  <DimensionCard icon={UserSquare} title={title} data={rec} />
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {/* 反派演进 */}
+      <section>
+        <h3 className="mb-2 flex items-center gap-2 text-sm font-medium text-content">
+          <Flame className="h-4 w-4 text-brand" />
+          反派演进 <span className="text-xs text-content-tertiary">({antagonists.length})</span>
+        </h3>
+        {antagonists.length === 0 ? (
+          <Card>
+            <p className="text-xs text-content-tertiary">未识别反派</p>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {antagonists.map((p, i) => (
+              <DimensionCard
+                key={i}
+                icon={Flame}
+                title={String((p as Record<string, unknown>).name ?? `反派 ${i + 1}`)}
+                data={p as Record<string, unknown>}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* 配角手法 */}
+      <section>
+        <h3 className="mb-2 flex items-center gap-2 text-sm font-medium text-content">
+          <Users className="h-4 w-4 text-brand" />
+          配角手法 <span className="text-xs text-content-tertiary">({supports.length})</span>
+        </h3>
+        {supports.length === 0 ? (
+          <Card>
+            <p className="text-xs text-content-tertiary">未识别配角分类</p>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+            {supports.map((s, i) => (
+              <DimensionCard
+                key={i}
+                icon={Users}
+                title={String((s as Record<string, unknown>).category ?? (s as Record<string, unknown>).type ?? `配角组 ${i + 1}`)}
+                data={s as Record<string, unknown>}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
   );
 }

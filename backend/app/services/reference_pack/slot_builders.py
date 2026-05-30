@@ -130,6 +130,113 @@ async def build_chapter_outline(db: AsyncSession, ctx: Any) -> str:
     return "\n".join(lines)
 
 
+async def build_plot_lines_with_beats(db: AsyncSession, ctx: Any) -> str:
+    """V4.1 方案 C：剧情线 + 节点（beats）+ 权重 + 已分配桥段配额，
+    供 bridge_planning 场景规划桥段时按节点分配。
+
+    序列化结构：
+        【📈 剧情线 + 节点 + 桥段配额】
+        ▼ 主线：xxx（预计 80 章）
+          [节点 1] 拜入门派  权重 20%  → 16 章  → 4 个桥段
+          [节点 2] 历劫渡难  权重 25%  → 20 章  → 5 个桥段
+          ...
+        ▼ 支线：yyy（预计 20 章）
+          ...
+
+        总章数：100；总桥段数：25；按节点权重自动分配。
+
+    取数：
+    - 读项目下所有 PlotLine（按 order_index 排序）
+    - 解析每条 timeline_data.beats（含 index/title/weight）
+    - 按 estimated_chapters × weight 算每节点对应章数
+    - 桥段配额 = ceil(章数 / 4)，由调用方传入 ctx.bridge_count 用于按比例分配
+
+    返回空字符串当：
+    - 项目无 plot_lines / 全部 plot_lines 没有 timeline_data / beats 为空
+    （上层会跳过该 slot，free 模式下根本不会用到此 slot）
+    """
+    from app.models.plot_line import PlotLine
+
+    result = await db.execute(
+        select(PlotLine).where(PlotLine.project_id == ctx.project_id).order_by(PlotLine.order_index)
+    )
+    lines = result.scalars().all()
+    if not lines:
+        return ""
+
+    # bridge_count 由调用方通过 ctx.extra["bridge_count"] 透传
+    extra = getattr(ctx, "extra", None) or {}
+    total_bridge_count = extra.get("bridge_count") or 25
+
+    # 第一遍：解析所有 line 的 beats，统计总章数 + 总权重
+    parsed_lines: list[dict[str, Any]] = []
+    total_estimated = 0
+    for line in lines:
+        beats_data: list[dict[str, Any]] = []
+        if line.timeline_data:
+            try:
+                td = json.loads(line.timeline_data)
+                beats_data = td.get("beats", []) or []
+            except (json.JSONDecodeError, TypeError):
+                beats_data = []
+        if not beats_data:
+            continue
+        est = line.estimated_chapters or 40 if line.line_type == "main" else (line.estimated_chapters or 15)
+        total_estimated += est
+        parsed_lines.append({
+            "line": line,
+            "beats": beats_data,
+            "estimated_chapters": est,
+        })
+
+    if not parsed_lines:
+        return ""
+
+    # 第二遍：按总章数比例为每条 line 分配桥段配额，再按每条 line 内节点 weight 二次分配
+    chunks: list[str] = ["【📈 剧情线 + 节点 + 桥段配额】"]
+    chunks.append(
+        f"总桥段数：{total_bridge_count}；总预计章数：{total_estimated}；"
+        f"由系统按 line 权重 × beat 权重 自动分配。"
+    )
+
+    for pl in parsed_lines:
+        line = pl["line"]
+        beats = pl["beats"]
+        est = pl["estimated_chapters"]
+        line_quota = max(1, round(total_bridge_count * (est / total_estimated))) if total_estimated > 0 else 0
+        line_type_label = {"main": "主线", "sub": "支线", "character": "角色线"}.get(line.line_type or "main", "其他")
+        chunks.append(f"\n▼ {line_type_label}：{line.title}（预计 {est} 章 → {line_quota} 个桥段，line_id={line.id}）")
+
+        # 节点权重在 line 内归一化分配桥段
+        total_w = sum(float(b.get("weight", 0) or 0) for b in beats) or 1.0
+        # 用 floor + 余数分配确保桥段总数严格 = line_quota
+        raw = [(float(b.get("weight", 0) or 0) / total_w) * line_quota for b in beats]
+        floors = [int(x) for x in raw]
+        remainders = sorted(
+            range(len(beats)),
+            key=lambda i: raw[i] - floors[i],
+            reverse=True,
+        )
+        deficit = line_quota - sum(floors)
+        for i in remainders[: max(0, deficit)]:
+            floors[i] += 1
+
+        for i, b in enumerate(beats):
+            beat_idx = b.get("index", i + 1)
+            beat_title = (b.get("title") or f"节点{beat_idx}").strip()
+            beat_weight = float(b.get("weight", 0) or 0)
+            beat_chapters = round(beat_weight * est)
+            beat_quota = floors[i]
+            desc = (b.get("description") or "").strip()
+            desc_part = f"｜{desc[:60]}" if desc else ""
+            chunks.append(
+                f"  [节点 {beat_idx}] {beat_title}  权重 {beat_weight:.0%}  "
+                f"→ {beat_chapters} 章  → {beat_quota} 个桥段{desc_part}"
+            )
+
+    return "\n".join(chunks)
+
+
 async def build_bridge_position(db: AsyncSession, ctx: Any) -> str:
     """K2 桥段位置约束（章节级，不缓存）。
 
@@ -299,6 +406,7 @@ SLOT_BUILDERS: dict[str, Callable[[AsyncSession, Any], Awaitable[str]]] = {
     "output_spec":            build_output_spec,
     # user 段 - 业务
     "bridge_position":        build_bridge_position,
+    "plot_lines_with_beats":  build_plot_lines_with_beats,  # V4.1 方案 C
     "history_full":           build_history_full,
     "history_normal":         build_history_normal,
     "history_brief":          build_history_brief,

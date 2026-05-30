@@ -261,6 +261,9 @@ export function wizardReducer(state: WizardState, action: WizardAction): WizardS
     case 'GEN_PROJECT_CREATED':
       return { ...state, projectId: action.payload };
 
+    case 'GEN_NEXT_ROUTE':
+      return { ...state, nextWizardRoute: action.payload };
+
     case 'GEN_COMPLETE':
       return {
         ...state,

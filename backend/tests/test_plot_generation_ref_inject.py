@@ -16,7 +16,7 @@ from app.services.plot_generation_service import PlotGenerationService
 
 
 class _StubAIService:
-    """记录最近一次 generate_text 调用的 prompt。"""
+    """记录最近一次 LLM 调用的 prompt（支持新版 stream_collect 与旧版 generate_text）。"""
 
     def __init__(self):
         self.last_prompt: str | None = None
@@ -32,8 +32,14 @@ class _StubAIService:
         )
 
     async def generate_text(self, prompt: str, **_):
+        # 保留以兼容潜在的老调用路径
         self.last_prompt = prompt
         return self.response
+
+    async def generate_text_stream_collect(self, prompt: str, **_):
+        # plot_generation_service 改流式后走这里
+        self.last_prompt = prompt
+        return {"content": self.response, "finish_reason": "stream_complete"}
 
 
 @pytest.mark.asyncio

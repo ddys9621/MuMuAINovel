@@ -13,10 +13,17 @@
 - first_chapter / last_chapter / appearance_count
 - role_type（投票：所有 ChapterFact.characters[].role_hint 投票，多数胜）
 - profile_extras：abilities / locations / appearance（多章合并）
+
+F4 兜底（2026-05-21 V4.2.3）：
+- 投票结束后如果所有 person 都没有被标为 protagonist，按 appearance_count
+  取出场最多的 person 强制升级为 protagonist
+- 触发场景：短篇 / 单章 / LLM 把主角标成 antagonist（如「秤魂」女反派当主角）
+- 标记 profile_extras["_role_type_fallback"]=True 让上层能区分
 """
 
 from __future__ import annotations
 
+import logging
 from collections import Counter
 from typing import Optional
 
@@ -26,6 +33,8 @@ from app.services.book_dissect.v2_types import (
     EntityProfile,
     EntityType,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class EntityAggregator:
@@ -161,6 +170,11 @@ class EntityAggregator:
                 # 取得票最高的 role_hint
                 profile.role_type = votes.most_common(1)[0][0]
 
+        # ----------- 3.5. F4 protagonist 兜底（V4.2.3 修复）-----------
+        # 触发：LLM 未标 protagonist / 全部标为 antagonist|supporting|minor
+        # 策略：按 appearance_count 取出场最多 person 升级为 protagonist
+        _apply_protagonist_fallback(profiles)
+
         # ----------- 4. 排序 -----------
         result = list(profiles.values())
         result.sort(
@@ -183,3 +197,68 @@ def _entity_type_priority(t: str) -> int:
         EntityType.CONCEPT.value: 4,
     }
     return order.get(t, 99)
+
+
+def _apply_protagonist_fallback(profiles: dict[str, EntityProfile]) -> None:
+    """F4 兜底：当所有 person 都没有被标为 protagonist 时，按出场次数兜底。
+
+    触发条件：所有 entity_type=person 的 profile 中无任何 role_type=protagonist
+    策略：
+        1. 优先选 appearance_count 最高的 person
+        2. 平票时，选 first_chapter 最早的（最早出场 = 视角中心可能性大）
+        3. 仍平票时，选 canonical_name 字典序最小（保证确定性）
+    标记：被升级的 profile.profile_extras["_role_type_fallback"]=True
+
+    特殊处理：
+    - 把原 role_type 保留在 profile_extras["_role_type_original"] 便于审计
+    - 如果原本是 antagonist（如「秤魂」杨令珊），日志 INFO 级别提示
+    - 如果原本是 None 或 minor，日志 DEBUG 级别（属于正常兜底）
+    """
+    person_profiles = [
+        p for p in profiles.values()
+        if p.entity_type == EntityType.PERSON.value
+    ]
+    if not person_profiles:
+        return  # 没 person 实体，无需兜底
+
+    has_protagonist = any(p.role_type == "protagonist" for p in person_profiles)
+    if has_protagonist:
+        return  # 已经有 protagonist，不兜底
+
+    # 按 (appearance_count desc, first_chapter asc, canonical_name asc) 选 top-1
+    top = max(
+        person_profiles,
+        key=lambda p: (
+            p.appearance_count or 0,
+            -(p.first_chapter or 99999),  # 负号让 min first_chapter 排前
+            # 字典序倒序：因 max + 元组，最后一项也要倒，但字符串无法直接负号
+            # 用反向比较：先按前两项 max，最后用 sorted 二级兜底
+        ),
+    )
+    # canonical_name 平票兜底（极少触发）
+    candidates = [
+        p for p in person_profiles
+        if (p.appearance_count or 0) == (top.appearance_count or 0)
+        and (p.first_chapter or 99999) == (top.first_chapter or 99999)
+    ]
+    if len(candidates) > 1:
+        top = min(candidates, key=lambda p: p.canonical_name or "")
+
+    original = top.role_type
+    top.role_type = "protagonist"
+    top.profile_extras["_role_type_fallback"] = True
+    top.profile_extras["_role_type_original"] = original
+
+    if original == "antagonist":
+        # 用户故事可能是"反派当主角"，明确提示
+        logger.info(
+            "[EntityAggregator F4 兜底] '%s' 原 role_hint=antagonist → 升级为 protagonist "
+            "（出场=%d，首章=%s）。可能是反英雄故事，请人工核验",
+            top.canonical_name, top.appearance_count or 0, top.first_chapter,
+        )
+    else:
+        logger.warning(
+            "[EntityAggregator F4 兜底] 无 protagonist，按出场次数选 '%s' "
+            "（原 role_type=%s，出场=%d，首章=%s）",
+            top.canonical_name, original, top.appearance_count or 0, top.first_chapter,
+        )

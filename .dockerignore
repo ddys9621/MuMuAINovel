@@ -1,5 +1,5 @@
 # Python
-__pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
 *.so
@@ -7,10 +7,16 @@ __pycache__/
 env/
 venv/
 ENV/
+.venv/
+backend/.venv/
+backend/venv/
+backend/env/
 *.egg-info/
 dist/
 build/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Node
 node_modules/

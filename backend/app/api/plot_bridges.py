@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.settings import get_user_ai_service
 from app.database import get_db
 from app.models.project import Project
 from app.services.ai_service import AIService
@@ -51,12 +52,30 @@ class PlanBridgesRequest(BaseModel):
     """规划桥段请求。"""
     bridge_count: int = Field(default=25, ge=1, le=300)
     model: Optional[str] = Field(default=None, description="覆盖默认模型")
+    mode: str = Field(
+        default="by_plot_line",
+        description=(
+            "规划模式：'by_plot_line'（推荐）按主线 + 节点权重自动分配桥段配额；"
+            "'free' 自由规划不绑节点（向后兼容）"
+        ),
+        pattern="^(by_plot_line|free)$",
+    )
 
 
 class ExpandBridgeRequest(BaseModel):
     """展开桥段请求。"""
     start_chapter_number: int = Field(..., ge=1)
     model: Optional[str] = Field(default=None)
+
+
+class ExpandAllRequest(BaseModel):
+    """T2.1：批量展开项目下所有 ready 桥段为章纲。"""
+    model: Optional[str] = Field(default=None, description="覆盖默认模型")
+    start_chapter_number: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="起始章号；不传则从当前章纲表最大 chapter_number+1 推算",
+    )
 
 
 class UpdateBridgeRequest(BaseModel):
@@ -87,6 +106,11 @@ class BridgeResponse(BaseModel):
     next_bridge_hook: Optional[str]
     status: str
     order_index: Optional[int]
+    # V4.1 方案 C：桥段 ↔ 剧情线节点绑定字段
+    plot_line_id: Optional[str] = None
+    beat_index: Optional[int] = None
+    beat_coverage_start: Optional[float] = None
+    beat_coverage_end: Optional[float] = None
 
     class Config:
         from_attributes = True
@@ -96,12 +120,17 @@ class BridgeResponse(BaseModel):
 # 依赖
 # ============================================================
 
-def get_bridge_service(request: Request) -> BridgePlanningService:
-    """从 request.state 注入 AI service（中间件已注入）。"""
-    user_ai = getattr(request.state, "user_ai_service", None)
-    if not user_ai:
-        # fallback：用默认 AIService（依赖 settings）
-        user_ai = AIService()
+def get_bridge_service(
+    user_ai: AIService = Depends(get_user_ai_service),
+) -> BridgePlanningService:
+    """复用全局 `get_user_ai_service`：按当前登录用户的 Settings.api_provider /
+    api_key / api_base_url / llm_model 创建 AIService，与 wizard_stream /
+    chapter_outline 等其他生成入口的依赖注入方式保持一致。
+
+    历史 bug：旧实现从 `request.state.user_ai_service` 取（中间件并未注入此字段），
+    永远走 `AIService()` fallback → 用环境变量默认 provider/key 创建 → 用户在
+    弹窗里选 Anthropic 模型时撞 "OpenAI 客户端未初始化"。
+    """
     return BridgePlanningService(ai_service=user_ai)
 
 
@@ -115,19 +144,21 @@ async def plan_bridges_endpoint(
     payload: PlanBridgesRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
+    service: BridgePlanningService = Depends(get_bridge_service),
 ):
     """规划 N 个桥段（自动注入拆书 bridges + synopsis + methodology 维度）。"""
     user_id = getattr(request.state, "user_id", None)
     await verify_project_access(project_id, user_id, db)
 
-    service = get_bridge_service(request)
-    model = payload.model or "deepseek-v3"  # 默认模型
+    # payload.model 为 None 时，由 service 内部回退到 user_ai_service.default_model
+    # payload.mode 决定是否按主线节点分配桥段（默认 by_plot_line，方案 C）
     try:
         bridges = await service.plan_bridges(
             db,
             project_id=project_id,
-            model_name=model,
+            model_name=payload.model,
             bridge_count=payload.bridge_count,
+            mode=payload.mode,
         )
     except Exception as exc:
         logger.error("[plot_bridges] 规划失败: %s", exc, exc_info=True)
@@ -141,12 +172,12 @@ async def list_bridges_endpoint(
     project_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
+    service: BridgePlanningService = Depends(get_bridge_service),
 ):
     """列出项目下所有桥段（按 order_index）。"""
     user_id = getattr(request.state, "user_id", None)
     await verify_project_access(project_id, user_id, db)
 
-    service = get_bridge_service(request)
     bridges = await service.list_bridges(db, project_id)
     return [BridgeResponse.model_validate(b) for b in bridges]
 
@@ -156,8 +187,8 @@ async def get_bridge_endpoint(
     bridge_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
+    service: BridgePlanningService = Depends(get_bridge_service),
 ):
-    service = get_bridge_service(request)
     bridge = await service.get_bridge(db, bridge_id)
     if not bridge:
         raise HTTPException(status_code=404, detail="桥段不存在")
@@ -173,9 +204,9 @@ async def update_bridge_endpoint(
     payload: UpdateBridgeRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
+    service: BridgePlanningService = Depends(get_bridge_service),
 ):
     """用户手工编辑桥段卡片内容。"""
-    service = get_bridge_service(request)
     bridge = await service.get_bridge(db, bridge_id)
     if not bridge:
         raise HTTPException(status_code=404, detail="桥段不存在")
@@ -197,8 +228,8 @@ async def delete_bridge_endpoint(
     bridge_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
+    service: BridgePlanningService = Depends(get_bridge_service),
 ):
-    service = get_bridge_service(request)
     bridge = await service.get_bridge(db, bridge_id)
     if not bridge:
         raise HTTPException(status_code=404, detail="桥段不存在")
@@ -216,9 +247,9 @@ async def expand_bridge_endpoint(
     payload: ExpandBridgeRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
+    service: BridgePlanningService = Depends(get_bridge_service),
 ):
     """把单个桥段展开为 4 个 ChapterOutline（自动赋 bridge_id + bridge_position）。"""
-    service = get_bridge_service(request)
     bridge = await service.get_bridge(db, bridge_id)
     if not bridge:
         raise HTTPException(status_code=404, detail="桥段不存在")
@@ -226,12 +257,12 @@ async def expand_bridge_endpoint(
     user_id = getattr(request.state, "user_id", None)
     await verify_project_access(bridge.project_id, user_id, db)
 
-    model = payload.model or "deepseek-v3"
+    # payload.model 为 None 时，由 service 内部回退到 user_ai_service.default_model
     try:
         chapters = await service.expand_bridge_to_chapters(
             db,
             bridge_id=bridge_id,
-            model_name=model,
+            model_name=payload.model,
             start_chapter_number=payload.start_chapter_number,
         )
     except Exception as exc:
@@ -244,3 +275,32 @@ async def expand_bridge_endpoint(
         "chapter_count": len(chapters),
         "chapter_ids": [c.id for c in chapters],
     }
+
+
+@router.post("/projects/{project_id}/bridges/expand-all")
+async def expand_all_bridges_endpoint(
+    project_id: str,
+    payload: ExpandAllRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    service: BridgePlanningService = Depends(get_bridge_service),
+):
+    """T2.1 便利端点：批量展开项目下所有 status='ready' 的桥段。
+
+    返回每个桥段的成功/失败状态。单桥段失败不阻塞其他桥段。
+    """
+    user_id = getattr(request.state, "user_id", None)
+    await verify_project_access(project_id, user_id, db)
+
+    try:
+        result = await service.expand_all_ready_bridges(
+            db,
+            project_id=project_id,
+            model_name=payload.model,
+            start_chapter_number=payload.start_chapter_number,
+        )
+    except Exception as exc:
+        logger.error("[plot_bridges] 批量展开失败: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"批量展开失败: {exc}")
+
+    return {"success": True, **result}

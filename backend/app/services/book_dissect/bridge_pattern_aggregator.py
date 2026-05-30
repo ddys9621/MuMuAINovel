@@ -94,6 +94,13 @@ class BridgePatternAggregator:
             "bridge_types": [],
             "rhythm_stats": {
                 "avg_bridge_length": 0.0,
+                "bridge_length_distribution": {  # V4.2
+                    "micro_1_2": 0,
+                    "short_3": 0,
+                    "standard_4": 0,
+                    "long_5_6": 0,
+                    "epic_7plus": 0,
+                },
                 "showoff_density": "未识别",
                 "level_up_pacing": "未识别",
                 "slap_face_density": "未识别",
@@ -120,55 +127,85 @@ class BridgePatternAggregator:
     def _serialize_example(
         self, b: BridgeWindow, chapter_lookup: dict[int, Any]
     ) -> dict:
-        """把 BridgeWindow 序列化为典型范本 JSON。"""
+        """把 BridgeWindow 序列化为典型范本 JSON（V4.2 支持变长桥段）。
+
+        rating_features 优先用 confidence_breakdown（V4.2 标准字段），
+        若为空则回退到老 c1-c4 字段（V4.1 向后兼容）。
+        chapter_summaries 用 "ch{N}" 命名（N=章节号），不再硬编码 c1/c2/c3/c4。
+        """
+        # 变长 chapter_summaries：键名为 "ch{N}"，N = chapter_number
         summaries: dict[str, str] = {}
-        for label, ch in zip(("c1", "c2", "c3", "c4"), b.chapters):
+        for ch in b.chapters:
             fact = chapter_lookup.get(ch)
-            summaries[label] = (
+            summaries[f"ch{ch}"] = (
                 (getattr(fact, "summary", "") or "")[:200]
                 if fact else ""
             )
 
-        return {
-            "chapters": b.chapters,
-            "title_summary": b.goal[:30] if b.goal else "未命名桥段",
-            "goal": b.goal,
-            "showoff_point": b.showoff_point,
-            "golden_finger_mode": b.golden_finger_mode,
-            "rating_features": {
+        # rating_features：优先 confidence_breakdown（V4.2 LLM 模式）
+        # 否则回退到老字段格式（V4.1 rule 模式向后兼容）
+        if b.confidence_breakdown:
+            rating_features = {
+                k: round(v, 3) for k, v in b.confidence_breakdown.items()
+            }
+        else:
+            rating_features = {
                 "c1_intro_score": round(b.c1_score, 3),
                 "c2_build_score": round(b.c2_score, 3),
                 "c3_payoff_score": round(b.c3_score, 3),
                 "c4_aftermath_score": round(b.c4_score, 3),
-            },
+            }
+
+        return {
+            "chapters": b.chapters,
+            "bridge_length": len(b.chapters),  # V4.2 新增：桥段实际长度
+            "detection_origin": getattr(b, "detection_origin", "rule"),  # V4.2 新增
+            "title_summary": b.goal[:30] if b.goal else "未命名桥段",
+            "goal": b.goal,
+            "showoff_point": b.showoff_point,
+            "golden_finger_mode": b.golden_finger_mode,
+            "rating_features": rating_features,
             "chapter_summaries": summaries,
         }
 
     def _compute_rhythm(
         self, bridges: list[BridgeWindow], events: list[Any] | None
     ) -> dict:
-        """节奏指标。MVP 版只做基础计算，可在 V4.1 完整版扩展。"""
+        """节奏指标（V4.2 支持变长桥段长度分布统计）。"""
         if not bridges:
             return self._empty_result()["rhythm_stats"]
 
-        # 平均桥段长度（始终 4，因为 BridgeDetector 用的是窗口 4）
-        avg_len = sum(len(b.chapters) for b in bridges) / len(bridges)
+        # 平均桥段长度（V4.2：变长，可能 1-N 个）
+        lengths = [len(b.chapters) for b in bridges]
+        avg_len = sum(lengths) / len(bridges)
 
-        # 爽点密度：标准桥段 = 1 个爽点，所以约 N/4 章 1 个爽点
-        chapter_count = max((b.chapters[-1] for b in bridges), default=0)
+        # 桥段长度分布（V4.2 新增）
+        length_distribution = {
+            "micro_1_2": sum(1 for l in lengths if l <= 2),
+            "short_3": sum(1 for l in lengths if l == 3),
+            "standard_4": sum(1 for l in lengths if l == 4),
+            "long_5_6": sum(1 for l in lengths if 5 <= l <= 6),
+            "epic_7plus": sum(1 for l in lengths if l >= 7),
+        }
+
+        # 爽点密度（按桥段数算）
+        chapter_count = max(
+            (b.chapters[-1] for b in bridges if b.chapters),
+            default=0,
+        )
         if chapter_count > 0 and len(bridges) > 0:
             chapters_per_bridge = chapter_count / len(bridges)
             showoff_density = f"约每 {chapters_per_bridge:.1f} 章 1 次爽点"
         else:
             showoff_density = "未识别"
 
-        # level_up_pacing / slap_face_density：MVP 版本占位
-        # （V4.1 完整版可结合 events.event_type='level_up'/'slap_face' 计算）
+        # level_up_pacing / slap_face_density：留待结合 events 计算
         level_up_pacing = "待 events 联合分析"
         slap_face_density = "待 events 联合分析"
 
         return {
             "avg_bridge_length": round(avg_len, 1),
+            "bridge_length_distribution": length_distribution,  # V4.2 新增
             "showoff_density": showoff_density,
             "level_up_pacing": level_up_pacing,
             "slap_face_density": slap_face_density,

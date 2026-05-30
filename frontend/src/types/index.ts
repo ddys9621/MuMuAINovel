@@ -57,6 +57,8 @@ export interface Project {
   chapter_count?: number;
   narrative_perspective?: string;
   character_count?: number;
+  /** F3：是否启用桥段规划阶段（step 3.5）；默认 true */
+  enable_bridge_planning?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -94,6 +96,8 @@ export interface ProjectUpdate {
   chapter_count?: number;
   narrative_perspective?: string;
   character_count?: number;
+  /** F3：是否启用桥段规划阶段（step 3.5） */
+  enable_bridge_planning?: boolean;
   // current_words 由章节内容自动计算，不在此接口中
 }
 
@@ -324,6 +328,10 @@ export interface GenerateOutlineResponse {
   outline?: Outline;
   outlines?: Outline[];
   total_chapters?: number;
+  /** T2.1：后端根据 project.enable_bridge_planning 返回的下一步路由建议 */
+  next_wizard_route?: 'bridge_planning' | 'chapter_outlines';
+  /** T2.1：项目当前的桥段规划开关状态（同步给前端，避免多 GET 一次） */
+  enable_bridge_planning?: boolean;
 }
 
 // API响应类型

@@ -353,11 +353,19 @@ export function useProjectGeneration({ dispatch, mcpSettings, refPackSettings }:
         },
         onResult: (result) => {
           if (!isRunActive(runId)) return;
-          const outline = getOutlineFromResponse(result as GenerateOutlineResponse);
+          const typed = result as GenerateOutlineResponse;
+          const outline = getOutlineFromResponse(typed);
           setArtifacts((current) => ({
             ...current,
             outline,
           }));
+          // T2.1：捕获后端建议的下一步路由（bridge_planning / chapter_outlines）
+          if (
+            typed.next_wizard_route === 'bridge_planning' ||
+            typed.next_wizard_route === 'chapter_outlines'
+          ) {
+            dispatch({ type: 'GEN_NEXT_ROUTE', payload: typed.next_wizard_route });
+          }
           dispatch({ type: 'GEN_STEP_UPDATE', payload: { outline: 'completed' } });
         },
         onError: (error) => {

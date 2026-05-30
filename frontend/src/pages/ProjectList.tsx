@@ -661,20 +661,35 @@ export default function ProjectList() {
     setShowWizard(true)
   }
 
-  // 向导创建完成
-  const handleWizardSuccess = async (projectId: string) => {
+  // 向导创建完成（F5：支持 next_wizard_route 决定跳转目标）
+  const handleWizardSuccess = async (
+    projectId: string,
+    options?: { nextRoute?: 'bridge_planning' | 'chapter_outlines' }
+  ) => {
     setShowWizard(false)
     await refreshProjects()
-    navigate(`/project/${projectId}`)
+    if (options?.nextRoute === 'bridge_planning') {
+      navigate(`/project/${projectId}/plot-bridges`)
+    } else {
+      navigate(`/project/${projectId}`)
+    }
   }
 
   const handleInspirationProjectCreated = async () => {
     await refreshProjects()
   }
 
-  const handleEnterInspiredProject = (projectId: string) => {
+  // F5：灵感模式完成跳转，同样支持 next_wizard_route
+  const handleEnterInspiredProject = (
+    projectId: string,
+    options?: { nextRoute?: 'bridge_planning' | 'chapter_outlines' }
+  ) => {
     closeInspirationDrawer()
-    navigate(`/project/${projectId}`)
+    if (options?.nextRoute === 'bridge_planning') {
+      navigate(`/project/${projectId}/plot-bridges`)
+    } else {
+      navigate(`/project/${projectId}`)
+    }
   }
 
   // 删除项目
@@ -863,6 +878,8 @@ interface WizardForm {
   chapter_count: number
   character_count: number
   requirements: string
+  /** F3/F5：是否启用 step 3.5 桥段规划阶段（默认 true） */
+  enable_bridge_planning: boolean
 }
 
 const DEFAULT_WIZARD_FORM: WizardForm = {
@@ -875,6 +892,7 @@ const DEFAULT_WIZARD_FORM: WizardForm = {
   chapter_count: 30,
   character_count: 5,
   requirements: '',
+  enable_bridge_planning: true,
 }
 
 const GENRE_OPTIONS = ['玄幻', '奇幻', '武侠', '仙侠', '都市', '现实', '历史', '军事', '游戏', '体育', '科幻', '悬疑', '灵异', '二次元', '言情', '现言', '古言']
@@ -886,7 +904,10 @@ function WizardModal({
   initialPackTaskId,
 }: {
   onClose: () => void;
-  onSuccess: (projectId: string) => void;
+  onSuccess: (
+    projectId: string,
+    options?: { nextRoute?: 'bridge_planning' | 'chapter_outlines' }
+  ) => void;
   /** V3.2-A：拆书页跳转过来时传入，在 mount 后拉取该任务对应的参考包预填 */
   initialPackTaskId?: string | null;
 }) {
@@ -902,6 +923,8 @@ function WizardModal({
   const [enableMcp, setEnableMcp] = useState(false)
   // V3.2-B：拆书参考包选择状态（项目创建后后端会自动挂载）
   const [refPack, setRefPack] = useState<ReferencePackSelectorValue>(DEFAULT_REF_PACK_VALUE)
+  // F5：outline 完成后后端回传的下一步路由（bridge_planning 或 chapter_outlines）
+  const [nextRoute, setNextRoute] = useState<'bridge_planning' | 'chapter_outlines' | null>(null)
 
   // V3.2-A：从拆书页跳转过来时，根据 task_id 拉取对应的参考包并预填 refPack
   useEffect(() => {
@@ -948,6 +971,21 @@ function WizardModal({
 
   const updateField = <K extends keyof WizardForm>(key: K, value: WizardForm[K]) => {
     setForm(prev => ({ ...prev, [key]: value }))
+  }
+
+  /** 类型多选切换：用顿号拼接维护，已选则取消、未选则追加（与后端 _resolve_genre_guide 约定一致） */
+  const toggleGenre = (g: string) => {
+    setForm(prev => {
+      const current = (prev.genre || '').split('、').map(s => s.trim()).filter(Boolean)
+      const next = current.includes(g) ? current.filter(x => x !== g) : [...current, g]
+      return { ...prev, genre: next.join('、') }
+    })
+  }
+
+  /** 判断某类型是否被选中 */
+  const isGenreSelected = (g: string): boolean => {
+    if (!form.genre) return false
+    return form.genre.split('、').map(s => s.trim()).includes(g)
   }
 
   const canSubmit = form.title.trim() && form.description.trim()
@@ -1036,6 +1074,16 @@ function WizardModal({
 
       if (controller.signal.aborted) return
 
+      // Step 2.5: 把 enable_bridge_planning 同步到项目（仅当用户取消默认勾选时）
+      // 默认 true 时 DB 已是 true，无需多余请求
+      if (!form.enable_bridge_planning) {
+        try {
+          await projectApi.updateProject(pid, { enable_bridge_planning: false })
+        } catch (e) {
+          console.warn('[wizard] 同步 enable_bridge_planning=false 失败：', e)
+        }
+      }
+
       // Step 3: 大纲
       setSteps(s => ({ ...s, outline: 'processing' }))
       setProgressMsg('正在生成故事大纲...')
@@ -1059,7 +1107,15 @@ function WizardModal({
             setProgressMsg(msg)
             setProgress(66 + Math.floor(prog / 3))
           },
-          onResult: () => setSteps(s => ({ ...s, outline: 'completed' })),
+          onResult: (result) => {
+            // T2.1：捕获后端建议的下一步路由
+            const route = (result as { next_wizard_route?: 'bridge_planning' | 'chapter_outlines' })
+              .next_wizard_route
+            if (route === 'bridge_planning' || route === 'chapter_outlines') {
+              setNextRoute(route)
+            }
+            setSteps(s => ({ ...s, outline: 'completed' }))
+          },
           onError: (err) => {
             setSteps(s => ({ ...s, outline: 'error' }))
             throw new Error(err)
@@ -1128,10 +1184,12 @@ function WizardModal({
         {phase === 'done' && projectId && (
           <div className="px-4 py-2 border-t border-surface-border">
             <button
-              onClick={() => onSuccess(projectId)}
+              onClick={() =>
+                onSuccess(projectId, nextRoute ? { nextRoute } : undefined)
+              }
               className="w-full text-xs bg-brand text-white rounded-btn py-1.5 hover:bg-brand-600 transition-colors"
             >
-              进入项目 →
+              {nextRoute === 'bridge_planning' ? '进入桥段规划 →' : '进入项目 →'}
             </button>
           </div>
         )}
@@ -1212,25 +1270,36 @@ function WizardModal({
                 />
               </div>
 
-              {/* 类型 */}
+              {/* 类型（多选） */}
               <div>
-                <label className="block text-sm font-medium text-content mb-1">类型</label>
+                <label className="block text-sm font-medium text-content mb-1">
+                  类型
+                  <span className="ml-1.5 text-xs font-normal text-content-secondary">（可多选，组合融合）</span>
+                </label>
                 <div className="flex flex-wrap gap-1.5">
-                  {GENRE_OPTIONS.map(g => (
-                    <button
-                      key={g}
-                      type="button"
-                      onClick={() => updateField('genre', form.genre === g ? '' : g)}
-                      className={`text-xs rounded-full px-2.5 py-1 border transition-colors ${
-                        form.genre === g
-                          ? 'bg-brand text-white border-brand'
-                          : 'bg-white text-content-secondary border-surface-border hover:border-brand'
-                      }`}
-                    >
-                      {g}
-                    </button>
-                  ))}
+                  {GENRE_OPTIONS.map(g => {
+                    const selected = isGenreSelected(g)
+                    return (
+                      <button
+                        key={g}
+                        type="button"
+                        onClick={() => toggleGenre(g)}
+                        className={`text-xs rounded-full px-2.5 py-1 border transition-colors ${
+                          selected
+                            ? 'bg-brand text-white border-brand'
+                            : 'bg-white text-content-secondary border-surface-border hover:border-brand'
+                        }`}
+                      >
+                        {g}
+                      </button>
+                    )
+                  })}
                 </div>
+                {form.genre && (
+                  <div className="mt-1.5 text-xs text-content-secondary">
+                    已选：<span className="text-content font-medium">{form.genre}</span>
+                  </div>
+                )}
               </div>
 
               {/* 视角 */}
@@ -1313,6 +1382,25 @@ function WizardModal({
                   setSelectedPlugins(selected)
                 }}
               />
+
+              {/* F3/F5：桥段规划开关（默认启用） */}
+              <div className="rounded-btn border border-surface-border bg-white/60 px-3 py-2.5">
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.enable_bridge_planning}
+                    onChange={e => updateField('enable_bridge_planning', e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-surface-border text-brand focus:ring-brand"
+                  />
+                  <div className="flex-1">
+                    <div className="text-sm font-medium text-content">启用桥段规划阶段（推荐）</div>
+                    <div className="mt-0.5 text-xs text-content-secondary">
+                      大纲完成后先进入「桥段规划页」让 AI 设计 25 个桥段（C1 代入 → C2 拉扯 → C3 兑现 → C4 善后），
+                      你可手工微调再一键展开为完整章纲。<strong>关闭后直接进项目页传统创作。</strong>
+                    </div>
+                  </div>
+                </label>
+              </div>
             </>
           )}
 
@@ -1419,10 +1507,12 @@ function WizardModal({
           )}
           {(phase === 'done' || (phase === 'generating' && error)) && projectId && (
             <button
-              onClick={() => onSuccess(projectId)}
+              onClick={() =>
+                onSuccess(projectId, nextRoute ? { nextRoute } : undefined)
+              }
               className="bg-brand hover:bg-brand-600 text-white rounded-btn px-5 py-2 text-sm font-medium transition-colors"
             >
-              进入项目 →
+              {nextRoute === 'bridge_planning' ? '进入桥段规划 →' : '进入项目 →'}
             </button>
           )}
           {error && !projectId && (

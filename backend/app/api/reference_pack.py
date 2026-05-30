@@ -139,6 +139,11 @@ def _detail_from(pack: ReferencePack, attached_count: int) -> ReferencePackDetai
         entities=_safe_load_json(getattr(pack, "entities_json", None), None),
         relations=_safe_load_json(getattr(pack, "relations_json", None), None),
         events=_safe_load_json(getattr(pack, "events_json", None), None),
+        # V4.1：桥段反推 + 角色档案，老库未跑 V4.1 会是 None
+        bridges=_safe_load_json(getattr(pack, "bridges_json", None), None),
+        character_archive=_safe_load_json(
+            getattr(pack, "character_archive_json", None), None
+        ),
         attached_project_count=attached_count,
         created_at=pack.created_at,
         updated_at=pack.updated_at,
@@ -441,10 +446,11 @@ async def detach_pack(
 def _infer_default_dimensions(strength: str) -> List[str]:
     """根据参考强度推断默认维度。
 
-    V3.2 / V3.2-P2：
+    V4.1：
     - light: 仅文风（保持极简）
     - medium: + synopsis（Story Bible 全局引导）
     - deep: + 模式三维度（entities/relations/events）+ 5 手法全开
+            + V4.1 桥段范本(bridges) + V4.1 角色档案(character_archive)
     """
     if strength == "light":
         return ["style"]
@@ -459,6 +465,8 @@ def _infer_default_dimensions(strength: str) -> List[str]:
             "structure",
             "archetypes",
             "worldbuilding",
+            "bridges",            # V4.1
+            "character_archive",  # V4.1
             "corpus",
         ]
     # medium

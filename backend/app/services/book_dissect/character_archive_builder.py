@@ -71,10 +71,31 @@ class CharacterArchiveBuilder:
             key=lambda p: -getattr(p, "appearance_count", 0),
         )[: self.TOP_PROTAGONISTS]
 
+        # V4.2.3 双保险：即便 EntityAggregator 兜底没生效（旧数据 / 边界场景），
+        # 这里再兜底一次确保 protagonist_archetypes 不空
+        # 局部 set 记录本层兜底的 person id，序列化时透传给前端（_inferred=True）
+        inferred_protagonist_ids: set[int] = set()
+        if not protagonists and persons:
+            fallback = max(persons, key=lambda p: getattr(p, "appearance_count", 0))
+            inferred_protagonist_ids.add(id(fallback))
+            logger.warning(
+                "[CharacterArchive 双保险] EntityAggregator 未兜底，按出场次数选 '%s' 为 protagonist "
+                "（appearance=%d，原 role_type=%s）",
+                getattr(fallback, "canonical_name", "?"),
+                getattr(fallback, "appearance_count", 0),
+                getattr(fallback, "role_type", None),
+            )
+            protagonists = [fallback]
+
         antagonists = sorted(
             [p for p in persons if getattr(p, "role_type", "") == "antagonist"],
             key=lambda p: -getattr(p, "appearance_count", 0),
         )[: self.TOP_ANTAGONISTS]
+
+        # V4.2.3：把已被升级为 protagonist 的 person 从 antagonist 列表移除
+        # （防止"原 antagonist 被升 protagonist"重复出现在两个列表）
+        proto_ids = {id(p) for p in protagonists}
+        antagonists = [a for a in antagonists if id(a) not in proto_ids]
 
         supports = [p for p in persons if getattr(p, "role_type", "") == "supporting"]
 
@@ -87,6 +108,7 @@ class CharacterArchiveBuilder:
                 self._serialize_protagonist(
                     p, relations_by_source, events_by_actor,
                     chapter_lookup, total_chapters,
+                    inferred_ids=inferred_protagonist_ids,
                 )
                 for p in protagonists
             ],
@@ -151,16 +173,31 @@ class CharacterArchiveBuilder:
         events_by_actor: dict[str, list[Any]],
         chapter_lookup: dict[int, Any],
         total_chapters: int,
+        inferred_ids: set[int] | None = None,
     ) -> dict:
-        """序列化一个 protagonist 角色档案。"""
+        """序列化一个 protagonist 角色档案。
+
+        Args:
+            inferred_ids: V4.2.3 — L3 双保险升级的 person id 集合（局部传入）
+        """
         pid = str(getattr(p, "id", ""))
         first_ch = getattr(p, "first_chapter", 1) or 1
         last_ch = getattr(p, "last_chapter", total_chapters) or total_chapters
 
+        # V4.2.3：透传兜底升级标记给前端
+        # 来源 1：L2 EntityAggregator 兜底 → profile_extras 含 _role_type_fallback
+        # 来源 2：L3 CharacterArchiveBuilder 双保险 → inferred_ids 参数包含
+        profile_extras = getattr(p, "profile_extras", {}) or {}
+        is_inferred = (
+            profile_extras.get("_role_type_fallback") is True
+            or (inferred_ids is not None and id(p) in inferred_ids)
+        )
+        original_role = profile_extras.get("_role_type_original")
+
         # 注意 V3 哲学：不输出 canonical_name 避免引导复刻
         # 但 character_archive 是 V4.1 新维度，对 Phase 0 MVP 允许保留名字给前端展示
         # 前端展示时可选脱敏
-        return {
+        out: dict = {
             "name": getattr(p, "canonical_name", "未命名角色"),
             "role_type": "protagonist",
             "intro_chapter": first_ch,
@@ -179,6 +216,11 @@ class CharacterArchiveBuilder:
                 pid, events_by_actor,
             ),
         }
+        if is_inferred:
+            out["_inferred"] = True
+            if original_role:
+                out["_inferred_original_role"] = original_role
+        return out
 
     @staticmethod
     def _serialize_antagonist(

@@ -301,7 +301,7 @@ class TestSlotBuilderIntegration:
 
 class TestDimensionRegistry:
     def test_compressible_dimensions_list(self):
-        """COMPRESSIBLE_DIMENSIONS 应该包含 6 个核心维度。"""
+        """COMPRESSIBLE_DIMENSIONS 应该包含 6 核心维度 + V4.1 两维度（共 8 个）。"""
         assert set(COMPRESSIBLE_DIMENSIONS) == {
             "methodology",
             "style",
@@ -309,6 +309,8 @@ class TestDimensionRegistry:
             "archetypes",
             "worldbuilding",
             "synopsis",
+            "bridges",            # V4.1
+            "character_archive",  # V4.1
         }
         # corpus 不应在内（依赖动态 BM25）
         assert "corpus" not in COMPRESSIBLE_DIMENSIONS

@@ -44,6 +44,9 @@ const DIMENSION_LABELS: Record<ReferenceDimension, string> = {
   structure: '结构手法',
   archetypes: '角色塑造',
   worldbuilding: '世界观',
+  // V4.1 维度
+  bridges: '桥段范本',
+  character_archive: '角色档案',
   corpus: '灵感语料',
 };
 
