@@ -1,15 +1,21 @@
-"""HTTP MCP客户端 - 使用官方 MCP Python SDK 实现"""
+"""HTTP MCP客户端 - 使用官方 MCP Python SDK 实现（Streamable HTTP / SSE 两种远程传输）"""
 import asyncio
+from datetime import timedelta
 from typing import Dict, Any, List, Optional
 from contextlib import asynccontextmanager
 
 from mcp import ClientSession, types
+from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamablehttp_client
 from pydantic import AnyUrl
 
 from app.logger import get_logger
+from app.mcp.server_config import TRANSPORT_SSE, TRANSPORT_STREAMABLE_HTTP
 
 logger = get_logger(__name__)
+
+# SSE 长连接读超时（秒）：工具调用期间服务端可能长时间不发消息
+_SSE_READ_TIMEOUT_SECONDS = 300
 
 
 class MCPError(Exception):
@@ -25,7 +31,8 @@ class HTTPMCPClient:
         url: str,
         headers: Optional[Dict[str, str]] = None,
         env: Optional[Dict[str, str]] = None,
-        timeout: float = 60.0
+        timeout: float = 60.0,
+        transport: str = TRANSPORT_STREAMABLE_HTTP,
     ):
         """
         初始化HTTP MCP客户端
@@ -35,67 +42,118 @@ class HTTPMCPClient:
             headers: HTTP请求头
             env: 环境变量（用于API Key等）
             timeout: 超时时间（秒）
+            transport: 远程传输方式，TRANSPORT_STREAMABLE_HTTP（默认）或 TRANSPORT_SSE
         """
-        self.url = url.rstrip('/')
-        self.headers = headers or {}
+        if transport not in (TRANSPORT_STREAMABLE_HTTP, TRANSPORT_SSE):
+            raise ValueError(f"不支持的 transport: {transport}")
+
+        # URL 原样保留：尾部斜杠、查询串里的 key（如 ?key=xxx）都不能改写
+        self.url = url
+        self.headers = dict(headers or {})
         self.env = env or {}
         self.timeout = timeout
+        self.transport = transport
         
         # 如果env中有API Key，添加到headers
         if 'API_KEY' in self.env:
             self.headers['Authorization'] = f'Bearer {self.env["API_KEY"]}'
         
         self._session: Optional[ClientSession] = None
-        self._context_stack = []  # 保存上下文管理器栈
         self._initialized = False
         self._lock = asyncio.Lock()
+
+        # 连接守护任务：SDK 的 transport / ClientSession 上下文都在它里面进入与退出。
+        # anyio 的 cancel scope 要求同一任务进出；若留在某个请求任务里，请求结束时
+        # starlette 的 TaskGroup 退出会抛 "Attempted to exit a cancel scope ..." 并重置连接。
+        self._runner: Optional[asyncio.Task] = None
+        self._ready: Optional[asyncio.Event] = None
+        self._closing: Optional[asyncio.Event] = None
+        self._connect_error: Optional[BaseException] = None
+
+    def _open_transport(self):
+        """按 transport 创建 SDK 传输上下文（headers 在此真正下发）"""
+        if self.transport == TRANSPORT_SSE:
+            return sse_client(
+                self.url,
+                headers=self.headers,
+                timeout=self.timeout,
+                sse_read_timeout=_SSE_READ_TIMEOUT_SECONDS,
+            )
+        return streamablehttp_client(
+            self.url,
+            headers=self.headers,
+            timeout=timedelta(seconds=self.timeout),
+            sse_read_timeout=timedelta(seconds=_SSE_READ_TIMEOUT_SECONDS),
+        )
     
-    async def _ensure_connected(self):
-        """确保连接已建立"""
-        async with self._lock:
-            if self._session is None:
-                try:
-                    logger.info(f"🔗 连接到MCP服务器: {self.url}")
-                    
-                    # 使用官方 SDK 的 streamable_http_client
-                    # 保存上下文管理器以便后续正确清理
-                    stream_context = streamablehttp_client(self.url)
-                    read_stream, write_stream, _ = await stream_context.__aenter__()
-                    self._context_stack.append(('stream', stream_context))
-                    
-                    # 创建客户端会话
-                    self._session = ClientSession(read_stream, write_stream)
-                    session_context = self._session
-                    await session_context.__aenter__()
-                    self._context_stack.append(('session', session_context))
-                    
-                    # 初始化会话
-                    await self._session.initialize()
+    async def _run_connection(self, ready: asyncio.Event, closing: asyncio.Event):
+        """连接守护任务：建立连接 → 标记就绪 → 挂起直到 close() → 在本任务内按序退出上下文"""
+        session: Optional[ClientSession] = None
+        try:
+            # streamable_http 产出 (read, write, get_session_id)，sse 产出 (read, write)
+            async with self._open_transport() as streams:
+                async with ClientSession(streams[0], streams[1]) as session:
+                    await session.initialize()
+                    self._session = session
                     self._initialized = True
-                    
-                    logger.info(f"✅ MCP会话初始化成功")
-                    
-                except Exception as e:
-                    logger.error(f"❌ MCP连接失败: {e}")
-                    await self._cleanup()
-                    raise MCPError(f"连接MCP服务器失败: {str(e)}")
-    
+                    ready.set()
+                    await closing.wait()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            self._connect_error = e
+            if session is not None:
+                logger.warning(f"⚠️ MCP连接中断或关闭时出错: {self.url}: {e}")
+        finally:
+            # 只清理本任务建立的会话：被超时取消的旧守护任务不能误清掉新连接
+            if self._session is session:
+                self._session = None
+                self._initialized = False
+            ready.set()
+
+    async def _ensure_connected(self):
+        """确保连接已建立（连接失败抛 MCPError，可重试）"""
+        async with self._lock:
+            if self._session is not None:
+                return
+            if self._runner is not None and not self._runner.done():
+                # 上一次连接已断开但守护任务仍在收尾，先等它退出
+                await self._shutdown_runner()
+
+            logger.info(f"🔗 连接到MCP服务器: {self.url} ({self.transport})")
+            self._ready = asyncio.Event()
+            self._closing = asyncio.Event()
+            self._connect_error = None
+            self._runner = asyncio.create_task(
+                self._run_connection(self._ready, self._closing), name=f"mcp-conn:{self.url}"
+            )
+            await self._ready.wait()
+
+            if self._session is None:
+                error = self._connect_error
+                self._runner = None
+                logger.error(f"❌ MCP连接失败: {error}")
+                raise MCPError(f"连接MCP服务器失败: {error}")
+            logger.info(f"✅ MCP会话初始化成功")
+
+    async def _shutdown_runner(self):
+        """通知守护任务退出并等待其收尾（超时则取消）"""
+        runner, self._runner = self._runner, None
+        if self._closing is not None:
+            self._closing.set()
+        if runner is None or runner.done():
+            return
+        try:
+            await asyncio.wait_for(runner, timeout=15)
+        except asyncio.TimeoutError:
+            logger.warning(f"关闭MCP连接超时，强制取消: {self.url}")
+            runner.cancel()
+        except Exception as e:
+            logger.error(f"关闭MCP连接失败: {self.url}: {e}")
+
     async def _cleanup(self):
-        """清理连接资源（按照进入的相反顺序退出）"""
-        # 按照LIFO顺序清理上下文
-        while self._context_stack:
-            ctx_type, ctx = self._context_stack.pop()
-            try:
-                await ctx.__aexit__(None, None, None)
-            except RuntimeError as e:
-                # 忽略 anyio 的任务上下文错误（在关闭时可能发生）
-                if "cancel scope" in str(e).lower() or "different task" in str(e).lower():
-                    logger.debug(f"忽略{ctx_type}上下文清理的任务切换警告: {e}")
-                else:
-                    logger.error(f"清理{ctx_type}上下文失败: {e}")
-            except Exception as e:
-                logger.error(f"清理{ctx_type}上下文失败: {e}")
-        
+        """清理连接资源"""
+        await self._shutdown_runner()
         self._session = None
         self._initialized = False
     
@@ -314,9 +372,10 @@ class HTTPMCPClient:
             }
     
     async def close(self):
-        """关闭客户端连接"""
+        """关闭客户端连接（可从任意任务调用，上下文退出由守护任务完成）"""
         logger.info(f"关闭MCP客户端: {self.url}")
-        await self._cleanup()
+        async with self._lock:
+            await self._cleanup()
 
 
 @asynccontextmanager

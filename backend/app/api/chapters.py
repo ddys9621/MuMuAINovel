@@ -1772,10 +1772,10 @@ async def generate_chapter_content_stream(
                 _has_mcp_plugins = False
                 if enable_mcp and current_user_id:
                     from app.services.mcp_tool_service import mcp_tool_service
-                    _available_tools = await mcp_tool_service.get_available_tools(
+                    _available_tools = await mcp_tool_service.get_user_enabled_tools(
                         user_id=current_user_id,
                         db_session=db_session,
-                        selected_plugins=selected_plugins,
+                        plugin_names=selected_plugins,
                     )
                     _has_mcp_plugins = len(_available_tools) > 0
                     if not _has_mcp_plugins:

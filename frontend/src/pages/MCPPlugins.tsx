@@ -1,13 +1,17 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Plus, Pencil, Trash2, Power, TestTube, Loader2, Plug, Wrench, ChevronDown, ChevronUp } from 'lucide-react'
+import { Plus, Pencil, Trash2, Power, TestTube, Loader2, Plug, Wrench, ChevronDown, ChevronUp, Store } from 'lucide-react'
 import { toast } from 'sonner'
 import { mcpPluginApi } from '@/services/api'
 import { Modal } from '@/components/ui/Modal'
+import { MCPMarketplace } from '@/components/mcp/MCPMarketplace'
+import { cn } from '@/lib/utils'
 import type { MCPPlugin, MCPPluginCreate, MCPPluginUpdate, MCPTool } from '@/types'
 
 type ModalMode = 'simple' | 'full' | 'edit'
+type PageTab = 'mine' | 'market'
 
 export default function MCPPlugins() {
+  const [tab, setTab] = useState<PageTab>('mine')
   const [plugins, setPlugins] = useState<MCPPlugin[]>([])
   const [loading, setLoading] = useState(false)
   const [testingId, setTestingId] = useState<string | null>(null)
@@ -205,28 +209,51 @@ export default function MCPPlugins() {
 
   const inputCls = 'w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors'
 
+  // 商城安装成功后，把新插件并入「我的插件」列表（同名则替换）
+  const handleInstalled = useCallback((plugin: MCPPlugin) => {
+    setPlugins(prev => prev.some(p => p.id === plugin.id) ? prev.map(p => p.id === plugin.id ? plugin : p) : [...prev, plugin])
+  }, [])
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-content">MCP 插件管理</h1>
-        <div className="flex gap-2">
-          <button onClick={() => openCreate('simple')} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5">
-            <Plus className="w-4 h-4" />
-            快速添加
-          </button>
-          <button onClick={() => openCreate('full')} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm inline-flex items-center gap-1.5">
-            <Plus className="w-4 h-4" />
-            完整创建
-          </button>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-4">
+          <h1 className="text-xl font-bold text-content">MCP 插件管理</h1>
+          <div className="flex gap-2" role="tablist">
+            <button type="button" role="tab" aria-selected={tab === 'mine'} onClick={() => setTab('mine')} className={cn('hh-chip', tab === 'mine' && 'hh-chip--active')}>
+              <Plug className="w-3.5 h-3.5" />我的插件 <span className="tabular-nums opacity-70">{plugins.length}</span>
+            </button>
+            <button type="button" role="tab" aria-selected={tab === 'market'} onClick={() => setTab('market')} className={cn('hh-chip', tab === 'market' && 'hh-chip--active')}>
+              <Store className="w-3.5 h-3.5" />MCP 商城
+            </button>
+          </div>
         </div>
+        {tab === 'mine' && (
+          <div className="flex gap-2">
+            <button onClick={() => openCreate('simple')} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5">
+              <Plus className="w-4 h-4" />
+              快速添加
+            </button>
+            <button onClick={() => openCreate('full')} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm inline-flex items-center gap-1.5">
+              <Plus className="w-4 h-4" />
+              完整创建
+            </button>
+          </div>
+        )}
       </div>
 
-      {loading ? (
+      {tab === 'market' ? (
+        <MCPMarketplace onInstalled={handleInstalled} />
+      ) : loading ? (
         <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-content-secondary" /></div>
       ) : plugins.length === 0 ? (
-        <div className="text-center py-12 text-content-secondary text-sm">
-          <Plug className="w-8 h-8 mx-auto mb-2 opacity-40" />
-          暂无插件
+        <div className="text-center py-12 text-content-secondary text-sm space-y-3">
+          <Plug className="w-8 h-8 mx-auto opacity-40" />
+          <p>暂无插件</p>
+          <button type="button" onClick={() => setTab('market')} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm inline-flex items-center gap-1.5">
+            <Store className="w-4 h-4" />
+            去 MCP 商城一键安装
+          </button>
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -239,7 +266,7 @@ export default function MCPPlugins() {
                     <h3 className="text-sm font-semibold text-content truncate">{p.display_name}</h3>
                     {expandedId === p.id ? <ChevronUp className="w-3.5 h-3.5 text-content-secondary shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 text-content-secondary shrink-0" />}
                   </div>
-                  <p className="text-xs text-content-secondary">{p.plugin_type.toUpperCase()} · {p.category}</p>
+                  <p className="text-xs text-content-secondary">{p.transport === 'sse' ? 'SSE' : p.plugin_type.toUpperCase()} · {p.category}</p>
                 </div>
                 <span className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${statusColor(p.status)}`}>
                   {p.status === 'active' ? '正常' : p.status === 'error' ? '异常' : '未激活'}

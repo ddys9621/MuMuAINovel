@@ -2,7 +2,7 @@
 
 from typing import List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, or_
 import asyncio
 import json
 import time
@@ -119,7 +119,7 @@ class MCPToolService:
             user_id: 用户ID
             db_session: 数据库会话
             category: 工具类别筛选（search/analysis/filesystem等）
-            plugin_names: 指定插件名称列表，仅加载这些插件的工具
+            plugin_names: 指定插件列表，仅加载这些插件的工具；元素可为 plugin_name 或插件 id（前端 MCPSelector 传的是 id）
         
         Returns:
             工具定义列表，格式符合OpenAI Function Calling规范
@@ -136,7 +136,10 @@ class MCPToolService:
                 query = query.where(MCPPlugin.category == category)
             
             if plugin_names:
-                query = query.where(MCPPlugin.plugin_name.in_(plugin_names))
+                query = query.where(or_(
+                    MCPPlugin.plugin_name.in_(plugin_names),
+                    MCPPlugin.id.in_(plugin_names),
+                ))
             
             result = await db_session.execute(query)
             plugins = result.scalars().all()

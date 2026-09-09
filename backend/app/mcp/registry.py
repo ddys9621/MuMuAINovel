@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from app.mcp.http_client import HTTPMCPClient, MCPError
 from app.mcp.config import mcp_config
+from app.mcp.server_config import TRANSPORT_STREAMABLE_HTTP
 from app.models.mcp_plugin import MCPPlugin
 from app.logger import get_logger
 
@@ -222,18 +223,20 @@ class MCPPluginRegistry:
                     # 检查是否需要驱逐LRU会话
                     await self._evict_lru_session()
                 
-                # 目前只支持HTTP类型
+                # 目前只支持HTTP类型（含 Streamable HTTP 与 SSE 两种远程传输）
                 if plugin.plugin_type == "http":
                     if not plugin.server_url:
                         logger.error(f"HTTP插件缺少server_url: {plugin.plugin_name}")
                         return False
 
+                    plugin_config = plugin.config or {}
                     # 为每个插件创建独立的HTTP客户端
                     client = HTTPMCPClient(
                         url=plugin.server_url,
                         headers=plugin.headers or {},
                         env=plugin.env or {},
-                        timeout=plugin.config.get('timeout', 60.0) if plugin.config else 60.0
+                        timeout=plugin_config.get('timeout', 60.0),
+                        transport=plugin_config.get('transport', TRANSPORT_STREAMABLE_HTTP),
                     )
 
                     # 创建会话信息

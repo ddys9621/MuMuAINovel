@@ -1,5 +1,5 @@
 """MCP插件Pydantic模式"""
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
@@ -67,6 +67,7 @@ class MCPPluginResponse(BaseModel):
     # HTTP类型字段
     server_url: Optional[str] = None
     headers: Optional[Dict[str, str]] = None
+    transport: Optional[str] = Field(None, description="远程传输方式：streamable_http / sse")
     
     # Stdio类型字段
     command: Optional[str] = None
@@ -82,8 +83,7 @@ class MCPPluginResponse(BaseModel):
     # 时间戳
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MCPToolCall(BaseModel):
@@ -91,6 +91,55 @@ class MCPToolCall(BaseModel):
     plugin_id: str = Field(..., description="插件ID")
     tool_name: str = Field(..., description="工具名称")
     arguments: Dict[str, Any] = Field(default_factory=dict, description="工具参数")
+
+
+class MCPMarketplaceInputResponse(BaseModel):
+    """商城条目安装时需要用户填写的一项"""
+    key: str
+    label: str
+    required: bool
+    secret: bool
+    placeholder: Optional[str] = None
+    help_url: Optional[str] = None
+    help_label: Optional[str] = Field(None, description="链接文案，缺省「获取 Key」")
+    help_text: Optional[str] = None
+
+
+class MCPMarketplaceItemResponse(BaseModel):
+    """商城条目（目录项 + 当前用户的安装状态）"""
+    id: str
+    name: str
+    description: str
+    category: str
+    tags: List[str]
+    transport: str
+    server_url: str = Field(..., description="安装后的 URL 模板（占位符原样展示）")
+    inputs: List[MCPMarketplaceInputResponse]
+    homepage: str
+    official: bool
+    region: str
+    pricing: str
+    notes: Optional[str] = None
+    recommended: bool
+    verified_at: Optional[str] = None
+    installed_plugin_id: Optional[str] = Field(None, description="当前用户已安装则为插件ID")
+    installed_status: Optional[str] = Field(None, description="已安装插件的状态：active/inactive/error")
+
+
+class MCPMarketplaceCategory(BaseModel):
+    id: str
+    label: str
+
+
+class MCPMarketplaceListResponse(BaseModel):
+    categories: List[MCPMarketplaceCategory]
+    items: List[MCPMarketplaceItemResponse]
+
+
+class MCPMarketplaceInstallRequest(BaseModel):
+    """一键安装请求"""
+    inputs: Dict[str, str] = Field(default_factory=dict, description="占位符 → 用户填写的值（API Key 等）")
+    enabled: bool = Field(default=True, description="安装后是否立即启用")
 
 
 class MCPTestResult(BaseModel):

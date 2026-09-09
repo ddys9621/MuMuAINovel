@@ -18,6 +18,8 @@ from app.schemas.mcp_plugin import (
 import json
 from app.user_manager import User
 from app.mcp.registry import mcp_registry
+from app.mcp.server_config import ServerConfigError, parse_server_config
+from app.services.mcp_plugin_service import upsert_plugin
 from app.services.mcp_test_service import mcp_test_service
 from app.services.mcp_tool_service import mcp_tool_service
 from app.logger import get_logger
@@ -129,6 +131,7 @@ async def create_plugin_simple(
       "category": "search"
     }
     
+    type 兼容 http / streamable-http / sse / stdio 等常见写法，缺省时按 url / command 推断。
     自动从mcpServers中提取插件名称（取第一个键）
     如果插件已存在，则更新；否则创建新插件
     """
@@ -150,99 +153,17 @@ async def create_plugin_simple(
         
         logger.info(f"从配置中提取插件名称: {plugin_name}")
         
-        # 提取配置
-        server_type = server_config.get("type", "http")
+        # 归一化各家 README 的 type 写法（http / streamable-http / sse / stdio…）
+        try:
+            plugin_data = parse_server_config(plugin_name, server_config)
+        except ServerConfigError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         
-        if server_type not in ["http", "stdio"]:
-            raise HTTPException(status_code=400, detail=f"不支持的服务器类型: {server_type}")
-        
-        # 检查插件名是否已存在
-        result = await db.execute(
-            select(MCPPlugin).where(
-                MCPPlugin.user_id == user.user_id,
-                MCPPlugin.plugin_name == plugin_name
-            )
+        plugin = await upsert_plugin(
+            db, user.user_id, plugin_data,
+            category=data.category, enabled=data.enabled,
         )
-        existing = result.scalar_one_or_none()
-        
-        # 构建插件数据
-        plugin_data = {
-            "plugin_name": plugin_name,
-            "display_name": plugin_name, 
-            "plugin_type": server_type,
-            "enabled": data.enabled,
-            "category": data.category,
-            "sort_order": 0
-        }
-        
-        if server_type == "http":
-            plugin_data["server_url"] = server_config.get("url")
-            plugin_data["headers"] = server_config.get("headers", {})
-            
-            if not plugin_data["server_url"]:
-                raise HTTPException(status_code=400, detail="HTTP类型插件必须提供url字段")
-        
-        elif server_type == "stdio":
-            plugin_data["command"] = server_config.get("command")
-            plugin_data["args"] = server_config.get("args", [])
-            plugin_data["env"] = server_config.get("env", {})
-            
-            if not plugin_data["command"]:
-                raise HTTPException(status_code=400, detail="Stdio类型插件必须提供command字段")
-        
-        if existing:
-            # 更新现有插件
-            logger.info(f"插件 {plugin_name} 已存在，执行更新操作")
-            
-            # 先卸载旧插件
-            if existing.enabled:
-                await mcp_registry.unload_plugin(user.user_id, existing.plugin_name)
-            
-            # 更新字段
-            for key, value in plugin_data.items():
-                setattr(existing, key, value)
-            
-            plugin = existing
-            await db.commit()
-            await db.refresh(plugin)
-            
-            # 如果启用，重新加载
-            if plugin.enabled:
-                success = await mcp_registry.load_plugin(plugin)
-                if success:
-                    plugin.status = "active"
-                    plugin.last_error = None
-                else:
-                    plugin.status = "error"
-                    plugin.last_error = "加载失败"
-                await db.commit()
-                await db.refresh(plugin)
-            
-            logger.info(f"用户 {user.user_id} 更新插件: {plugin_name}")
-        else:
-            # 创建新插件
-            plugin = MCPPlugin(
-                user_id=user.user_id,
-                **plugin_data
-            )
-            
-            db.add(plugin)
-            await db.commit()
-            await db.refresh(plugin)
-            
-            # 如果启用，加载到注册表
-            if plugin.enabled:
-                success = await mcp_registry.load_plugin(plugin)
-                if success:
-                    plugin.status = "active"
-                else:
-                    plugin.status = "error"
-                    plugin.last_error = "加载失败"
-                await db.commit()
-                await db.refresh(plugin)
-            
-            logger.info(f"用户 {user.user_id} 通过简化配置创建插件: {plugin_name}")
-        
+        logger.info(f"用户 {user.user_id} 通过简化配置创建/更新插件: {plugin_name}")
         return plugin
         
     except json.JSONDecodeError as e:

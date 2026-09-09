@@ -48,5 +48,10 @@ class MCPPlugin(Base):
         Index('idx_user_enabled', 'user_id', 'enabled'),
     )
     
+    @property
+    def transport(self) -> str | None:
+        """远程传输方式（streamable_http / sse），存于 config；stdio 插件为 None"""
+        return (self.config or {}).get("transport")
+
     def __repr__(self):
         return f"<MCPPlugin(id={self.id}, name={self.plugin_name}, enabled={self.enabled})>"
