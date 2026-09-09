@@ -14,6 +14,7 @@ from app.services.world_rule_service import WorldRuleService
 from app.services.prompt_service import prompt_service as project_prompt_service
 from app.logger import get_logger
 from app.utils.plot_line_types import normalize_plot_line_type
+from app.utils.story_outline_fields import parse_story_outline_fields
 
 logger = get_logger(__name__)
 
@@ -74,39 +75,6 @@ class PlotGenerationService:
             parts.append(rules_summary)
 
         return "\n\n".join(parts) if parts else ""
-
-    def _parse_story_outline_content(self, content: str) -> Dict[str, Any]:
-        """
-        解析故事大纲JSON，提取核心字段
-
-        Args:
-            content: 故事大纲的content字段（JSON字符串或纯文本）
-
-        Returns:
-            包含7个核心字段的字典：
-            - premise: 故事梗概
-            - golden_finger: 金手指设定
-            - selling_points: 核心卖点列表
-            - power_system: 升级路线
-            - main_tropes: 主要套路列表
-            - ultimate_goal: 终极目标
-            - opening_hook: 开篇钩子
-        """
-        try:
-            data = json.loads(content)
-            return {
-                "premise": data.get("premise", ""),
-                "golden_finger": data.get("golden_finger", ""),
-                "selling_points": data.get("selling_points", []),
-                "power_system": data.get("power_system", ""),
-                "main_tropes": data.get("main_tropes", []),
-                "ultimate_goal": data.get("ultimate_goal", ""),
-                "opening_hook": data.get("opening_hook", "")
-            }
-        except (json.JSONDecodeError, TypeError):
-            # 兼容旧格式（纯文本）
-            logger.debug("故事大纲为纯文本格式，使用兼容模式")
-            return {"premise": content or ""}
 
     async def _plan_with_mcp(
         self,
@@ -1561,7 +1529,7 @@ class PlotGenerationService:
         if story_outline and story_outline.content:
             story_premise = story_outline.content
             # 🆕 解析故事大纲JSON，提取核心字段（金手指、卖点等）
-            story_outline_data = self._parse_story_outline_content(story_outline.content)
+            story_outline_data = parse_story_outline_fields(story_outline.content)
             logger.info(f"📖 已解析故事大纲核心字段: golden_finger={bool(story_outline_data.get('golden_finger'))}, selling_points={len(story_outline_data.get('selling_points', []))}")
 
         # 构建查询文本（用于智能检索世界规则）

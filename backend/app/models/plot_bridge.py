@@ -61,6 +61,11 @@ class PlotBridge(Base):
         nullable=True,
         comment="本桥段覆盖该节点的结束进度（0.0-1.0）",
     )
+    secondary_beats = Column(
+        Text,
+        nullable=True,
+        comment="副线任务 JSON 数组：[{plot_line_id, line_title, line_type, beat_index, beat_title, beat_description, coverage_start, coverage_end}]，由 bridge_slot_planner 计算写入",
+    )
 
     bridge_number = Column(
         Integer,
