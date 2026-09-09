@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, ConfigDict
@@ -122,6 +122,9 @@ class BridgeResponse(BaseModel):
     secondary_beats: list[dict] = []
     chapter_start: int
     chapter_end: int
+    # 生成溯源（填充时写入；draft / 旧数据为 None）
+    generation_meta: Optional[dict[str, Any]] = None
+    template: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

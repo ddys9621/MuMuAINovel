@@ -130,6 +130,13 @@ class PlotBridge(Base):
         comment="给下一桥段的钩子（C4 必须写）",
     )
 
+    # ---- 生成溯源（2026-09 评审问题 H）----
+    generation_meta = Column(
+        Text,
+        nullable=True,
+        comment="本桥段最近一次 LLM 填充的 provenance JSON：模型/档位/题材模板/参考包维度/槽位填充与截断/业务输入/警告",
+    )
+
     # ---- 状态 ----
     status = Column(
         String(20),

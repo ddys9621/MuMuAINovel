@@ -375,6 +375,46 @@ async def ensure_plot_bridge_beat_columns(engine: AsyncEngine):
                 logger.info("✅ plot_bridges.%s already exists", col_name)
 
 
+async def ensure_plot_bridge_secondary_beats_column(engine: AsyncEngine):
+    """Ensure plot_bridges.secondary_beats exists（工程化桥段流水线：副线任务挂载）。"""
+    async with engine.begin() as conn:
+        if not await column_exists(conn, "plot_bridges", "secondary_beats"):
+            logger.info("🔧 Adding plot_bridges.secondary_beats column (工程化桥段流水线)")
+            await apply_sql(conn, [
+                "ALTER TABLE plot_bridges ADD COLUMN secondary_beats TEXT",
+            ])
+        else:
+            logger.info("✅ plot_bridges.secondary_beats already exists")
+
+
+async def ensure_plot_bridge_generation_meta_column(engine: AsyncEngine):
+    """Ensure plot_bridges.generation_meta exists（桥段填充 provenance，nullable TEXT）。"""
+    async with engine.begin() as conn:
+        if not await column_exists(conn, "plot_bridges", "generation_meta"):
+            logger.info("🔧 Adding plot_bridges.generation_meta column (桥段填充溯源)")
+            await apply_sql(conn, [
+                "ALTER TABLE plot_bridges ADD COLUMN generation_meta TEXT",
+            ])
+        else:
+            logger.info("✅ plot_bridges.generation_meta already exists")
+
+
+async def ensure_character_aliases_column(engine: AsyncEngine):
+    """Ensure characters.aliases exists（角色曾用名，改名时自动追加旧名）。
+
+    场景：旧 DB 升级到「角色改名级联 + 曾用名兜底匹配」的版本。nullable TEXT，零数据迁移风险。
+    """
+    async with engine.begin() as conn:
+        if not await column_exists(conn, "characters", "aliases"):
+            logger.info("🔧 Adding characters.aliases column (角色曾用名)")
+            await apply_sql(conn, [
+                """ALTER TABLE characters
+                ADD COLUMN aliases TEXT""",
+            ])
+        else:
+            logger.info("✅ characters.aliases already exists")
+
+
 async def run_auto_migrations(engine: AsyncEngine):
     try:
         await ensure_chapter_outline_columns(engine)
@@ -389,6 +429,9 @@ async def run_auto_migrations(engine: AsyncEngine):
         await ensure_project_generation_prompt_column(engine)
         await ensure_project_bridge_planning_column(engine)  # F3：桥段规划开关（T2.1 前置）
         await ensure_plot_bridge_beat_columns(engine)  # V4.1 方案 C：桥段绑定剧情线节点
+        await ensure_plot_bridge_secondary_beats_column(engine)  # 工程化桥段流水线：副线任务
+        await ensure_plot_bridge_generation_meta_column(engine)  # 桥段填充溯源
+        await ensure_character_aliases_column(engine)  # 角色曾用名（改名级联兜底）
         logger.info("✅ Auto migrations finished")
     except Exception as exc:
         logger.error("❌ Auto migrations failed: %s", exc, exc_info=True)

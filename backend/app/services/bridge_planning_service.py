@@ -46,11 +46,17 @@ logger = logging.getLogger(__name__)
 
 
 def bridge_to_dict(b: PlotBridge) -> dict[str, Any]:
-    """ORM → API dict：解析 secondary_beats JSON，补 chapter_start/chapter_end。"""
+    """ORM → API dict：解析 secondary_beats / generation_meta JSON，补 chapter_start/chapter_end。"""
     try:
         secondary = json.loads(b.secondary_beats) if b.secondary_beats else []
     except (json.JSONDecodeError, TypeError):
         secondary = []
+    try:
+        meta = json.loads(b.generation_meta) if b.generation_meta else None
+    except (json.JSONDecodeError, TypeError):
+        meta = None
+    if not isinstance(meta, dict):
+        meta = None
     c_start, c_end = chapter_range(b.bridge_number)
     return {
         "id": b.id,
@@ -74,6 +80,8 @@ def bridge_to_dict(b: PlotBridge) -> dict[str, Any]:
         "secondary_beats": secondary if isinstance(secondary, list) else [],
         "chapter_start": c_start,
         "chapter_end": c_end,
+        "generation_meta": meta,
+        "template": meta.get("template") if meta else None,
     }
 
 
@@ -236,6 +244,25 @@ _FILL_FIELDS = (
     "c1_intro", "c2_build", "c3_payoff", "c4_aftermath", "next_bridge_hook",
 )
 _FILL_SHORT_FIELDS = {"title": 200, "goal": 500, "showoff_point": 500}
+
+
+def _collected_json_text(resp: Any, *, what: str) -> str:
+    """校验 generate_text_stream_collect 的返回，把"截断 / 空内容"翻译成可操作的错误。
+
+    这两种情况若直接交给 safe_parse_json，会退化成 [] 或残缺数组，最终报出误导性的
+    "数量不符：期望 [1, 2]，LLM 返回 []"，让用户去怀疑模型输出格式而不是 Max Tokens。
+    """
+    if not isinstance(resp, dict):
+        raise ValueError(f"{what}：LLM 未返回任何内容")
+    content = resp.get("content") or ""
+    if resp.get("finish_reason") == "length":
+        raise ValueError(
+            f"{what}：LLM 输出被 Max Tokens 截断（已输出 {len(content)} 字符，无法解析为完整 JSON），"
+            f"请在「设置」中调大 Max Tokens 后重试"
+        )
+    if not content.strip():
+        raise ValueError(f"{what}：LLM 未返回任何内容（finish_reason={resp.get('finish_reason')}）")
+    return content
 
 
 CHAPTER_EXPANSION_TASK_PROMPT = """请把下面这个桥段展开为 4 个详细章纲（C1/C2/C3/C4），\
@@ -504,10 +531,9 @@ class BridgePlanningService:
                 system_prompt=prompt.system_prompt,
                 model=effective_model or None,
                 temperature=0.6,
-                max_tokens=8000,
                 context=f"BridgeFill-{effective_model or 'default'}",
             )
-            content = (resp or {}).get("content", "") if isinstance(resp, dict) else ""
+            content = _collected_json_text(resp, what=f"节点 {b_idx} 桥段填充")
             data = safe_parse_json(content, default=[], expected_type="array", log_prefix="[BridgeFill]")
             items = {
                 int(d["bridge_number"]): d
@@ -616,10 +642,9 @@ class BridgePlanningService:
             system_prompt=prompt.system_prompt,
             model=effective_model or None,
             temperature=0.6,
-            max_tokens=8000,
             context=f"BridgeExpansion-{effective_model or 'default'}",
         )
-        content = (resp or {}).get("content", "") if isinstance(resp, dict) else ""
+        content = _collected_json_text(resp, what=f"桥段 {bridge.bridge_number} 展开")
         chapters_data = safe_parse_json(content, default=[], expected_type="array", log_prefix="[BridgeExpansion]")
         if not isinstance(chapters_data, list) or len(chapters_data) < CHAPTERS_PER_BRIDGE:
             raise ValueError("展开的章纲少于 4 个或格式错误")
