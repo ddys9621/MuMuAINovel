@@ -1,29 +1,54 @@
 /**
- * V4.1 K2 桥段四章 - 前端 API 客户端
+ * 桥段 - 前端 API 客户端（工程化桥段流水线：骨架 → 填充 → 展开）
  *
- * 对应后端 backend/app/api/plot_bridges.py 的 6 个端点
+ * 对应后端 backend/app/api/plot_bridges.py
  */
 import api from '@/services/api';
+import { ssePost } from '@/utils/sseClient';
+import type { SSEClientOptions } from '@/utils/sseClient';
 import type {
+  BridgeSlotPreview,
   ExpandAllBridgesRequest,
   ExpandAllBridgesResponse,
   ExpandBridgeRequest,
   ExpandBridgeResponse,
-  PlanBridgesRequest,
+  FillBridgesRequest,
+  FillBridgesResult,
   PlotBridge,
   UpdateBridgeRequest,
 } from '@/types/plot_bridge';
 
 export const plotBridgesApi = {
   /**
-   * 规划 N 个桥段（调 AI 注入 bridges + synopsis + methodology 维度）
+   * 纯计算预览：主线节点 → 桥段槽位表（不写库）
+   * GET /api/projects/{projectId}/bridges/plan-preview
+   */
+  planPreview: (projectId: string) =>
+    api.get<unknown, BridgeSlotPreview>(`/projects/${projectId}/bridges/plan-preview`),
+
+  /**
+   * 建骨架：创建 N 个 draft 桥段（无 LLM）；已存在 → 409
    * POST /api/projects/{projectId}/bridges/plan
    */
-  plan: (projectId: string, payload: PlanBridgesRequest = {}) =>
-    api.post<unknown, PlotBridge[]>(
-      `/projects/${projectId}/bridges/plan`,
-      payload,
-    ),
+  plan: (projectId: string) =>
+    api.post<unknown, PlotBridge[]>(`/projects/${projectId}/bridges/plan`, {}),
+
+  /**
+   * 重置骨架：删除全部桥段；已展开 → 409
+   * DELETE /api/projects/{projectId}/bridges
+   */
+  reset: (projectId: string) =>
+    api.delete<unknown, { deleted: number }>(`/projects/${projectId}/bridges`),
+
+  /**
+   * SSE：按主线节点分批用 LLM 填充 draft 桥段（首个失败即终止，重跑续填）
+   * POST /api/projects/{projectId}/bridges/fill-stream
+   */
+  fillStream: (
+    projectId: string,
+    payload: FillBridgesRequest,
+    options?: SSEClientOptions<FillBridgesResult>,
+  ) => ssePost<FillBridgesResult>(`/api/projects/${projectId}/bridges/fill-stream`, payload, options),
 
   /**
    * 列出项目下所有桥段
@@ -54,22 +79,16 @@ export const plotBridgesApi = {
     api.delete<unknown, { success: boolean }>(`/bridges/${bridgeId}`),
 
   /**
-   * 把单个桥段展开为 4 个 ChapterOutline
+   * 展开为第 4(n-1)+1…4n 章（要求 ready 且前一桥段已 completed）
    * POST /api/bridges/{bridgeId}/expand
    */
-  expand: (bridgeId: string, payload: ExpandBridgeRequest) =>
-    api.post<unknown, ExpandBridgeResponse>(
-      `/bridges/${bridgeId}/expand`,
-      payload,
-    ),
+  expand: (bridgeId: string, payload: ExpandBridgeRequest = {}) =>
+    api.post<unknown, ExpandBridgeResponse>(`/bridges/${bridgeId}/expand`, payload),
 
   /**
-   * T2.1：批量展开项目下所有 status='ready' 的桥段为章纲
+   * 按 bridge_number 顺序批量展开全部 ready 桥段（首个失败即停止）
    * POST /api/projects/{projectId}/bridges/expand-all
    */
   expandAll: (projectId: string, payload: ExpandAllBridgesRequest = {}) =>
-    api.post<unknown, ExpandAllBridgesResponse>(
-      `/projects/${projectId}/bridges/expand-all`,
-      payload,
-    ),
+    api.post<unknown, ExpandAllBridgesResponse>(`/projects/${projectId}/bridges/expand-all`, payload),
 };

@@ -359,13 +359,8 @@ export function useProjectGeneration({ dispatch, mcpSettings, refPackSettings }:
             ...current,
             outline,
           }));
-          // T2.1：捕获后端建议的下一步路由（bridge_planning / chapter_outlines）
-          if (
-            typed.next_wizard_route === 'bridge_planning' ||
-            typed.next_wizard_route === 'chapter_outlines'
-          ) {
-            dispatch({ type: 'GEN_NEXT_ROUTE', payload: typed.next_wizard_route });
-          }
+          // 工程化流水线：大纲之后固定进入桥段规划
+          dispatch({ type: 'GEN_NEXT_ROUTE', payload: 'bridge_planning' });
           dispatch({ type: 'GEN_STEP_UPDATE', payload: { outline: 'completed' } });
         },
         onError: (error) => {

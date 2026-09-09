@@ -16,7 +16,6 @@ import type {
   PlotLineReorderRequest,
   ChapterOutlineCreate,
   ChapterOutlineUpdate,
-  ChapterOutlineGenerateRequest,
   ChapterOutlineReorderRequest,
   ChapterOutlineBatchCreateRequest,
   // PaginationResponse
@@ -389,20 +388,6 @@ export function useChapterOutlineSync() {
     }
   }, [addChapterOutline]);
 
-  // AI生成章纲
-  const generateChapterOutlines = useCallback(async (data: ChapterOutlineGenerateRequest) => {
-    try {
-      const newOutlines = await chapterOutlineApi.generateChapterOutlines(data);
-      newOutlines.forEach(outline => addChapterOutline(outline));
-      toast.success(`成功生成 ${newOutlines.length} 个章纲`);
-      return newOutlines;
-    } catch (error) {
-      console.error('AI生成章纲失败:', error);
-      toast.error('AI生成章纲失败');
-      throw error;
-    }
-  }, [addChapterOutline]);
-
   // 获取章纲统计信息
   const getChapterOutlineStatistics = useCallback(async (projectId: string) => {
     try {
@@ -422,7 +407,6 @@ export function useChapterOutlineSync() {
     deleteChapterOutline,
     reorderChapterOutlines,
     batchCreateChapterOutlines,
-    generateChapterOutlines,
     getChapterOutlineStatistics,
   };
 }

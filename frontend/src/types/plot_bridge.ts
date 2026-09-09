@@ -36,6 +36,18 @@ export const BRIDGE_STATUS_COLOR: Record<BridgeStatus, string> = {
   completed: 'success',
 };
 
+/** 副线任务：支线/角色线节点按进度比例挂到主线桥段（由后端 bridge_slot_planner 计算） */
+export interface SecondaryBeatTask {
+  plot_line_id: string;
+  line_title: string;
+  line_type: string;
+  beat_index: number;
+  beat_title: string;
+  beat_description: string;
+  coverage_start: number;
+  coverage_end: number;
+}
+
 export interface PlotBridge {
   id: string;
   project_id: string;
@@ -51,25 +63,55 @@ export interface PlotBridge {
   next_bridge_hook: string | null;
   status: BridgeStatus;
   order_index: number | null;
-  // V4.1 方案 C：桥段 ↔ 剧情线节点绑定字段
-  plot_line_id?: string | null;
-  beat_index?: number | null;
-  beat_coverage_start?: number | null;
-  beat_coverage_end?: number | null;
+  // 桥段 ↔ 主线节点绑定字段（代码写入，非 LLM）
+  plot_line_id: string | null;
+  beat_index: number | null;
+  beat_coverage_start: number | null;
+  beat_coverage_end: number | null;
+  /** 副线任务列表 */
+  secondary_beats: SecondaryBeatTask[];
+  /** 确定性章号范围：第 4(n-1)+1 … 4n 章 */
+  chapter_start: number;
+  chapter_end: number;
 }
 
-/** V4.1 方案 C：桥段规划模式 */
-export type BridgePlanMode = 'by_plot_line' | 'free';
+/** GET /projects/{id}/bridges/plan-preview 返回的槽位表（纯计算，不写库） */
+export interface BridgeSlotPreview {
+  main_line_id: string;
+  total_bridges: number;
+  total_chapters: number;
+  /** beat_index(字符串) → 该节点桥段数 */
+  beat_quotas: Record<string, number>;
+  slots: Array<{
+    bridge_number: number;
+    plot_line_id: string;
+    beat_index: number;
+    beat_title: string;
+    beat_description: string;
+    beat_weight: number;
+    coverage_start: number;
+    coverage_end: number;
+    chapter_start: number;
+    chapter_end: number;
+    secondary: SecondaryBeatTask[];
+  }>;
+}
 
-export interface PlanBridgesRequest {
-  bridge_count?: number;
+/** POST /projects/{id}/bridges/fill-stream 请求体 */
+export interface FillBridgesRequest {
   model?: string;
-  /** 'by_plot_line'（默认）按主线节点权重分配桥段；'free' 自由规划不绑节点 */
-  mode?: BridgePlanMode;
+  /** 只填充该主线节点的 draft 桥段 */
+  beat_index?: number;
+}
+
+/** fill-stream 的 result 事件 */
+export interface FillBridgesResult {
+  type: 'done';
+  filled: number;
+  remaining_drafts: number;
 }
 
 export interface ExpandBridgeRequest {
-  start_chapter_number: number;
   model?: string;
 }
 
@@ -93,13 +135,12 @@ export interface UpdateBridgeRequest {
   status?: BridgeStatus;
 }
 
-/** T2.1 批量展开请求。 */
+/** 批量展开请求（按 bridge_number 顺序，首个失败即停止）。 */
 export interface ExpandAllBridgesRequest {
   model?: string;
-  start_chapter_number?: number;
 }
 
-/** T2.1 批量展开响应。 */
+/** 批量展开响应。 */
 export interface ExpandAllBridgesResponse {
   success: boolean;
   total: number;
