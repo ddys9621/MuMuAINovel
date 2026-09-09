@@ -564,7 +564,8 @@ async def quick_generate(
             "title": "书名（可选）",
             "description": "简介（可选）",
             "theme": "主题（可选）",
-            "genre": ["类型1", "类型2"]（可选）
+            "genre": ["类型1", "类型2"]（可选）,
+            "narrative_perspective": "叙事视角（可选）"
         }
     
     Response:
@@ -572,7 +573,8 @@ async def quick_generate(
             "title": "补全的书名",
             "description": "补全的简介",
             "theme": "补全的主题",
-            "genre": ["补全的类型"]
+            "genre": ["补全的类型"],
+            "narrative_perspective": "第一人称 / 第三人称 / 全知视角"
         }
     """
     try:
@@ -588,6 +590,8 @@ async def quick_generate(
             existing_info.append(f"- 主题：{data['theme']}")
         if data.get("genre"):
             existing_info.append(f"- 类型：{', '.join(data['genre'])}")
+        if data.get("narrative_perspective"):
+            existing_info.append(f"- 叙事视角：{data['narrative_perspective']}")
         
         existing_text = "\n".join(existing_info) if existing_info else "暂无信息"
         
@@ -601,13 +605,15 @@ async def quick_generate(
 2. description: 简介（50-100字）
 3. theme: 核心主题（30-50字）
 4. genre: 类型标签数组（2-3个）
+5. narrative_perspective: 叙事视角，只能是"第一人称"、"第三人称"、"全知视角"之一
 
 返回JSON格式：
 {{
     "title": "书名",
     "description": "简介内容...",
     "theme": "主题内容...",
-    "genre": ["类型1", "类型2"]
+    "genre": ["类型1", "类型2"],
+    "narrative_perspective": "第三人称"
 }}
 
 只返回纯JSON，不要有其他文字。"""
@@ -638,7 +644,11 @@ async def quick_generate(
                 "title": data.get("title") or result.get("title", ""),
                 "description": data.get("description") or result.get("description", ""),
                 "theme": data.get("theme") or result.get("theme", ""),
-                "genre": data.get("genre") or result.get("genre", [])
+                "genre": data.get("genre") or result.get("genre", []),
+                # 前端 readyToGenerate 依赖视角字段，缺了会卡在创建 0%
+                "narrative_perspective": data.get("narrative_perspective")
+                or result.get("narrative_perspective")
+                or "第三人称",
             }
             
             logger.info(f"✅ 智能补全成功")

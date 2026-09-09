@@ -1797,31 +1797,39 @@ async def generate_outline_stream(
     return create_sse_response(outline_generator(data, db, user_ai_service))
 
 
-async def _run_with_heartbeat(coro, interval: float = 15.0):
-    """把一个阻塞较久的协程包成异步生成器：等待期间定时 yield SSE 心跳，结束时 yield 结果对象。
+class _PlotPipelineError(Exception):
+    """剧情线流水线里可预期的业务失败，带 SSE 错误码"""
 
-    调用方按 `isinstance(item, str)` 区分心跳字符串与结果。
-    """
-    task = asyncio.ensure_future(coro)
-    try:
-        while not task.done():
-            done, _ = await asyncio.wait({task}, timeout=interval)
-            if not done:
-                yield await SSEResponse.send_heartbeat()
-        yield task.result()
-    finally:
-        if not task.done():
-            task.cancel()
+    def __init__(self, message: str, code: int = 500):
+        super().__init__(message)
+        self.message = message
+        self.code = code
 
 
-async def plot_lines_generator(
+# 客户端断开后仍在跑的流水线任务：保持强引用，避免被 GC 中途回收
+_DETACHED_PIPELINE_TASKS: set = set()
+
+
+async def _pipeline_session_factory(user_id: str):
+    """后台流水线专用的 session 工厂：请求级 session 会在连接断开时被关闭，不能复用"""
+    from app.database import get_engine
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    engine = await get_engine(user_id)
+    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+async def _plot_lines_pipeline(
     data: Dict[str, Any],
-    db: AsyncSession,
-    user_ai_service: AIService
-) -> AsyncGenerator[str, None]:
-    """向导步骤 4：生成 1 条主线 + N 条支线（含节点）。主线预计章节数固定为项目章节数。
+    outline_id: str,
+    user_ai_service: AIService,
+    emit,
+) -> Dict[str, Any]:
+    """剧情线完整流水线：主线 → 对齐章节数 → 支线 → wizard_step → 骨架预览。
 
-    前置（不满足直接 error，不做退化）：项目存在、有 active 故事大纲、项目内尚无主线。
+    用独立 session 跑在后台任务里，不依赖请求连接：浏览器中途断开也会完整写库，
+    不会留下"主线已建、章节数没对齐、没有支线、wizard_step 停在 3"的半成品。
+    emit(message, progress) 只往队列塞进度，没人消费也不影响执行。
     """
     from app.services.bridge_slot_planner import (
         BridgePlanningPreconditionError,
@@ -1835,6 +1843,75 @@ async def plot_lines_generator(
     sub_line_count = int(data.get("sub_line_count", 2) or 0)
     requirements = (data.get("requirements") or "").strip()
     user_id = data.get("user_id")
+
+    session_factory = await _pipeline_session_factory(user_id)
+    async with session_factory() as db:
+        service = PlotGenerationService(user_ai_service)
+        common = dict(
+            db=db, project_id=project_id, outline_id=outline_id,
+            custom_prompt=requirements or None,
+            enable_mcp=bool(data.get("enable_mcp", False)),
+            selected_plugins=data.get("selected_plugins") or [],
+            user_id=user_id,
+            pack_ids=data.get("pack_ids"), dimensions=data.get("dimensions"), strength=data.get("strength"),
+            provider=data.get("provider"), model=data.get("model"),
+        )
+
+        emit(f"生成主线（全书 {chapter_count} 章）...", 10)
+        main_lines = await service.generate_plot_lines(line_type="main", count=1, **common)
+        if not main_lines:
+            raise _PlotPipelineError("主线生成失败：AI 未返回剧情线", 500)
+        main = main_lines[0]
+        main.estimated_chapters = chapter_count
+        await db.commit()
+        await db.refresh(main)
+        emit(f"主线《{main.title}》完成，预计 {chapter_count} 章", 55)
+
+        sub_lines = []
+        if sub_line_count > 0:
+            emit(f"生成 {sub_line_count} 条支线...", 60)
+            sub_lines = await service.generate_plot_lines(
+                line_type="sub", count=sub_line_count, based_on_lines=[main.id], **common
+            )
+
+        project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one()
+        project.wizard_step = 4
+        project.wizard_status = "incomplete"
+        await db.commit()
+
+        emit("计算桥段骨架预览...", 92)
+        all_lines = [parse_plot_line(l) for l in (await db.execute(
+            select(PlotLine).where(PlotLine.project_id == project_id).order_by(PlotLine.order_index)
+        )).scalars().all()]
+        try:
+            plan = compute_bridge_slots(all_lines)
+        except BridgePlanningPreconditionError as exc:
+            raise _PlotPipelineError(f"剧情线已生成但不满足桥段规划前置条件：{exc}", 400) from exc
+
+        main_data = parse_plot_line(main)
+        return {
+            "message": "剧情线生成完成",
+            "main_line": {
+                "id": main.id, "title": main.title,
+                "estimated_chapters": main.estimated_chapters, "beat_count": len(main_data.beats),
+            },
+            "sub_lines": [{"id": s.id, "title": s.title} for s in sub_lines],
+            "plan_preview": {"total_bridges": plan.total_bridges, "total_chapters": plan.total_chapters},
+        }
+
+
+async def plot_lines_generator(
+    data: Dict[str, Any],
+    db: AsyncSession,
+    user_ai_service: AIService
+) -> AsyncGenerator[str, None]:
+    """向导步骤 4：生成 1 条主线 + N 条支线（含节点）。主线预计章节数固定为项目章节数。
+
+    前置（不满足直接 error，不做退化）：项目存在、有 active 故事大纲、项目内尚无主线。
+    前置校验用请求 session 快速失败；通过后流水线转入后台任务，本生成器只负责转发进度与心跳。
+    """
+    project_id = data.get("project_id")
+    chapter_count = int(data.get("chapter_count") or 0)
 
     try:
         yield await SSEResponse.send_progress("校验前置条件...", 3)
@@ -1859,76 +1936,68 @@ async def plot_lines_generator(
         if existing_main:
             yield await SSEResponse.send_error("项目已存在主线剧情线，工程化流水线要求且仅要求一条主线", 400)
             return
+    except Exception as e:
+        logger.error(f"剧情线前置校验失败: {str(e)}", exc_info=True)
+        yield await SSEResponse.send_error(f"生成失败: {str(e)}")
+        return
 
-        service = PlotGenerationService(user_ai_service)
-        common = dict(
-            db=db, project_id=project_id, outline_id=outline.id,
-            custom_prompt=requirements or None,
-            enable_mcp=bool(data.get("enable_mcp", False)),
-            selected_plugins=data.get("selected_plugins") or [],
-            user_id=user_id,
-            pack_ids=data.get("pack_ids"), dimensions=data.get("dimensions"), strength=data.get("strength"),
-            provider=data.get("provider"), model=data.get("model"),
-        )
+    queue: "asyncio.Queue" = asyncio.Queue()
 
-        yield await SSEResponse.send_progress(f"生成主线（全书 {chapter_count} 章）...", 10)
-        main_lines = None
-        async for item in _run_with_heartbeat(service.generate_plot_lines(line_type="main", count=1, **common)):
-            if isinstance(item, str):
-                yield item
-            else:
-                main_lines = item
-        if not main_lines:
-            yield await SSEResponse.send_error("主线生成失败：AI 未返回剧情线", 500)
-            return
-        main = main_lines[0]
-        main.estimated_chapters = chapter_count
-        await db.commit()
-        await db.refresh(main)
-        yield await SSEResponse.send_progress(f"主线《{main.title}》完成，预计 {chapter_count} 章", 55)
+    def emit(message: str, progress: int) -> None:
+        queue.put_nowait((message, progress))
 
-        sub_lines = []
-        if sub_line_count > 0:
-            yield await SSEResponse.send_progress(f"生成 {sub_line_count} 条支线...", 60)
-            async for item in _run_with_heartbeat(
-                service.generate_plot_lines(line_type="sub", count=sub_line_count, based_on_lines=[main.id], **common)
-            ):
-                if isinstance(item, str):
-                    yield item
-                else:
-                    sub_lines = item
-
-        project.wizard_step = 4
-        project.wizard_status = "incomplete"
-        await db.commit()
-
-        yield await SSEResponse.send_progress("计算桥段骨架预览...", 92)
-        all_lines = [parse_plot_line(l) for l in (await db.execute(
-            select(PlotLine).where(PlotLine.project_id == project_id).order_by(PlotLine.order_index)
-        )).scalars().all()]
+    async def run_pipeline():
         try:
-            plan = compute_bridge_slots(all_lines)
-        except BridgePlanningPreconditionError as exc:
-            yield await SSEResponse.send_error(f"剧情线已生成但不满足桥段规划前置条件：{exc}", 400)
-            return
+            return await _plot_lines_pipeline(data, outline.id, user_ai_service, emit)
+        finally:
+            queue.put_nowait(None)  # 结束哨兵，让转发循环及时退出
 
-        main_data = parse_plot_line(main)
-        yield await SSEResponse.send_result({
-            "message": "剧情线生成完成",
-            "main_line": {
-                "id": main.id, "title": main.title,
-                "estimated_chapters": main.estimated_chapters, "beat_count": len(main_data.beats),
-            },
-            "sub_lines": [{"id": s.id, "title": s.title} for s in sub_lines],
-            "plan_preview": {"total_bridges": plan.total_bridges, "total_chapters": plan.total_chapters},
-        })
+    task = asyncio.create_task(run_pipeline())
+    _DETACHED_PIPELINE_TASKS.add(task)
+    task.add_done_callback(_DETACHED_PIPELINE_TASKS.discard)
+
+    try:
+        while True:
+            try:
+                item = await asyncio.wait_for(queue.get(), timeout=15.0)
+            except asyncio.TimeoutError:
+                yield await SSEResponse.send_heartbeat()
+                continue
+            if item is None:
+                break
+            yield await SSEResponse.send_progress(*item)
+
+        result = await task
+        yield await SSEResponse.send_result(result)
         yield await SSEResponse.send_progress("完成!", 100, "success")
         yield await SSEResponse.send_done()
-    except GeneratorExit:
-        logger.warning("剧情线生成器被提前关闭")
+    except (GeneratorExit, asyncio.CancelledError):
+        # 连接断开：不取消 task，让流水线在后台跑完并写库；前端已看不到结果，改由日志记录
+        logger.warning(
+            f"剧情线生成器被提前关闭（客户端断开），后台流水线继续执行 - 项目: {project_id}, 任务已完成: {task.done()}"
+        )
+        task.add_done_callback(_log_detached_pipeline_result)
+        raise
+    except _PlotPipelineError as e:
+        logger.error(f"剧情线生成失败: {e.message}")
+        yield await SSEResponse.send_error(e.message, e.code)
     except Exception as e:
         logger.error(f"剧情线生成失败: {str(e)}", exc_info=True)
         yield await SSEResponse.send_error(f"生成失败: {str(e)}")
+
+
+def _log_detached_pipeline_result(task: "asyncio.Task") -> None:
+    """后台流水线结束时记一条日志：连接断开后前端看不到结果，只能靠日志确认"""
+    if task.cancelled():
+        logger.warning("剧情线后台流水线被取消")
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error(f"剧情线后台流水线失败: {exc}")
+    else:
+        result = task.result() or {}
+        main = result.get("main_line") or {}
+        logger.info(f"剧情线后台流水线完成 - 主线《{main.get('title')}》，支线 {len(result.get('sub_lines') or [])} 条")
 
 
 @router.post("/plot-lines", summary="流式生成剧情线（向导步骤 4）")
