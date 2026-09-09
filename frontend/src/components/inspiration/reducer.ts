@@ -127,6 +127,9 @@ export function wizardReducer(state: WizardState, action: WizardAction): WizardS
         ),
         currentStep: 'generating',
         loading: true,
+        // 上一次创建失败后 progress 会停在中途，不清零会挡住重新创建的自动启动
+        progress: 0,
+        progressMessage: '',
       };
 
     // ---- 重新开始 ----
@@ -196,7 +199,7 @@ export function wizardReducer(state: WizardState, action: WizardAction): WizardS
         ...state,
         currentStep: 'generating',
         projectTitle: action.payload.title,
-        generationSteps: { worldBuilding: 'pending', characters: 'pending', outline: 'pending' },
+        generationSteps: { worldBuilding: 'pending', characters: 'pending', outline: 'pending', plotLines: 'pending' },
         progress: 0,
         progressMessage: '开始创建项目...',
         loading: true,
@@ -241,7 +244,8 @@ export function wizardReducer(state: WizardState, action: WizardAction): WizardS
       const now = Date.now();
       const elapsedSec = Math.floor((now - state.generationMeta.startedAt) / 1000);
       const sinceLast = state.generationMeta.lastUpdateAt ? now - state.generationMeta.lastUpdateAt : 0;
-      const stallLevel = sinceLast > 40000 ? 'stalled' : sinceLast > 15000 ? 'slow' : 'none';
+      // 单个节点一次 LLM 调用常常 30~60 秒没有中间进度，阈值不能太敏感
+      const stallLevel = sinceLast > 90000 ? 'stalled' : sinceLast > 30000 ? 'slow' : 'none';
       return {
         ...state,
         generationMeta: {
@@ -260,9 +264,6 @@ export function wizardReducer(state: WizardState, action: WizardAction): WizardS
 
     case 'GEN_PROJECT_CREATED':
       return { ...state, projectId: action.payload };
-
-    case 'GEN_NEXT_ROUTE':
-      return { ...state, nextWizardRoute: action.payload };
 
     case 'GEN_COMPLETE':
       return {

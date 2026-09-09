@@ -26,6 +26,14 @@ const NEXT_API_STEP: Record<string, OptionGenerationStep> = {
   theme: 'genre',
 };
 
+/** 候选生成失败后 currentStep 停在 loading_*，用户此时"自己写"的就是该步骤的字段 */
+const LOADING_STEP_TARGET: Partial<Record<Step, Step>> = {
+  loading_title: 'title',
+  loading_desc: 'description',
+  loading_theme: 'theme',
+  loading_genre: 'genre',
+};
+
 type BuildContextInput = Partial<WizardData> & Partial<GenerationApiContext>;
 
 /** 构建 API context */
@@ -164,7 +172,7 @@ export function useInspirationMachine() {
   /** 自定义输入处理（非 idea 阶段） */
   const handleCustomInput = useCallback(async (input: string) => {
     const updatedData = { ...state.wizardData };
-    const step = state.currentStep;
+    const step = LOADING_STEP_TARGET[state.currentStep] ?? state.currentStep;
 
     if (step === 'title') updatedData.title = input;
     else if (step === 'description') updatedData.description = input;
@@ -313,24 +321,27 @@ export function useInspirationMachine() {
         description: data.description,
         theme: data.theme,
         genre: data.genre,
+        narrative_perspective: data.narrative_perspective,
       });
-      dispatch({
-        type: 'SET_WIZARD_DATA',
-        payload: {
-          title: result.title,
-          description: result.description,
-          theme: result.theme,
-          genre: result.genre,
-          narrative_perspective: result.narrative_perspective,
-        },
-      });
+      if (result.error) {
+        throw new Error(result.error);
+      }
+      // 视角缺失时兜底为第三人称：readyToGenerate 依赖它，缺了创建流程会卡在 0%
+      const completed = {
+        title: result.title || data.title || '',
+        description: result.description || data.description || '',
+        theme: result.theme || data.theme || '',
+        genre: result.genre?.length ? result.genre : data.genre || [],
+        narrative_perspective: result.narrative_perspective || data.narrative_perspective || '第三人称',
+      };
+      dispatch({ type: 'SET_WIZARD_DATA', payload: completed });
       dispatch({
         type: 'API_SUCCESS',
         payload: {
           nextStep: 'confirm',
           aiMessage: {
             type: 'ai',
-            content: `已为你快速补全所有信息：\n\n📖 书名：${result.title}\n📝 简介：${result.description}\n🎨 主题：${result.theme}\n🏷️ 类型：${result.genre.join('、')}\n👁️ 视角：${result.narrative_perspective}\n\n请确认是否开始创建项目？`,
+            content: `已为你快速补全所有信息：\n\n📖 书名：${completed.title}\n📝 简介：${completed.description}\n🎨 主题：${completed.theme}\n🏷️ 类型：${completed.genre.join('、')}\n👁️ 视角：${completed.narrative_perspective}\n\n请确认是否开始创建项目？`,
             options: ['✅ 确认创建', '🔄 重新开始'],
           },
         },

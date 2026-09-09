@@ -2,25 +2,32 @@
 
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { wizardStreamApi } from '../../services/api';
+import { plotBridgesApi } from '../../services/plotBridgesApi';
+import { plotLineApi, wizardStreamApi } from '../../services/api';
 import type {
   ApiError,
   Character,
   GenerateOutlineResponse,
   Outline,
+  WizardPlotLinesResponse,
   WorldBuildingResponse,
 } from '../../types';
 import type { WizardAction, WizardData } from './types';
 import type { MCPSelectorValue } from '../MCPSelector';
 import type { ReferencePackSelectorValue } from '../ReferencePackSelector';
 
-export type GenerationNodeKey = 'worldBuilding' | 'characters' | 'outline';
+export type GenerationNodeKey = 'worldBuilding' | 'characters' | 'outline' | 'plotLines';
 
 export interface GenerationArtifacts {
   worldBuilding: WorldBuildingResponse | null;
   characters: Character[];
   outline: Outline | null;
+  plotLines: WizardPlotLinesResponse | null;
 }
+
+/** 灵感模式固定用默认篇幅创建项目：全书章节数（= 主线预计章节数）与支线数 */
+const DEFAULT_CHAPTER_COUNT = 30;
+const DEFAULT_SUB_LINE_COUNT = 2;
 
 interface UseProjectGenerationOptions {
   dispatch: React.Dispatch<WizardAction>;
@@ -45,22 +52,29 @@ const EMPTY_ARTIFACTS: GenerationArtifacts = {
   worldBuilding: null,
   characters: [],
   outline: null,
+  plotLines: null,
 };
 
 type StageProgressPreset = Partial<Record<GenerationNodeKey, [number, number]>>;
 
 const NODE_PROGRESS_PRESETS: Record<GenerationNodeKey, StageProgressPreset> = {
   worldBuilding: {
-    worldBuilding: [0, 34],
-    characters: [34, 67],
-    outline: [67, 100],
+    worldBuilding: [0, 25],
+    characters: [25, 50],
+    outline: [50, 75],
+    plotLines: [75, 100],
   },
   characters: {
-    characters: [0, 50],
-    outline: [50, 100],
+    characters: [0, 34],
+    outline: [34, 67],
+    plotLines: [67, 100],
   },
   outline: {
-    outline: [0, 100],
+    outline: [0, 50],
+    plotLines: [50, 100],
+  },
+  plotLines: {
+    plotLines: [0, 100],
   },
 };
 
@@ -72,6 +86,11 @@ const INITIAL_NODE_STATUS: Record<GenerationNodeKey, Partial<Record<GenerationNo
   outline: {
     worldBuilding: 'completed',
     characters: 'completed',
+  },
+  plotLines: {
+    worldBuilding: 'completed',
+    characters: 'completed',
+    outline: 'completed',
   },
 };
 
@@ -359,8 +378,6 @@ export function useProjectGeneration({ dispatch, mcpSettings, refPackSettings }:
             ...current,
             outline,
           }));
-          // 工程化流水线：大纲之后固定进入桥段规划
-          dispatch({ type: 'GEN_NEXT_ROUTE', payload: 'bridge_planning' });
           dispatch({ type: 'GEN_STEP_UPDATE', payload: { outline: 'completed' } });
         },
         onError: (error) => {
@@ -372,6 +389,69 @@ export function useProjectGeneration({ dispatch, mcpSettings, refPackSettings }:
     );
 
     return getOutlineFromResponse(response as GenerateOutlineResponse);
+  }, [dispatch, dispatchIfActive, isRunActive, mcpEnabled, mcpPlugins, refPackSettings]);
+
+  /** 重跑大纲/剧情线前清空剧情线层：桥段骨架（未展开）→ 全部剧情线。已展开为章纲时后端返 409，由用户在桥段页处理。 */
+  const clearPlotLayer = useCallback(async (projectId: string, progressBase: number, runId: number) => {
+    dispatchIfActive(runId, {
+      type: 'GEN_PROGRESS',
+      payload: { progress: progressBase, message: '正在清理旧的剧情线与桥段骨架...' },
+    });
+    await plotBridgesApi.reset(projectId);
+    const existing = await plotLineApi.getPlotLines(projectId, { limit: 100 });
+    for (const line of existing.items ?? []) {
+      await plotLineApi.deletePlotLine(line.id);
+    }
+  }, [dispatchIfActive]);
+
+  const runPlotLines = useCallback(async (
+    projectId: string,
+    preset: StageProgressPreset,
+    runId: number,
+  ) => {
+    dispatchIfActive(runId, { type: 'GEN_STEP_UPDATE', payload: { plotLines: 'processing' } });
+    dispatchIfActive(runId, {
+      type: 'GEN_PROGRESS',
+      payload: {
+        progress: getNodeRange(preset, 'plotLines')[0],
+        message: '正在生成剧情线...',
+      },
+    });
+
+    const response = await wizardStreamApi.generatePlotLinesStream(
+      {
+        project_id: projectId,
+        chapter_count: DEFAULT_CHAPTER_COUNT,
+        sub_line_count: DEFAULT_SUB_LINE_COUNT,
+        enable_mcp: mcpEnabled,
+        selected_plugins: mcpPlugins,
+        ..._r8Payload(refPackSettings),
+      },
+      {
+        onProgress: (message, progress) => {
+          if (!isRunActive(runId)) return;
+          dispatch({
+            type: 'GEN_PROGRESS',
+            payload: {
+              progress: mapProgress(preset, 'plotLines', progress),
+              message,
+            },
+          });
+        },
+        onResult: (result) => {
+          if (!isRunActive(runId)) return;
+          setArtifacts((current) => ({ ...current, plotLines: result as WizardPlotLinesResponse }));
+          dispatch({ type: 'GEN_STEP_UPDATE', payload: { plotLines: 'completed' } });
+        },
+        onError: (error) => {
+          if (!isRunActive(runId)) return;
+          dispatch({ type: 'GEN_STEP_UPDATE', payload: { plotLines: 'error' } });
+          throw new Error(error);
+        },
+      },
+    );
+
+    return response as WizardPlotLinesResponse;
   }, [dispatch, dispatchIfActive, isRunActive, mcpEnabled, mcpPlugins, refPackSettings]);
 
   const runFromNode = useCallback(async (
@@ -394,11 +474,18 @@ export function useProjectGeneration({ dispatch, mcpSettings, refPackSettings }:
         ...current,
         characters: [],
         outline: null,
+        plotLines: null,
+      }));
+    } else if (startNode === 'outline') {
+      setArtifacts((current) => ({
+        ...current,
+        outline: null,
+        plotLines: null,
       }));
     } else {
       setArtifacts((current) => ({
         ...current,
-        outline: null,
+        plotLines: null,
       }));
     }
 
@@ -414,11 +501,12 @@ export function useProjectGeneration({ dispatch, mcpSettings, refPackSettings }:
         if (existingProjectId) {
           await cleanupDownstreamData(projectId, getNodeRange(preset, 'characters')[0] - 8, runId);
           if (!isRunActive(runId)) return;
-          dispatch({ type: 'GEN_STEP_UPDATE', payload: { characters: 'pending', outline: 'pending' } });
+          dispatch({ type: 'GEN_STEP_UPDATE', payload: { characters: 'pending', outline: 'pending', plotLines: 'pending' } });
           setArtifacts((current) => ({
             ...current,
             characters: [],
             outline: null,
+            plotLines: null,
           }));
         }
       }
@@ -430,15 +518,27 @@ export function useProjectGeneration({ dispatch, mcpSettings, refPackSettings }:
       if (startNode === 'characters') {
         await cleanupDownstreamData(projectId, Math.max(getNodeRange(preset, 'characters')[0], 0), runId);
         if (!isRunActive(runId)) return;
-        dispatch({ type: 'GEN_STEP_UPDATE', payload: { characters: 'pending', outline: 'pending' } });
+        dispatch({ type: 'GEN_STEP_UPDATE', payload: { characters: 'pending', outline: 'pending', plotLines: 'pending' } });
       }
 
-      if (startNode !== 'outline') {
+      if (startNode === 'worldBuilding' || startNode === 'characters') {
         await runCharacters(projectId, data, preset, worldBuilding, runId);
         if (!isRunActive(runId)) return;
       }
 
-      await runOutline(projectId, data, preset, runId);
+      if (startNode === 'outline' || startNode === 'plotLines') {
+        // 重跑大纲 / 剧情线：先清空剧情线层（桥段骨架 + 剧情线），否则后端会以「已存在主线」拒绝
+        await clearPlotLayer(projectId, getNodeRange(preset, startNode)[0], runId);
+        if (!isRunActive(runId)) return;
+        dispatch({ type: 'GEN_STEP_UPDATE', payload: { plotLines: 'pending' } });
+      }
+
+      if (startNode !== 'plotLines') {
+        await runOutline(projectId, data, preset, runId);
+        if (!isRunActive(runId)) return;
+      }
+
+      await runPlotLines(projectId, preset, runId);
       if (!isRunActive(runId)) return;
 
       dispatch({ type: 'GEN_COMPLETE' });
@@ -454,7 +554,7 @@ export function useProjectGeneration({ dispatch, mcpSettings, refPackSettings }:
         setRunningNode(null);
       }
     }
-  }, [artifacts.worldBuilding, cleanupDownstreamData, dispatch, dispatchIfActive, isRunActive, runCharacters, runOutline, runWorldBuilding]);
+  }, [artifacts.worldBuilding, cleanupDownstreamData, clearPlotLayer, dispatch, dispatchIfActive, isRunActive, runCharacters, runOutline, runPlotLines, runWorldBuilding]);
 
   const startGeneration = useCallback(async (data: WizardData) => {
     const runId = createRunId();
