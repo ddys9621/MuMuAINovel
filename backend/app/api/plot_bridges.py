@@ -22,14 +22,15 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.settings import get_user_ai_service
-from app.database import get_db
+from app.database import get_db, get_engine
 from app.models.plot_bridge import PlotBridge
 from app.models.project import Project
 from app.services.ai_service import AIService
 from app.utils.sse_response import SSEResponse, create_sse_response
+from app.services.bridge_fill_jobs import bridge_fill_jobs
 from app.services.bridge_planning_service import BridgePlanningService, bridge_to_dict
 from app.services.bridge_slot_planner import (
     BridgePlanningConflictError,
@@ -73,6 +74,11 @@ class FillBridgesRequest(BaseModel):
     """填充桥段内容请求。"""
     model: Optional[str] = Field(default=None, description="覆盖默认模型")
     beat_index: Optional[int] = Field(default=None, ge=1, description="只填充该主线节点的 draft 桥段")
+
+
+class FillJobEventsRequest(BaseModel):
+    """事件回放起点：只要 seq > since 的事件。"""
+    since: int = Field(default=0, ge=0)
 
 
 class ExpandBridgeRequest(BaseModel):
@@ -147,6 +153,32 @@ def get_bridge_service(
     return BridgePlanningService(ai_service=user_ai)
 
 
+class _JobSession:
+    """`async with session_factory() as db`：后台任务用的会话，引擎按 user_id 惰性获取。
+
+    任务寿命超过请求，不能复用 Depends(get_db) 的会话（请求结束即关闭）。
+    与 book_dissect/extractor_v2._create_task_session 同一套路。
+    """
+
+    def __init__(self, user_id: str):
+        self._user_id = user_id
+        self._session: AsyncSession | None = None
+
+    async def __aenter__(self) -> AsyncSession:
+        engine = await get_engine(self._user_id)
+        self._session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)()
+        return self._session
+
+    async def __aexit__(self, *exc) -> bool:
+        if self._session is not None:
+            await self._session.close()
+        return False
+
+
+def _job_session_factory(user_id: str):
+    return lambda: _JobSession(user_id)
+
+
 # ============================================================
 # Routes
 # ============================================================
@@ -207,50 +239,81 @@ async def fill_bridges_stream_endpoint(
     db: AsyncSession = Depends(get_db),
     service: BridgePlanningService = Depends(get_bridge_service),
 ):
-    """SSE：按主线节点分批用 LLM 填充 draft 桥段。首个失败即终止，重跑自动续填。"""
-    await verify_project_access(project_id, getattr(request.state, "user_id", None), db)
+    """SSE：启动后台填充任务并从头流式输出其事件。
+
+    任务寿命独立于本连接：关弹窗 / 刷新 / 断网不会终止填充；重连用
+    GET fill-jobs/current + POST fill-jobs/{id}/events。已有任务在跑 → 409。
+    事件翻译（服务层 → progress/meta/bridges/partial/thinking/result/done/error）在
+    bridge_fill_jobs 的 runner 里完成。
+    """
+    user_id = getattr(request.state, "user_id", None)
+    await verify_project_access(project_id, user_id, db)
+    try:
+        job = await bridge_fill_jobs.start(
+            project_id=project_id,
+            user_id=user_id,
+            ai_service=service.ai_service,
+            model=payload.model,
+            beat_index=payload.beat_index,
+            session_factory=_job_session_factory(user_id),
+        )
+    except BridgePlanningConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
     async def gen():
-        total_result = await db.execute(
-            select(PlotBridge.id).where(PlotBridge.project_id == project_id, PlotBridge.status == "draft")
-        )
-        total = len(total_result.scalars().all())
-        done_count = 0
-        try:
-            yield await SSEResponse.send_progress("开始填充桥段内容...", 1)
-            async for evt in service.fill_bridges(db, project_id, payload.model, payload.beat_index):
-                if evt["type"] == "beat_start":
-                    yield await SSEResponse.send_progress(
-                        f"节点 {evt['beat_index']}：生成桥段 {evt['bridge_numbers'][0]}-{evt['bridge_numbers'][-1]}",
-                        int(done_count / total * 100) if total else 0,
-                    )
-                elif evt["type"] == "batch_done":
-                    done_count += len(evt["bridges"])
-                    nums = evt["bridge_numbers"]
-                    yield SSEResponse.format_sse({
-                        "type": "meta",
-                        "beat_index": evt["beat_index"],
-                        "bridge_numbers": nums,
-                        "provenance": evt["provenance"],
-                    })
-                    yield await SSEResponse.send_progress(
-                        f"节点 {evt['beat_index']}：桥段 {nums[0]}-{nums[-1]} 已填充（累计 {done_count}/{total}）",
-                        int(done_count / total * 100) if total else 100,
-                    )
-                elif evt["type"] == "beat_done":
-                    yield await SSEResponse.send_progress(
-                        f"节点 {evt['beat_index']} 完成（累计 {done_count}/{total}）",
-                        int(done_count / total * 100) if total else 100,
-                    )
-                else:
-                    yield await SSEResponse.send_result(evt)
-            yield await SSEResponse.send_progress("完成!", 100, "success")
-            yield await SSEResponse.send_done()
-        except Exception as exc:  # noqa: BLE001 - 统一转 SSE error 事件
-            logger.error("[plot_bridges] 填充失败: %s", exc, exc_info=True)
-            yield await SSEResponse.send_error(f"桥段填充失败: {exc}")
+        yield SSEResponse.format_sse({"type": "start", "job_id": job.id})
+        async for evt in bridge_fill_jobs.events(job.id, since=0):
+            yield SSEResponse.format_sse(evt)
 
     return create_sse_response(gen())
+
+
+@router.get("/projects/{project_id}/bridges/fill-jobs/current")
+async def fill_job_current_endpoint(
+    project_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """页面挂载时查询：该项目是否有填充任务在跑（用于恢复横幅并重连事件流）。"""
+    await verify_project_access(project_id, getattr(request.state, "user_id", None), db)
+    job = bridge_fill_jobs.current(project_id)
+    return {"job": job.snapshot() if job else None}
+
+
+@router.post("/projects/{project_id}/bridges/fill-jobs/{job_id}/events")
+async def fill_job_events_endpoint(
+    project_id: str,
+    job_id: str,
+    payload: FillJobEventsRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """SSE：从 since 之后回放任务事件并续尾到终态（POST 以复用前端 ssePost）。"""
+    await verify_project_access(project_id, getattr(request.state, "user_id", None), db)
+    job = bridge_fill_jobs.get(job_id)
+    if job is None or job.project_id != project_id:
+        raise HTTPException(status_code=404, detail="填充任务不存在或已过期")
+
+    async def gen():
+        async for evt in bridge_fill_jobs.events(job_id, since=payload.since):
+            yield SSEResponse.format_sse(evt)
+
+    return create_sse_response(gen())
+
+
+@router.delete("/projects/{project_id}/bridges/fill-jobs/{job_id}")
+async def fill_job_cancel_endpoint(
+    project_id: str,
+    job_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """停止填充：当前子批保持 draft，已完成的桥段已入库。"""
+    await verify_project_access(project_id, getattr(request.state, "user_id", None), db)
+    job = bridge_fill_jobs.get(job_id)
+    if job is None or job.project_id != project_id:
+        raise HTTPException(status_code=404, detail="填充任务不存在或已过期")
+    return {"cancelled": await bridge_fill_jobs.cancel(job_id)}
 
 
 @router.get("/projects/{project_id}/bridges", response_model=list[BridgeResponse])
