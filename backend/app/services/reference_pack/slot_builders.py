@@ -130,6 +130,93 @@ async def build_chapter_outline(db: AsyncSession, ctx: Any) -> str:
     return "\n".join(lines)
 
 
+def _clip(value: Any, limit: int) -> str:
+    """单行化 + 截断：换行压成空格，供角色/规则表一行一条。"""
+    text = " ".join(str(value or "").split())
+    return text[:limit]
+
+
+_ROLE_LABEL = {"protagonist": "主角", "antagonist": "反派", "supporting": "配角"}
+_ROLE_ORDER = {"protagonist": 0, "antagonist": 1, "supporting": 2}
+
+
+async def build_project_characters(db: AsyncSession, ctx: Any) -> str:
+    """【👥 本书角色】项目自有角色与组织（项目级缓存）。
+
+    评审问题 A：没有这段时 LLM 只能从节点描述里捞名字，捞不到就自己编，跨批次人名漂移。
+    主角 → 反派 → 配角 → 组织；人物最多 12 个、组织最多 6 个，一行一条。
+    """
+    from app.models.character import Character
+
+    result = await db.execute(
+        select(Character)
+        .where(Character.project_id == ctx.project_id)
+        .order_by(Character.created_at, Character.id)
+    )
+    rows = [c for c in result.scalars().all() if (c.name or "").strip()]
+    if not rows:
+        return ""
+
+    people = sorted(
+        (c for c in rows if not c.is_organization),
+        key=lambda c: _ROLE_ORDER.get(c.role_type or "", 3),
+    )[:12]
+    orgs = [c for c in rows if c.is_organization][:6]
+
+    lines = ["【👥 本书角色（人名/称呼必须与此一致，不得另起新名）】"]
+    for c in people:
+        meta = "·".join(x for x in (_ROLE_LABEL.get(c.role_type or "", c.role_type or ""), c.gender or "", c.age or "") if x)
+        desc = "｜".join(x for x in (_clip(c.personality, 60), _clip(c.background, 60)) if x)
+        head = f"- {c.name}（{meta}）" if meta else f"- {c.name}"
+        lines.append(f"{head}：{desc}" if desc else head)
+    if orgs:
+        lines.append("组织/势力：")
+        for o in orgs:
+            desc = "｜".join(x for x in (_clip(o.organization_type, 30), _clip(o.organization_purpose, 60)) if x)
+            lines.append(f"- {o.name}：{desc}" if desc else f"- {o.name}")
+    return "\n".join(lines)
+
+
+_RULE_CATEGORY_LABEL = {
+    "cultivation_realm": "能力/地位层级",
+    "equipment_template": "资源/载体系统",
+    "map_location": "地图/地点",
+}
+_LADDER_CATEGORIES = {"cultivation_realm"}
+
+
+async def build_world_rules_table(db: AsyncSession, ctx: Any) -> str:
+    """【📜 世界规则表】WorldRule 按分类汇总（项目级缓存）。
+
+    层级类（境界/等级）按 order_index 串成阶梯，供桥段规划把升级节奏铺在正确位置；
+    其余分类一行列出 name（summary）。
+    """
+    from app.models.world_rule import WorldRule
+
+    result = await db.execute(
+        select(WorldRule)
+        .where(WorldRule.project_id == ctx.project_id)
+        .order_by(WorldRule.category, WorldRule.order_index, WorldRule.name)
+    )
+    rules = result.scalars().all()
+    if not rules:
+        return ""
+
+    by_cat: dict[str, list[Any]] = {}
+    for r in rules:
+        by_cat.setdefault(r.category, []).append(r)
+
+    lines = ["【📜 世界规则表（设定硬约束，不得违背）】"]
+    for cat, items in by_cat.items():
+        label = _RULE_CATEGORY_LABEL.get(cat, cat)
+        if cat in _LADDER_CATEGORIES:
+            lines.append(f"- {label}：{' → '.join(r.name for r in items[:12])}")
+            continue
+        parts = [f"{r.name}（{_clip(r.summary, 40)}）" if r.summary else r.name for r in items[:8]]
+        lines.append(f"- {label}：{'；'.join(parts)}")
+    return "\n".join(lines)
+
+
 async def build_plot_lines_with_beats(db: AsyncSession, ctx: Any) -> str:
     """主线节点 + 桥段配额（由 bridge_slot_planner 确定）+ 副线节点概览。
 
@@ -348,6 +435,8 @@ SLOT_BUILDERS: dict[str, Callable[[AsyncSession, Any], Awaitable[str]]] = {
     # user 段 - 业务
     "bridge_position":        build_bridge_position,
     "plot_lines_with_beats":  build_plot_lines_with_beats,  # V4.1 方案 C
+    "project_characters":     build_project_characters,     # 评审问题 A：本书角色
+    "world_rules_table":      build_world_rules_table,      # 评审问题 A：世界规则表
     "history_full":           build_history_full,
     "history_normal":         build_history_normal,
     "history_brief":          build_history_brief,
@@ -362,3 +451,7 @@ SLOT_BUILDERS: dict[str, Callable[[AsyncSession, Any], Awaitable[str]]] = {
     "dissect_bridges":        build_dissect_bridges,
     "dissect_character_archive": build_dissect_char_arch,
 }
+
+
+# 供 bridge_planning_service 生成 provenance 时取参考包标题
+get_first_attached_pack = _get_first_attached_pack
