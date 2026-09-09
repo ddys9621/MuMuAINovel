@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Plus, Pencil, Trash2, FileText, Loader2, Sparkles, LayoutGrid, GitBranch, BookOpen, BarChart3, Check, ChevronDown, ChevronUp, Link2, Eye } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -20,7 +21,7 @@ import type {
   PlotLineProgress, TimelineData, TimelineBeat,
   PlotCardGenerateRequest, PlotLineGenerateRequest,
   ChapterOutline, ChapterOutlineCreate, ChapterOutlineUpdate,
-  ChapterOutlineBatchCreateRequest, ChapterOutlineGenerateRequest,
+  ChapterOutlineBatchCreateRequest,
 } from '@/types'
 
 type TabKey = 'outlines' | 'plotCards' | 'plotLines' | 'chapterOutlines' | 'overview'
@@ -55,12 +56,14 @@ const PLOT_LINE_TYPE_ALIASES: Record<string, string> = {
 }
 
 const PLOT_LINE_TYPE_COLORS: Record<string, string> = {
-  main: 'bg-blue-100 text-blue-700',
-  sub: 'bg-amber-100 text-amber-700',
-  character: 'bg-purple-100 text-purple-700',
-  foreshadow: 'bg-orange-100 text-orange-700',
-  other: 'bg-gray-100 text-gray-700',
+  main: 'bg-brand/10 text-brand',
+  sub: 'bg-surface-hover text-content-secondary',
+  character: 'bg-surface-hover text-content-secondary',
+  foreshadow: 'bg-surface-hover text-content-secondary',
+  other: 'bg-surface-hover text-content-secondary',
 }
+
+const STATUS_TAG = 'px-2 py-0.5 text-[11px] font-medium'
 
 const normalizePlotLineType = (type?: string | null) => {
   const value = type?.trim()
@@ -89,7 +92,7 @@ export default function OutlinePage() {
   const { refreshOutlines, createOutline, updateOutline, deleteOutline, activateOutline } = useOutlineSync()
   const { plotCards, refreshPlotCards, createPlotCard, updatePlotCard, deletePlotCard, generatePlotCards } = usePlotCardSync()
   const { plotLines, refreshPlotLines, createPlotLine, updatePlotLine: updatePlotLineData, deletePlotLine, generatePlotLines } = usePlotLineSync()
-  const { chapterOutlines, refreshChapterOutlines, createChapterOutline, updateChapterOutline: updateChapterOutlineData, deleteChapterOutline, batchCreateChapterOutlines, generateChapterOutlines } = useChapterOutlineSync()
+  const { chapterOutlines, refreshChapterOutlines, createChapterOutline, updateChapterOutline: updateChapterOutlineData, deleteChapterOutline, batchCreateChapterOutlines } = useChapterOutlineSync()
 
   // 初始化加载
   useEffect(() => {
@@ -105,34 +108,45 @@ export default function OutlinePage() {
 
   // ==================== Tab 容器 ====================
   return (
-    <div className="space-y-6">
-      {/* Tab 栏 */}
-      <div className="flex border-b border-surface-border mb-6">
-        {TABS.map(tab => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={cn(
-              "px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors inline-flex items-center gap-1.5",
-              activeTab === tab.key
-                ? "border-brand text-brand"
-                : "border-transparent text-content-secondary hover:text-content"
-            )}
-          >
-            <tab.icon className="w-4 h-4" />
-            {tab.label}
-          </button>
-        ))}
-      </div>
+    <div className="animate-fade-in space-y-6">
+      <section className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-[28px] font-semibold tracking-tight text-content md:text-[32px]">故事大纲</h1>
+          <p className="mt-2 max-w-[560px] text-sm leading-6 text-content-secondary">
+            先定整本书的骨架，再拆成剧情卡片、剧情线与章纲。当前有 {outlines.length} 个大纲版本、{plotCards.length} 张剧情卡片、{plotLines.length} 条剧情线、{chapterOutlines.length} 份章纲。
+          </p>
+        </div>
+
+        <div className="flex shrink-0 flex-wrap self-start border border-surface-border bg-white/60 p-1 md:self-auto">
+          {TABS.map(tab => {
+            const selected = activeTab === tab.key
+            return (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={cn(
+                  'inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium transition-colors',
+                  selected ? 'bg-brand text-white' : 'text-content-secondary hover:text-content'
+                )}
+              >
+                <tab.icon className="h-3.5 w-3.5" />
+                {tab.label}
+              </button>
+            )
+          })}
+        </div>
+      </section>
 
       {loading ? (
-        <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-content-secondary" /></div>
+        <div className="hh-panel flex items-center justify-center py-16">
+          <Loader2 className="h-6 w-6 animate-spin text-brand" />
+        </div>
       ) : (
         <>
           {activeTab === 'outlines' && <OutlinesView outlines={outlines} projectId={projectId} createOutline={createOutline} updateOutline={updateOutline} deleteOutline={deleteOutline} activateOutline={activateOutline} refreshOutlines={refreshOutlines} />}
           {activeTab === 'plotCards' && <PlotCardsView plotCards={plotCards} projectId={projectId} outlines={outlines} createPlotCard={createPlotCard} updatePlotCard={updatePlotCard} deletePlotCard={deletePlotCard} generatePlotCards={generatePlotCards} />}
           {activeTab === 'plotLines' && <PlotLinesView plotLines={plotLines} plotCards={plotCards} projectId={projectId} outlines={outlines} createPlotLine={createPlotLine} updatePlotLine={updatePlotLineData} deletePlotLine={deletePlotLine} generatePlotLines={generatePlotLines} />}
-          {activeTab === 'chapterOutlines' && <ChapterOutlinesView chapterOutlines={chapterOutlines} projectId={projectId} createChapterOutline={createChapterOutline} updateChapterOutline={updateChapterOutlineData} deleteChapterOutline={deleteChapterOutline} batchCreateChapterOutlines={batchCreateChapterOutlines} generateChapterOutlines={generateChapterOutlines} plotLines={plotLines} />}
+          {activeTab === 'chapterOutlines' && <ChapterOutlinesView chapterOutlines={chapterOutlines} projectId={projectId} createChapterOutline={createChapterOutline} updateChapterOutline={updateChapterOutlineData} deleteChapterOutline={deleteChapterOutline} batchCreateChapterOutlines={batchCreateChapterOutlines} plotLines={plotLines} />}
           {activeTab === 'overview' && <OverviewPanel plotCards={plotCards} plotLines={plotLines} chapterOutlines={chapterOutlines} />}
         </>
       )}
@@ -141,11 +155,31 @@ export default function OutlinePage() {
 }
 
 // ==================== 通用弹窗壳（薄壳，转发到全局 Modal） ====================
-function Modal({ title, onClose, children, size = 'xl' }: { title: string; onClose: () => void; children: React.ReactNode; size?: ModalSize }) {
+function Modal({ title, onClose, children, size = 'xl', footer, closeOnMaskClick }: {
+  title: string
+  onClose: () => void
+  children: React.ReactNode
+  size?: ModalSize
+  footer?: React.ReactNode
+  closeOnMaskClick?: boolean
+}) {
   return (
-    <UiModal title={title} onClose={onClose} size={size}>
+    <UiModal title={title} onClose={onClose} size={size} footer={footer} closeOnMaskClick={closeOnMaskClick}>
       {children}
     </UiModal>
+  )
+}
+
+// ==================== 通用空状态（面板内） ====================
+function EmptyBlock({ icon: Icon, title, hint }: { icon: React.ElementType; title: string; hint: string }) {
+  return (
+    <div className="mt-6 flex flex-col items-center px-6 py-12 text-center">
+      <span className="flex h-14 w-14 items-center justify-center bg-brand/10 text-brand">
+        <Icon className="h-7 w-7" />
+      </span>
+      <h3 className="mt-5 text-xl font-semibold tracking-tight text-content">{title}</h3>
+      <p className="mt-2 max-w-md text-sm leading-6 text-content-secondary">{hint}</p>
+    </div>
   )
 }
 
@@ -267,105 +301,132 @@ function OutlinesView({ outlines, projectId, createOutline, updateOutline, delet
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold text-content">故事大纲</h2>
-        <div className="flex gap-2">
-          <button onClick={() => setShowGenModal(true)} disabled={generating} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-3 py-2 text-sm transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
-            {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+    <section className="hh-panel p-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h2 className="text-lg font-semibold tracking-tight text-content">大纲版本</h2>
+          <p className="mt-1 text-sm leading-6 text-content-secondary">
+            整本书的骨架：梗概、金手指、卖点与终极目标。活跃版本会作为剧情卡片、剧情线与章纲生成的依据，共 {outlines.length} 个版本。
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2.5">
+          <button onClick={() => setShowGenModal(true)} disabled={generating} className="hh-btn-secondary">
+            {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-brand" />}
             AI 生成
           </button>
-          <button onClick={openCreate} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5">
-            <Plus className="w-4 h-4" />新建大纲
+          <button onClick={openCreate} className="hh-btn-primary">
+            <Plus className="h-4 w-4" />
+            新建大纲
           </button>
         </div>
       </div>
 
       {outlines.length === 0 ? (
-        <div className="text-center py-12 text-content-secondary text-sm">暂无大纲，点击上方按钮创建</div>
+        <EmptyBlock
+          icon={FileText}
+          title="还没有故事大纲"
+          hint="点击右上角「新建大纲」手动填写，或用「AI 生成」根据项目设定生成一版初稿，再回来细修。"
+        />
       ) : (
-        <div className="space-y-3">
+        <div className="mt-6 space-y-3">
           {outlines.map(o => (
-            <div key={o.id} className="bg-white border border-surface-border rounded-card p-4">
+            <article key={o.id} className="hh-subpanel p-4">
               <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <FileText className="w-4 h-4 text-content-secondary shrink-0" />
-                    <h3 className="text-sm font-semibold text-content truncate">{o.title}</h3>
-                    {o.is_active && <span className="text-xs bg-green-100 text-green-700 rounded px-1.5 py-0.5">活跃</span>}
-                    {o.version != null && <span className="text-xs text-content-secondary">v{o.version}</span>}
+                <div className="flex min-w-0 flex-1 items-start gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center bg-brand/10 text-brand">
+                    <FileText className="h-5 w-5" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="min-w-0 max-w-full truncate text-[15px] font-semibold text-content">{o.title}</h3>
+                      {o.is_active && <span className={cn(STATUS_TAG, 'bg-emerald-50 text-emerald-600')}>活跃</span>}
+                      {o.version != null && <span className="text-xs text-content-tertiary tabular-nums">v{o.version}</span>}
+                    </div>
+                    {o.content && <p className="mt-1.5 line-clamp-3 whitespace-pre-wrap text-[13px] leading-6 text-content-secondary">{(() => {
+                      try { const parsed = JSON.parse(o.content); return typeof parsed === 'object' ? (parsed.premise || parsed.content || JSON.stringify(parsed, null, 2)) : o.content; } catch { return o.content; }
+                    })()}</p>}
+                    <button
+                      onClick={() => togglePlotLines(o.id)}
+                      className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand hover:text-brand-600"
+                    >
+                      <GitBranch className="h-3 w-3" />
+                      关联剧情线
+                      {expandedOutlineId === o.id ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                    </button>
                   </div>
-                  {o.content && <p className="text-xs text-content-secondary mt-1.5 line-clamp-3 whitespace-pre-wrap">{(() => {
-                    try { const parsed = JSON.parse(o.content); return typeof parsed === 'object' ? (parsed.premise || parsed.content || JSON.stringify(parsed, null, 2)) : o.content; } catch { return o.content; }
-                  })()}</p>}
-                  <button
-                    onClick={() => togglePlotLines(o.id)}
-                    className="inline-flex items-center gap-1 mt-2 text-xs text-brand hover:text-brand-600 transition-colors"
-                  >
-                    <GitBranch className="w-3 h-3" />
-                    关联剧情线
-                    {expandedOutlineId === o.id ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                  </button>
                 </div>
-                <div className="flex gap-1 shrink-0">
+                <div className="flex shrink-0 items-center gap-1">
                   {!o.is_active && (
-                    <button onClick={() => handleActivate(o)} className="text-xs border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-2 py-1 transition-colors inline-flex items-center gap-1">
-                      <Check className="w-3 h-3" />激活
+                    <button onClick={() => handleActivate(o)} className="hh-btn-secondary h-8 px-3 text-xs">
+                      <Check className="h-3 w-3" />激活
                     </button>
                   )}
-                  <button onClick={() => setViewingOutline(o)} className="p-1.5 rounded hover:bg-surface-hover text-content-secondary transition-colors" title="查看全文"><Eye className="w-3.5 h-3.5" /></button>
-                  <button onClick={() => openEdit(o)} className="p-1.5 rounded hover:bg-surface-hover text-content-secondary transition-colors" title="编辑"><Pencil className="w-3.5 h-3.5" /></button>
-                  <button onClick={() => handleDelete(o)} className="p-1.5 rounded hover:bg-red-50 text-content-secondary hover:text-red-500 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                  <button onClick={() => setViewingOutline(o)} className="hh-icon-btn-plain h-8 w-8" title="查看全文"><Eye className="h-3.5 w-3.5" /></button>
+                  <button onClick={() => openEdit(o)} className="hh-icon-btn-plain h-8 w-8" title="编辑"><Pencil className="h-3.5 w-3.5" /></button>
+                  <button onClick={() => handleDelete(o)} className="hh-icon-btn-plain h-8 w-8 hover:text-red-500" title="删除"><Trash2 className="h-3.5 w-3.5" /></button>
                 </div>
               </div>
               {expandedOutlineId === o.id && (
-                <div className="mt-3 pt-3 border-t border-surface-border">
+                <div className="mt-3 border-t border-surface-border/80 pt-3">
                   {loadingLinks === o.id ? (
-                    <div className="flex items-center gap-2 text-xs text-content-secondary"><Loader2 className="w-3 h-3 animate-spin" />加载中...</div>
+                    <div className="flex items-center gap-2 text-xs text-content-secondary"><Loader2 className="h-3 w-3 animate-spin" />加载中...</div>
                   ) : (linkedPlotLines[o.id] || []).length === 0 ? (
                     <p className="text-xs text-content-tertiary">暂无关联剧情线</p>
                   ) : (
                     <div className="flex flex-wrap gap-2">
                       {(linkedPlotLines[o.id] || []).map(pl => (
-                        <span key={pl.id} className="inline-flex items-center gap-1 text-xs bg-blue-50 text-blue-700 rounded px-2 py-1">
-                          <GitBranch className="w-3 h-3" />
+                        <span key={pl.id} className="hh-tag">
+                          <GitBranch className="h-3 w-3" />
                           {pl.title}
-                          {pl.line_type && <span className="text-blue-400">({getPlotLineTypeLabel(pl.line_type)})</span>}
+                          {pl.line_type && <span className="text-brand/60">({getPlotLineTypeLabel(pl.line_type)})</span>}
                         </span>
                       ))}
                     </div>
                   )}
                 </div>
               )}
-            </div>
+            </article>
           ))}
         </div>
       )}
 
       {showGenModal && (
-        <Modal title="AI 生成故事大纲" onClose={() => setShowGenModal(false)}>
-          <div className="space-y-3">
-            <div className="grid grid-cols-3 gap-3">
+        <Modal
+          title="AI 生成故事大纲"
+          onClose={() => setShowGenModal(false)}
+          closeOnMaskClick={false}
+          footer={(
+            <>
+              <button onClick={() => setShowGenModal(false)} className="hh-btn-ghost">取消</button>
+              <button onClick={handleAIGenerate} disabled={generating} className="hh-btn-primary">
+                {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                开始生成
+              </button>
+            </>
+          )}
+        >
+          <div className="space-y-5">
+            <div className="grid gap-4 sm:grid-cols-3">
               <div>
-                <label className="block text-sm text-content-secondary mb-1">叙事视角</label>
-                <select value={genForm.narrative_perspective} onChange={e => setGenForm(f => ({ ...f, narrative_perspective: e.target.value }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand outline-none bg-white">
+                <label className="hh-label">叙事视角</label>
+                <select value={genForm.narrative_perspective} onChange={e => setGenForm(f => ({ ...f, narrative_perspective: e.target.value }))} className="hh-field">
                   <option value="第一人称">第一人称</option>
                   <option value="第三人称">第三人称</option>
                   <option value="全知视角">全知视角</option>
                 </select>
               </div>
               <div>
-                <label className="block text-sm text-content-secondary mb-1">章节数</label>
-                <input type="number" value={genForm.chapter_count} onChange={e => setGenForm(f => ({ ...f, chapter_count: Number(e.target.value) }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand outline-none" />
+                <label className="hh-label">章节数</label>
+                <input type="number" value={genForm.chapter_count} onChange={e => setGenForm(f => ({ ...f, chapter_count: Number(e.target.value) }))} className="hh-field" />
               </div>
               <div>
-                <label className="block text-sm text-content-secondary mb-1">目标字数</label>
-                <input type="number" value={genForm.target_words} onChange={e => setGenForm(f => ({ ...f, target_words: Number(e.target.value) }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand outline-none" />
+                <label className="hh-label">目标字数</label>
+                <input type="number" value={genForm.target_words} onChange={e => setGenForm(f => ({ ...f, target_words: Number(e.target.value) }))} className="hh-field" />
               </div>
             </div>
             <div>
-              <label className="block text-sm text-content-secondary mb-1">额外要求（可选）</label>
-              <textarea value={genForm.requirements} onChange={e => setGenForm(f => ({ ...f, requirements: e.target.value }))} placeholder="对大纲的特殊要求..." rows={2} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand outline-none resize-none" />
+              <label className="hh-label">额外要求（可选）</label>
+              <textarea value={genForm.requirements} onChange={e => setGenForm(f => ({ ...f, requirements: e.target.value }))} placeholder="对大纲的特殊要求..." rows={2} className="hh-textarea" />
             </div>
             <MCPSelector value={{ enable: genEnableMcp, selected: genPlugins }} onChange={({ enable, selected }) => { setGenEnableMcp(enable); setGenPlugins(selected) }} />
             {projectId && (
@@ -378,57 +439,57 @@ function OutlinesView({ outlines, projectId, createOutline, updateOutline, delet
               />
             )}
           </div>
-          <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
-            <button onClick={() => setShowGenModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
-            <button onClick={handleAIGenerate} disabled={generating} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
-              {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-              开始生成
-            </button>
-          </div>
         </Modal>
       )}
 
       {showModal && (
-        <Modal title={editing ? '编辑大纲' : '新建大纲'} onClose={() => setShowModal(false)} size="xl">
-          <div className="space-y-3">
+        <Modal
+          title={editing ? '编辑大纲' : '新建大纲'}
+          onClose={() => setShowModal(false)}
+          size="xl"
+          closeOnMaskClick={false}
+          footer={(
+            <>
+              <button onClick={() => setShowModal(false)} className="hh-btn-ghost">取消</button>
+              <button onClick={handleSubmit} className="hh-btn-primary">确定</button>
+            </>
+          )}
+        >
+          <div className="space-y-5">
             <div>
-              <label className="block text-sm text-content-secondary mb-1">标题</label>
-              <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand outline-none" />
+              <label className="hh-label">标题</label>
+              <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} className="hh-field" />
             </div>
             <div>
-              <label className="block text-sm text-content-secondary mb-1">故事梗概 (premise)</label>
-              <textarea value={form.premise} onChange={e => setForm(f => ({ ...f, premise: e.target.value }))} rows={4} placeholder="5-8句话概括整个故事..." className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand outline-none resize-none" />
+              <label className="hh-label">故事梗概</label>
+              <textarea value={form.premise} onChange={e => setForm(f => ({ ...f, premise: e.target.value }))} rows={4} placeholder="5-8句话概括整个故事..." className="hh-textarea" />
             </div>
             <div>
-              <label className="block text-sm text-content-secondary mb-1">金手指设定 (golden_finger)</label>
-              <input value={form.golden_finger} onChange={e => setForm(f => ({ ...f, golden_finger: e.target.value }))} placeholder="主角的核心优势" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand outline-none" />
+              <label className="hh-label">金手指设定</label>
+              <input value={form.golden_finger} onChange={e => setForm(f => ({ ...f, golden_finger: e.target.value }))} placeholder="主角的核心优势" className="hh-field" />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <label className="block text-sm text-content-secondary mb-1">核心卖点 (selling_points)</label>
-                <input value={form.selling_points} onChange={e => setForm(f => ({ ...f, selling_points: e.target.value }))} placeholder="用顿号分隔，如：废材逆袭、打脸" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand outline-none" />
+                <label className="hh-label">核心卖点</label>
+                <input value={form.selling_points} onChange={e => setForm(f => ({ ...f, selling_points: e.target.value }))} placeholder="用顿号分隔，如：废材逆袭、打脸" className="hh-field" />
               </div>
               <div>
-                <label className="block text-sm text-content-secondary mb-1">主要套路 (main_tropes)</label>
-                <input value={form.main_tropes} onChange={e => setForm(f => ({ ...f, main_tropes: e.target.value }))} placeholder="用顿号分隔，如：宗门大比、夺宝" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand outline-none" />
+                <label className="hh-label">主要套路</label>
+                <input value={form.main_tropes} onChange={e => setForm(f => ({ ...f, main_tropes: e.target.value }))} placeholder="用顿号分隔，如：宗门大比、夺宝" className="hh-field" />
               </div>
             </div>
             <div>
-              <label className="block text-sm text-content-secondary mb-1">升级路线 (power_system)</label>
-              <input value={form.power_system} onChange={e => setForm(f => ({ ...f, power_system: e.target.value }))} placeholder="用→连接各阶段" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand outline-none" />
+              <label className="hh-label">升级路线</label>
+              <input value={form.power_system} onChange={e => setForm(f => ({ ...f, power_system: e.target.value }))} placeholder="用→连接各阶段" className="hh-field" />
             </div>
             <div>
-              <label className="block text-sm text-content-secondary mb-1">终极目标 (ultimate_goal)</label>
-              <input value={form.ultimate_goal} onChange={e => setForm(f => ({ ...f, ultimate_goal: e.target.value }))} placeholder="主角最终会达成什么" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand outline-none" />
+              <label className="hh-label">终极目标</label>
+              <input value={form.ultimate_goal} onChange={e => setForm(f => ({ ...f, ultimate_goal: e.target.value }))} placeholder="主角最终会达成什么" className="hh-field" />
             </div>
             <div>
-              <label className="block text-sm text-content-secondary mb-1">开篇钩子 (opening_hook)</label>
-              <input value={form.opening_hook} onChange={e => setForm(f => ({ ...f, opening_hook: e.target.value }))} placeholder="第一章如何吸引读者" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand outline-none" />
+              <label className="hh-label">开篇钩子</label>
+              <input value={form.opening_hook} onChange={e => setForm(f => ({ ...f, opening_hook: e.target.value }))} placeholder="第一章如何吸引读者" className="hh-field" />
             </div>
-          </div>
-          <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
-            <button onClick={() => setShowModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
-            <button onClick={handleSubmit} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">确定</button>
           </div>
         </Modal>
       )}
@@ -451,10 +512,19 @@ function OutlinesView({ outlines, projectId, createOutline, updateOutline, delet
           return JSON.stringify(v);
         };
         return (
-          <Modal title={`查看大纲：${viewingOutline.title}`} onClose={() => setViewingOutline(null)} size="2xl">
-            <div className="space-y-3">
-              <div className="flex items-center gap-2 text-xs text-content-secondary">
-                {viewingOutline.is_active && <span className="bg-green-100 text-green-700 rounded px-1.5 py-0.5">活跃</span>}
+          <Modal
+            title={`查看大纲：${viewingOutline.title}`}
+            onClose={() => setViewingOutline(null)}
+            size="2xl"
+            footer={(
+              <button onClick={() => { setViewingOutline(null); openEdit(viewingOutline); }} className="hh-btn-primary">
+                <Pencil className="h-3.5 w-3.5" />编辑
+              </button>
+            )}
+          >
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-content-secondary">
+                {viewingOutline.is_active && <span className={cn(STATUS_TAG, 'bg-emerald-50 text-emerald-600')}>活跃</span>}
                 {viewingOutline.version != null && <span>版本 v{viewingOutline.version}</span>}
                 <span>创建于 {new Date(viewingOutline.created_at).toLocaleString()}</span>
               </div>
@@ -463,28 +533,22 @@ function OutlinesView({ outlines, projectId, createOutline, updateOutline, delet
                   const val = parsed![key];
                   if (!val) return null;
                   return (
-                    <div key={key} className="bg-surface-hover/50 border border-surface-border rounded-btn p-3">
-                      <div className="text-xs font-semibold text-brand mb-1">{label}</div>
-                      <div className="text-sm whitespace-pre-wrap leading-relaxed">{renderValue(val)}</div>
+                    <div key={key} className="hh-subpanel p-4">
+                      <p className="text-xs font-medium text-content-tertiary">{label}</p>
+                      <p className="mt-1.5 whitespace-pre-wrap text-sm leading-7 text-content">{renderValue(val)}</p>
                     </div>
                   );
                 }) : (
-                  <div className="bg-surface-hover/50 border border-surface-border rounded-btn p-4 text-sm whitespace-pre-wrap leading-relaxed">
+                  <div className="hh-subpanel whitespace-pre-wrap p-4 text-sm leading-7 text-content">
                     {viewingOutline.content}
                   </div>
                 )}
               </div>
             </div>
-            <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
-              <button onClick={() => { setViewingOutline(null); openEdit(viewingOutline); }} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm inline-flex items-center gap-1.5">
-                <Pencil className="w-3.5 h-3.5" />编辑
-              </button>
-              <button onClick={() => setViewingOutline(null)} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">关闭</button>
-            </div>
           </Modal>
         );
       })()}
-    </div>
+    </section>
   )
 }
 // ==================== Tab 2: 剧情卡片 ====================
@@ -549,116 +613,135 @@ function PlotCardsView({ plotCards, projectId, outlines, createPlotCard, updateP
     try { await deletePlotCard(c.id) } catch { /* hook 已 toast */ }
   }
 
-  const typeColor = (t: string) => {
-    const map: Record<string, string> = { '起因': 'bg-blue-100 text-blue-700', '经过': 'bg-yellow-100 text-yellow-700', '高潮': 'bg-red-100 text-red-700', '结局': 'bg-green-100 text-green-700', '伏笔': 'bg-purple-100 text-purple-700', '转折': 'bg-orange-100 text-orange-700' }
-    return map[t] || 'bg-gray-100 text-gray-700'
-  }
-
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold text-content">剧情卡片</h2>
-        <div className="flex gap-2">
-          <button onClick={() => setShowGenModal(true)} disabled={generating} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-3 py-2 text-sm transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
-            {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+    <section className="hh-panel p-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h2 className="text-lg font-semibold tracking-tight text-content">剧情卡片</h2>
+          <p className="mt-1 text-sm leading-6 text-content-secondary">
+            把大纲拆成一张张可排序的剧情片段，按起因、经过、高潮、结局组织，共 {plotCards.length} 张。
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2.5">
+          <button onClick={() => setShowGenModal(true)} disabled={generating} className="hh-btn-secondary">
+            {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-brand" />}
             AI 生成
           </button>
-          <button onClick={openCreate} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5">
-            <Plus className="w-4 h-4" />新建卡片
+          <button onClick={openCreate} className="hh-btn-primary">
+            <Plus className="h-4 w-4" />
+            新建卡片
           </button>
         </div>
       </div>
 
       {plotCards.length === 0 ? (
-        <div className="text-center py-12 text-content-secondary text-sm">暂无剧情卡片</div>
+        <EmptyBlock
+          icon={LayoutGrid}
+          title="还没有剧情卡片"
+          hint="点击右上角「新建卡片」手动添加，或用「AI 生成」基于活跃的故事大纲批量生成剧情片段。"
+        />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {[...plotCards].sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0)).map(c => (
-            <div key={c.id} className="bg-white border border-surface-border rounded-card p-4 flex flex-col gap-2">
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold text-content truncate flex-1">{c.title}</h3>
-                <div className="flex gap-1 shrink-0">
-                  <button onClick={() => openEdit(c)} className="p-1 rounded hover:bg-surface-hover text-content-secondary transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
-                  <button onClick={() => handleDelete(c)} className="p-1 rounded hover:bg-red-50 text-content-secondary hover:text-red-500 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+            <article key={c.id} className="hh-subpanel flex flex-col gap-2 p-4">
+              <div className="flex items-start justify-between gap-2">
+                <h3 className="min-w-0 flex-1 truncate text-[15px] font-semibold text-content">{c.title}</h3>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button onClick={() => openEdit(c)} className="hh-icon-btn-plain h-8 w-8" title="编辑"><Pencil className="h-3.5 w-3.5" /></button>
+                  <button onClick={() => handleDelete(c)} className="hh-icon-btn-plain h-8 w-8 hover:text-red-500" title="删除"><Trash2 className="h-3.5 w-3.5" /></button>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <span className={cn("text-xs rounded px-1.5 py-0.5", typeColor(c.card_type))}>{c.card_type}</span>
-                {c.order_index != null && <span className="text-xs text-content-secondary">#{c.order_index + 1}</span>}
+                <span className={cn(STATUS_TAG, 'bg-brand/10 text-brand')}>{c.card_type}</span>
+                {c.order_index != null && <span className="text-xs text-content-tertiary tabular-nums">#{c.order_index + 1}</span>}
               </div>
-              {c.content && <p className="text-xs text-content-secondary line-clamp-3">{c.content}</p>}
-            </div>
+              {c.content && <p className="line-clamp-3 text-[13px] leading-6 text-content-secondary">{c.content}</p>}
+            </article>
           ))}
         </div>
       )}
 
       {showGenModal && (
-        <Modal title="AI 生成剧情卡片" onClose={() => setShowGenModal(false)}>
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
+        <Modal
+          title="AI 生成剧情卡片"
+          onClose={() => setShowGenModal(false)}
+          closeOnMaskClick={false}
+          footer={(
+            <>
+              <button onClick={() => setShowGenModal(false)} className="hh-btn-ghost">取消</button>
+              <button onClick={handleGenerate} disabled={generating} className="hh-btn-primary">
+                {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                开始生成
+              </button>
+            </>
+          )}
+        >
+          <div className="space-y-5">
+            <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <label className="block text-sm text-content-secondary mb-1">卡片类型</label>
-                <select value={genForm.card_type} onChange={e => setGenForm(f => ({ ...f, card_type: e.target.value }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand outline-none bg-white">
+                <label className="hh-label">卡片类型</label>
+                <select value={genForm.card_type} onChange={e => setGenForm(f => ({ ...f, card_type: e.target.value }))} className="hh-field">
                   {CARD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-sm text-content-secondary mb-1">生成数量</label>
-                <input type="number" min={1} max={20} value={genForm.count} onChange={e => setGenForm(f => ({ ...f, count: Number(e.target.value) }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand outline-none" />
+                <label className="hh-label">生成数量</label>
+                <input type="number" min={1} max={20} value={genForm.count} onChange={e => setGenForm(f => ({ ...f, count: Number(e.target.value) }))} className="hh-field" />
               </div>
             </div>
             <div>
-              <label className="block text-sm text-content-secondary mb-1">从已有卡片延伸（可选）</label>
-              <select value={genForm.extend_from_card_id} onChange={e => setGenForm(f => ({ ...f, extend_from_card_id: e.target.value }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand outline-none bg-white">
+              <label className="hh-label">从已有卡片延伸（可选）</label>
+              <select value={genForm.extend_from_card_id} onChange={e => setGenForm(f => ({ ...f, extend_from_card_id: e.target.value }))} className="hh-field">
                 <option value="">不指定</option>
                 {plotCards.map(c => <option key={c.id} value={c.id}>{c.title} [{c.card_type}]</option>)}
               </select>
             </div>
             <div>
-              <label className="block text-sm text-content-secondary mb-1">提示词（可选）</label>
-              <textarea value={genForm.prompt} onChange={e => setGenForm(f => ({ ...f, prompt: e.target.value }))} placeholder="对剧情卡片的特殊要求..." rows={2} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand outline-none resize-none" />
+              <label className="hh-label">提示词（可选）</label>
+              <textarea value={genForm.prompt} onChange={e => setGenForm(f => ({ ...f, prompt: e.target.value }))} placeholder="对剧情卡片的特殊要求..." rows={2} className="hh-textarea" />
             </div>
             <MCPSelector value={{ enable: genEnableMcp, selected: genPlugins }} onChange={({ enable, selected }) => { setGenEnableMcp(enable); setGenPlugins(selected) }} />
-          </div>
-          <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
-            <button onClick={() => setShowGenModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
-            <button onClick={handleGenerate} disabled={generating} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
-              {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-              开始生成
-            </button>
           </div>
         </Modal>
       )}
 
       {showModal && (
-        <Modal title={editing ? '编辑剧情卡片' : '新建剧情卡片'} onClose={() => setShowModal(false)}>
-          <div className="space-y-3">
+        <Modal
+          title={editing ? '编辑剧情卡片' : '新建剧情卡片'}
+          onClose={() => setShowModal(false)}
+          closeOnMaskClick={false}
+          footer={(
+            <>
+              <button onClick={() => setShowModal(false)} className="hh-btn-ghost">取消</button>
+              <button onClick={handleSubmit} className="hh-btn-primary">确定</button>
+            </>
+          )}
+        >
+          <div className="space-y-5">
             <div>
-              <label className="block text-sm text-content-secondary mb-1">标题</label>
-              <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+              <label className="hh-label">标题</label>
+              <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} className="hh-field" />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="hh-label">类型</label>
+                <select value={form.card_type} onChange={e => setForm(f => ({ ...f, card_type: e.target.value }))} className="hh-field">
+                  {CARD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="hh-label">排序号</label>
+                <input type="number" value={form.order_index} onChange={e => setForm(f => ({ ...f, order_index: Number(e.target.value) }))} className="hh-field" />
+              </div>
             </div>
             <div>
-              <label className="block text-sm text-content-secondary mb-1">类型</label>
-              <select value={form.card_type} onChange={e => setForm(f => ({ ...f, card_type: e.target.value }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors bg-white">
-                {CARD_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
+              <label className="hh-label">内容</label>
+              <textarea value={form.content} onChange={e => setForm(f => ({ ...f, content: e.target.value }))} rows={5} className="hh-textarea" />
             </div>
-            <div>
-              <label className="block text-sm text-content-secondary mb-1">排序号</label>
-              <input type="number" value={form.order_index} onChange={e => setForm(f => ({ ...f, order_index: Number(e.target.value) }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
-            </div>
-            <div>
-              <label className="block text-sm text-content-secondary mb-1">内容</label>
-              <textarea value={form.content} onChange={e => setForm(f => ({ ...f, content: e.target.value }))} rows={5} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors resize-none" />
-            </div>
-          </div>
-          <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
-            <button onClick={() => setShowModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
-            <button onClick={handleSubmit} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">确定</button>
           </div>
         </Modal>
       )}
-    </div>
+    </section>
   )
 }
 // ==================== Tab 3: 剧情线 ====================
@@ -862,260 +945,296 @@ function PlotLinesView({ plotLines, projectId, outlines, plotCards, createPlotLi
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold text-content">剧情线</h2>
-        <div className="flex gap-2">
-          <button onClick={() => setShowGenModal(true)} disabled={generating} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-3 py-2 text-sm transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
-            {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+    <section className="hh-panel p-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h2 className="text-lg font-semibold tracking-tight text-content">剧情线</h2>
+          <p className="mt-1 text-sm leading-6 text-content-secondary">
+            主线、支线与伏笔线各自的推进节奏；节点权重决定章纲覆盖时的进度计算，共 {plotLines.length} 条。
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2.5">
+          <button onClick={() => setShowGenModal(true)} disabled={generating} className="hh-btn-secondary">
+            {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-brand" />}
             AI 生成
           </button>
-          <button onClick={openCreate} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5">
-            <Plus className="w-4 h-4" />新建剧情线
+          <button onClick={openCreate} className="hh-btn-primary">
+            <Plus className="h-4 w-4" />
+            新建剧情线
           </button>
         </div>
       </div>
 
       {plotLines.length === 0 ? (
-        <div className="text-center py-12 text-content-secondary text-sm">暂无剧情线</div>
+        <EmptyBlock
+          icon={GitBranch}
+          title="还没有剧情线"
+          hint="点击右上角「新建剧情线」手动规划，或用「AI 生成」基于故事大纲与剧情卡片生成主线和支线。"
+        />
       ) : (
-        <div className="space-y-3">
+        <div className="mt-6 space-y-3">
           {plotLines.map(l => (
-            <div key={l.id} className="bg-white border border-surface-border rounded-card p-4 space-y-3">
+            <article key={l.id} className="hh-subpanel p-4">
               <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <GitBranch className="w-4 h-4 text-content-secondary shrink-0" />
-                    <h3 className="text-sm font-semibold text-content truncate">{l.title}</h3>
-                    <span className={cn("text-xs rounded px-1.5 py-0.5", getPlotLineTypeColor(l.line_type))}>{getPlotLineTypeLabel(l.line_type)}</span>
-                  </div>
-                  {l.description && <p className="text-xs text-content-secondary mt-1.5 line-clamp-2">{l.description}</p>}
-                  <div className="flex items-center gap-3 mt-2 text-xs text-content-secondary">
-                    {l.plot_card_count != null && <span>关联卡片: {l.plot_card_count}</span>}
-                    {l.chapter_outline_count != null && <span>关联章纲: {l.chapter_outline_count}</span>}
-                    {l.estimated_chapters != null && l.estimated_chapters > 0 && <span>预计章节: {l.estimated_chapters}</span>}
+                <div className="flex min-w-0 flex-1 items-start gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center bg-brand/10 text-brand">
+                    <GitBranch className="h-5 w-5" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="min-w-0 max-w-full truncate text-[15px] font-semibold text-content">{l.title}</h3>
+                      <span className={cn(STATUS_TAG, getPlotLineTypeColor(l.line_type))}>{getPlotLineTypeLabel(l.line_type)}</span>
+                    </div>
+                    {l.description && <p className="mt-1.5 line-clamp-2 text-[13px] leading-6 text-content-secondary">{l.description}</p>}
+                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-content-tertiary tabular-nums">
+                      {l.plot_card_count != null && <span>关联卡片: {l.plot_card_count}</span>}
+                      {l.chapter_outline_count != null && <span>关联章纲: {l.chapter_outline_count}</span>}
+                      {l.estimated_chapters != null && l.estimated_chapters > 0 && <span>预计章节: {l.estimated_chapters}</span>}
+                    </div>
                   </div>
                 </div>
-                <div className="flex gap-1 shrink-0">
-                  <button onClick={() => openView(l)} className="p-1.5 rounded hover:bg-surface-hover text-content-secondary transition-colors" title="查看详情"><Eye className="w-3.5 h-3.5" /></button>
-                  <button onClick={() => openEdit(l)} className="p-1.5 rounded hover:bg-surface-hover text-content-secondary transition-colors" title="编辑剧情线与节点"><Pencil className="w-3.5 h-3.5" /></button>
-                  <button onClick={() => handleDelete(l)} className="p-1.5 rounded hover:bg-red-50 text-content-secondary hover:text-red-500 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button onClick={() => openView(l)} className="hh-icon-btn-plain h-8 w-8" title="查看详情"><Eye className="h-3.5 w-3.5" /></button>
+                  <button onClick={() => openEdit(l)} className="hh-icon-btn-plain h-8 w-8" title="编辑剧情线与节点"><Pencil className="h-3.5 w-3.5" /></button>
+                  <button onClick={() => handleDelete(l)} className="hh-icon-btn-plain h-8 w-8 hover:text-red-500" title="删除"><Trash2 className="h-3.5 w-3.5" /></button>
                 </div>
               </div>
               {Array.isArray(l.timeline_data?.beats) && l.timeline_data.beats.length > 0 ? (
-                <div className="rounded-btn border border-surface-border bg-surface/40 p-3">
+                <div className="mt-4 border-t border-surface-border/80 pt-3">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-xs font-medium text-content">剧情节点</p>
-                    <span className="text-xs text-content-secondary">{l.timeline_data.beats.length} 个</span>
+                    <span className="text-xs text-content-tertiary tabular-nums">{l.timeline_data.beats.length} 个</span>
                   </div>
-                  <div className="mt-2 space-y-2">
+                  <div className="mt-1 divide-y divide-surface-border/80">
                     {l.timeline_data.beats.slice(0, 4).map((beat: TimelineBeat) => (
-                      <div key={`${l.id}-${beat.index}`} className="rounded-btn bg-white border border-surface-border px-3 py-2">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="text-xs font-medium text-content truncate">节点 {beat.index} · {beat.title}</p>
-                            {beat.description && <p className="text-xs text-content-secondary mt-1 line-clamp-2">{beat.description}</p>}
-                          </div>
-                          <span className="text-[11px] text-content-secondary shrink-0">权重 {(Number(beat.weight) * 100).toFixed(0)}%</span>
+                      <div key={`${l.id}-${beat.index}`} className="flex items-center justify-between gap-3 py-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-medium text-content">节点 {beat.index} · {beat.title}</p>
+                          {beat.description && <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-content-secondary">{beat.description}</p>}
                         </div>
+                        <span className="shrink-0 text-[11px] text-content-tertiary tabular-nums">权重 {(Number(beat.weight) * 100).toFixed(0)}%</span>
                       </div>
                     ))}
-                    {l.timeline_data.beats.length > 4 && (
-                      <p className="text-xs text-content-tertiary">还有 {l.timeline_data.beats.length - 4} 个节点，点右侧小眼睛可查看全部。</p>
-                    )}
                   </div>
+                  {l.timeline_data.beats.length > 4 && (
+                    <p className="mt-2 text-xs text-content-tertiary">还有 {l.timeline_data.beats.length - 4} 个节点，点击右侧「查看详情」可查看全部。</p>
+                  )}
                 </div>
               ) : (
-                <div className="rounded-btn border border-dashed border-surface-border px-3 py-2 text-xs text-content-tertiary">
-                  暂无节点，点击右侧铅笔可直接补充剧情节点。
+                <div className="mt-4 border border-dashed border-surface-border px-3 py-2.5 text-xs text-content-tertiary">
+                  暂无节点，点击右侧「编辑」可直接补充剧情节点。
                 </div>
               )}
-            </div>
+            </article>
           ))}
         </div>
       )}
 
       {showGenModal && (
-        <Modal title="AI 生成剧情线" onClose={() => setShowGenModal(false)}>
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
+        <Modal
+          title="AI 生成剧情线"
+          onClose={() => setShowGenModal(false)}
+          closeOnMaskClick={false}
+          footer={(
+            <>
+              <button onClick={() => setShowGenModal(false)} className="hh-btn-ghost">取消</button>
+              <button onClick={handleGenerate} disabled={generating} className="hh-btn-primary">
+                {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                开始生成
+              </button>
+            </>
+          )}
+        >
+          <div className="space-y-5">
+            <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <label className="block text-sm text-content-secondary mb-1">剧情线类型</label>
-                <select value={genForm.line_type} onChange={e => setGenForm(f => ({ ...f, line_type: e.target.value }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand outline-none bg-white">
+                <label className="hh-label">剧情线类型</label>
+                <select value={genForm.line_type} onChange={e => setGenForm(f => ({ ...f, line_type: e.target.value }))} className="hh-field">
                   {lineTypes.map(t => <option key={t} value={t}>{getPlotLineTypeLabel(t)}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-sm text-content-secondary mb-1">生成数量</label>
-                <input type="number" min={1} max={10} value={genForm.count} onChange={e => setGenForm(f => ({ ...f, count: Number(e.target.value) }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand outline-none" />
+                <label className="hh-label">生成数量</label>
+                <input type="number" min={1} max={10} value={genForm.count} onChange={e => setGenForm(f => ({ ...f, count: Number(e.target.value) }))} className="hh-field" />
               </div>
             </div>
             <div>
-              <label className="block text-sm text-content-secondary mb-1">基于已有剧情线（可选，保持连贯性）</label>
-              <div className="border border-surface-border rounded-btn p-2 max-h-32 overflow-y-auto space-y-1">
+              <label className="hh-label">基于已有剧情线（可选，保持连贯性）</label>
+              <div className="hh-subpanel max-h-32 space-y-0.5 overflow-y-auto p-1.5">
                 {plotLines.length > 0 ? plotLines.map(pl => (
-                  <label key={pl.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-surface-hover rounded px-1 py-0.5">
+                  <label key={pl.id} className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-sm text-content hover:bg-brand/5">
                     <input type="checkbox" checked={genForm.based_on_lines.includes(pl.id)} onChange={e => {
                       setGenForm(f => ({ ...f, based_on_lines: e.target.checked ? [...f.based_on_lines, pl.id] : f.based_on_lines.filter(id => id !== pl.id) }))
-                    }} className="w-3.5 h-3.5" />
+                    }} className="h-3.5 w-3.5" />
                     <span>{pl.title}</span>
-                    <span className="text-xs text-content-secondary">[{getPlotLineTypeLabel(pl.line_type)}]</span>
+                    <span className="text-xs text-content-tertiary">[{getPlotLineTypeLabel(pl.line_type)}]</span>
                   </label>
-                )) : <p className="text-xs text-content-secondary py-1">暂无已有剧情线</p>}
+                )) : <p className="px-2 py-1.5 text-xs text-content-tertiary">暂无已有剧情线</p>}
               </div>
             </div>
             <div>
-              <label className="block text-sm text-content-secondary mb-1">基于剧情卡片（可选）</label>
-              <div className="border border-surface-border rounded-btn p-2 max-h-32 overflow-y-auto space-y-1">
+              <label className="hh-label">基于剧情卡片（可选）</label>
+              <div className="hh-subpanel max-h-32 space-y-0.5 overflow-y-auto p-1.5">
                 {plotCards.length > 0 ? plotCards.map(pc => (
-                  <label key={pc.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-surface-hover rounded px-1 py-0.5">
+                  <label key={pc.id} className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-sm text-content hover:bg-brand/5">
                     <input type="checkbox" checked={genForm.based_on_cards.includes(pc.id)} onChange={e => {
                       setGenForm(f => ({ ...f, based_on_cards: e.target.checked ? [...f.based_on_cards, pc.id] : f.based_on_cards.filter(id => id !== pc.id) }))
-                    }} className="w-3.5 h-3.5" />
+                    }} className="h-3.5 w-3.5" />
                     <span>{pc.title}</span>
-                    <span className="text-xs text-content-secondary">[{pc.card_type}]</span>
+                    <span className="text-xs text-content-tertiary">[{pc.card_type}]</span>
                   </label>
-                )) : <p className="text-xs text-content-secondary py-1">暂无剧情卡片</p>}
+                )) : <p className="px-2 py-1.5 text-xs text-content-tertiary">暂无剧情卡片</p>}
               </div>
             </div>
             <div>
-              <label className="block text-sm text-content-secondary mb-1">提示词（可选）</label>
-              <textarea value={genForm.prompt} onChange={e => setGenForm(f => ({ ...f, prompt: e.target.value }))} placeholder="对剧情线的特殊要求..." rows={2} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand outline-none resize-none" />
+              <label className="hh-label">提示词（可选）</label>
+              <textarea value={genForm.prompt} onChange={e => setGenForm(f => ({ ...f, prompt: e.target.value }))} placeholder="对剧情线的特殊要求..." rows={2} className="hh-textarea" />
             </div>
             <MCPSelector value={{ enable: genEnableMcp, selected: genPlugins }} onChange={({ enable, selected }) => { setGenEnableMcp(enable); setGenPlugins(selected) }} />
-          </div>
-          <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
-            <button onClick={() => setShowGenModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
-            <button onClick={handleGenerate} disabled={generating} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
-              {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-              开始生成
-            </button>
           </div>
         </Modal>
       )}
 
       {showModal && (
-        <Modal title={editing ? '编辑剧情线' : '新建剧情线'} onClose={() => setShowModal(false)} size="2xl">
-          <div className="space-y-3">
+        <Modal
+          title={editing ? '编辑剧情线' : '新建剧情线'}
+          onClose={() => setShowModal(false)}
+          size="2xl"
+          closeOnMaskClick={false}
+          footer={(
+            <>
+              <button onClick={() => setShowModal(false)} className="hh-btn-ghost">取消</button>
+              <button onClick={handleSubmit} className="hh-btn-primary">确定</button>
+            </>
+          )}
+        >
+          <div className="space-y-5">
             <div>
-              <label className="block text-sm text-content-secondary mb-1">名称</label>
-              <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+              <label className="hh-label">名称</label>
+              <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} className="hh-field" />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="hh-label">类型</label>
+                <select value={form.line_type} onChange={e => setForm(f => ({ ...f, line_type: e.target.value }))} className="hh-field">
+                  {lineTypes.map(t => <option key={t} value={t}>{getPlotLineTypeLabel(t)}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="hh-label">预计章节数</label>
+                <input type="number" value={form.estimated_chapters} onChange={e => setForm(f => ({ ...f, estimated_chapters: Number(e.target.value) }))} className="hh-field" />
+              </div>
             </div>
             <div>
-              <label className="block text-sm text-content-secondary mb-1">类型</label>
-              <select value={form.line_type} onChange={e => setForm(f => ({ ...f, line_type: e.target.value }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors bg-white">
-                {lineTypes.map(t => <option key={t} value={t}>{getPlotLineTypeLabel(t)}</option>)}
-              </select>
+              <label className="hh-label">描述</label>
+              <textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} rows={4} className="hh-textarea" />
             </div>
-            <div>
-              <label className="block text-sm text-content-secondary mb-1">预计章节数</label>
-              <input type="number" value={form.estimated_chapters} onChange={e => setForm(f => ({ ...f, estimated_chapters: Number(e.target.value) }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
-            </div>
-            <div>
-              <label className="block text-sm text-content-secondary mb-1">描述</label>
-              <textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} rows={4} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors resize-none" />
-            </div>
-            <div className="rounded-card border border-surface-border p-3 space-y-3">
-              <div className="flex items-center justify-between gap-3">
+            <div className="hh-subpanel space-y-4 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <p className="text-sm font-medium text-content">剧情节点</p>
-                  <p className="text-xs text-content-secondary mt-1">可直接编辑节点标题、描述和权重，权重总和需要接近 1.00。</p>
+                  <p className="mt-1 text-xs leading-5 text-content-secondary">可直接编辑节点标题、描述和权重，权重总和需要接近 1.00。</p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex shrink-0 items-center gap-2">
                   {form.beats.length > 1 && (
-                    <button onClick={() => setForm(prev => ({ ...prev, beats: rebalanceBeats(prev.beats) }))} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-3 py-2 text-xs transition-colors">
+                    <button onClick={() => setForm(prev => ({ ...prev, beats: rebalanceBeats(prev.beats) }))} className="hh-btn-ghost hh-btn-sm">
                       平均分配权重
                     </button>
                   )}
-                  <button onClick={handleAddBeat} className="bg-surface-hover hover:bg-surface-border/70 text-content rounded-btn px-3 py-2 text-xs transition-colors inline-flex items-center gap-1.5">
-                    <Plus className="w-3.5 h-3.5" />添加节点
+                  <button onClick={handleAddBeat} className="hh-btn-secondary hh-btn-sm">
+                    <Plus className="h-3.5 w-3.5" />添加节点
                   </button>
                 </div>
               </div>
 
               {form.beats.length === 0 ? (
-                <div className="rounded-btn border border-dashed border-surface-border px-3 py-4 text-xs text-content-tertiary">
-                  还没有节点。添加后就能在列表里看到节点摘要，也能在小眼睛里看完整进度。
+                <div className="border border-dashed border-surface-border px-4 py-5 text-center text-xs leading-5 text-content-tertiary">
+                  还没有节点。添加后就能在列表里看到节点摘要，也能在详情里看到完整进度。
                 </div>
               ) : (
-                <div className="space-y-3 max-h-[42vh] overflow-y-auto pr-1">
+                <div className="max-h-[42vh] space-y-3 overflow-y-auto pr-1">
                   {form.beats.map((beat, index) => (
-                    <div key={`beat-editor-${index}`} className="rounded-btn border border-surface-border p-3 space-y-3">
+                    <div key={`beat-editor-${index}`} className="space-y-3 border border-surface-border bg-white/70 p-4">
                       <div className="flex items-center justify-between gap-3">
                         <p className="text-sm font-medium text-content">节点 {index + 1}</p>
-                        <button onClick={() => handleRemoveBeat(index)} className="p-1.5 rounded hover:bg-red-50 text-content-secondary hover:text-red-500 transition-colors" title="删除节点">
-                          <Trash2 className="w-3.5 h-3.5" />
+                        <button onClick={() => handleRemoveBeat(index)} className="hh-icon-btn-plain h-8 w-8 hover:text-red-500" title="删除节点">
+                          <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                         <div>
-                          <label className="block text-xs text-content-secondary mb-1">节点标题</label>
-                          <input value={beat.title} onChange={e => handleBeatChange(index, 'title', e.target.value)} placeholder={`例如：节点 ${index + 1}`} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+                          <label className="hh-label">节点标题</label>
+                          <input value={beat.title} onChange={e => handleBeatChange(index, 'title', e.target.value)} placeholder={`例如：节点 ${index + 1}`} className="hh-field" />
                         </div>
                         <div>
-                          <label className="block text-xs text-content-secondary mb-1">节点标识</label>
-                          <input value={beat.key} onChange={e => handleBeatChange(index, 'key', e.target.value)} placeholder={`beat_${index + 1}`} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+                          <label className="hh-label">节点标识</label>
+                          <input value={beat.key} onChange={e => handleBeatChange(index, 'key', e.target.value)} placeholder={`beat_${index + 1}`} className="hh-field" />
                         </div>
                       </div>
                       <div>
-                        <label className="block text-xs text-content-secondary mb-1">节点描述</label>
-                        <textarea value={beat.description} onChange={e => handleBeatChange(index, 'description', e.target.value)} rows={3} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors resize-none" />
+                        <label className="hh-label">节点描述</label>
+                        <textarea value={beat.description} onChange={e => handleBeatChange(index, 'description', e.target.value)} rows={3} className="hh-textarea" />
                       </div>
                       <div>
-                        <label className="block text-xs text-content-secondary mb-1">权重</label>
-                        <input type="number" min={0} max={1} step={0.01} value={beat.weight} onChange={e => handleBeatChange(index, 'weight', e.target.value)} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+                        <label className="hh-label">权重</label>
+                        <input type="number" min={0} max={1} step={0.01} value={beat.weight} onChange={e => handleBeatChange(index, 'weight', e.target.value)} className="hh-field" />
                       </div>
                     </div>
                   ))}
                 </div>
               )}
 
-              <div className={cn('rounded-btn px-3 py-2 text-xs', weightIsValid ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200')}>
+              <div className={cn('px-3 py-2 text-xs font-medium', weightIsValid ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600')}>
                 当前权重总和：{totalWeight.toFixed(2)}{weightIsValid ? '，可以保存。' : '，请调整到 1.00 附近。'}
               </div>
             </div>
-          </div>
-          <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
-            <button onClick={() => setShowModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
-            <button onClick={handleSubmit} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">确定</button>
           </div>
         </Modal>
       )}
 
       {viewing && (
-        <Modal title={`剧情线详情：${viewing.title}`} onClose={() => { setViewing(null); setViewingProgress(null) }} size="2xl">
+        <Modal
+          title={`剧情线详情：${viewing.title}`}
+          onClose={() => { setViewing(null); setViewingProgress(null) }}
+          size="2xl"
+          footer={(
+            <button onClick={() => { const current = viewing; setViewing(null); setViewingProgress(null); if (current) openEdit(current) }} className="hh-btn-primary">
+              <Pencil className="h-3.5 w-3.5" />编辑节点
+            </button>
+          )}
+        >
           <div className="space-y-5">
             {/* 顶部元信息栏 */}
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              <span className={cn('rounded-full px-3 py-1 text-xs font-medium', getPlotLineTypeColor(viewing.line_type))}>{getPlotLineTypeLabel(viewing.line_type)}</span>
-              <div className="flex items-center gap-4 text-xs text-content-secondary">
+              <span className={cn(STATUS_TAG, getPlotLineTypeColor(viewing.line_type))}>{getPlotLineTypeLabel(viewing.line_type)}</span>
+              <div className="flex flex-wrap items-center gap-4 text-xs text-content-secondary tabular-nums">
                 {viewing.estimated_chapters != null && viewing.estimated_chapters > 0 && (
-                  <span className="inline-flex items-center gap-1"><BookOpen className="w-3.5 h-3.5" />预计 {viewing.estimated_chapters} 章</span>
+                  <span className="inline-flex items-center gap-1"><BookOpen className="h-3.5 w-3.5" />预计 {viewing.estimated_chapters} 章</span>
                 )}
-                <span className="inline-flex items-center gap-1"><Link2 className="w-3.5 h-3.5" />章纲 {viewing.chapter_outline_count ?? 0}</span>
-                <span className="inline-flex items-center gap-1"><LayoutGrid className="w-3.5 h-3.5" />卡片 {viewing.plot_card_count ?? 0}</span>
+                <span className="inline-flex items-center gap-1"><Link2 className="h-3.5 w-3.5" />章纲 {viewing.chapter_outline_count ?? 0}</span>
+                <span className="inline-flex items-center gap-1"><LayoutGrid className="h-3.5 w-3.5" />卡片 {viewing.plot_card_count ?? 0}</span>
               </div>
             </div>
 
             {/* 剧情简介 */}
             {viewing.description && (
-              <div className="rounded-lg border border-surface-border bg-gradient-to-br from-surface/60 to-surface-hover/30 p-4">
-                <p className="text-xs font-medium text-content-secondary mb-2 uppercase tracking-wider">剧情简介</p>
-                <p className="text-sm text-content leading-relaxed whitespace-pre-wrap">{viewing.description}</p>
+              <div className="hh-subpanel p-4">
+                <p className="text-xs font-medium text-content-tertiary">剧情简介</p>
+                <p className="mt-1.5 whitespace-pre-wrap text-sm leading-7 text-content">{viewing.description}</p>
               </div>
             )}
 
             {/* 整体进度概览 */}
             {!loadingProgress && viewingProgress?.has_beats && (
-              <div className="rounded-lg bg-gradient-to-r from-brand/5 via-brand/10 to-brand/5 border border-brand/20 p-4">
-                <div className="flex items-center justify-between mb-3">
+              <div className="hh-subpanel p-4">
+                <div className="flex items-center justify-between">
                   <p className="text-sm font-semibold text-content">整体进度</p>
-                  <span className="text-lg font-bold text-brand">{((viewingProgress.total_progress || 0) * 100).toFixed(1)}%</span>
+                  <span className="text-lg font-semibold text-brand tabular-nums">{((viewingProgress.total_progress || 0) * 100).toFixed(1)}%</span>
                 </div>
-                <div className="h-2.5 rounded-full bg-white/80 overflow-hidden shadow-inner">
-                  <div className="h-full rounded-full bg-gradient-to-r from-brand to-brand-600 transition-all duration-500" style={{ width: `${Math.max(0, Math.min(100, (viewingProgress.total_progress || 0) * 100))}%` }} />
+                <div className="hh-progress mt-3">
+                  <div className="hh-progress-bar" style={{ width: `${Math.max(0, Math.min(100, (viewingProgress.total_progress || 0) * 100))}%` }} />
                 </div>
-                <p className="text-xs text-content-secondary mt-2">已关联 {viewingProgress.linked_chapters_count} 个章纲 · 共 {viewingProgress.beats.length} 个节点</p>
+                <p className="mt-2 text-xs text-content-secondary">已关联 {viewingProgress.linked_chapters_count} 个章纲 · 共 {viewingProgress.beats.length} 个节点</p>
               </div>
             )}
 
@@ -1123,68 +1242,50 @@ function PlotLinesView({ plotLines, projectId, outlines, plotCards, createPlotLi
             <div className="space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-sm font-semibold text-content">节点详情</p>
-                {loadingProgress && <Loader2 className="w-4 h-4 animate-spin text-content-secondary" />}
+                {loadingProgress && <Loader2 className="h-4 w-4 animate-spin text-content-secondary" />}
               </div>
 
               {loadingProgress ? (
                 <div className="flex items-center justify-center py-8">
                   <div className="flex flex-col items-center gap-2">
-                    <Loader2 className="w-6 h-6 animate-spin text-brand" />
+                    <Loader2 className="h-6 w-6 animate-spin text-brand" />
                     <span className="text-xs text-content-secondary">加载节点进度中…</span>
                   </div>
                 </div>
               ) : viewingProgress?.has_beats ? (
-                <div className="grid grid-cols-1 gap-3 max-h-[50vh] overflow-y-auto pr-1">
+                <div className="grid max-h-[50vh] grid-cols-1 gap-3 overflow-y-auto pr-1">
                   {viewingProgress.beats.map(beat => {
                     const isCompleted = beat.status === 'completed'
                     const isInProgress = beat.status === 'in_progress'
-                    const statusDot = isCompleted
-                      ? 'bg-emerald-500'
-                      : isInProgress
-                        ? 'bg-blue-500 animate-pulse'
-                        : 'bg-gray-300'
                     const statusText = isCompleted ? '已完成' : isInProgress ? '进行中' : '未开始'
-                    const cardBorder = isCompleted
-                      ? 'border-emerald-200'
+                    const statusTag = isCompleted
+                      ? 'bg-emerald-50 text-emerald-600'
                       : isInProgress
-                        ? 'border-blue-200'
-                        : 'border-surface-border'
-                    const barColor = isCompleted
-                      ? 'bg-gradient-to-r from-emerald-400 to-emerald-500'
-                      : isInProgress
-                        ? 'bg-gradient-to-r from-blue-400 to-blue-500'
-                        : 'bg-gray-200'
+                        ? 'bg-amber-50 text-amber-600'
+                        : 'bg-surface-hover text-content-secondary'
 
                     return (
-                      <div key={`progress-${beat.index}`} className={cn('rounded-lg border bg-white p-4 transition-shadow hover:shadow-sm', cardBorder)}>
+                      <div key={`progress-${beat.index}`} className="hh-subpanel p-4">
                         <div className="flex items-start gap-3">
                           {/* 序号指示器 */}
-                          <div className="flex flex-col items-center gap-1 pt-0.5">
-                            <span className="flex items-center justify-center w-7 h-7 rounded-full bg-surface-hover text-xs font-bold text-content">{beat.index}</span>
-                            <span className={cn('w-2 h-2 rounded-full shrink-0', statusDot)} />
-                          </div>
+                          <span className="flex h-7 w-7 shrink-0 items-center justify-center bg-brand/10 text-xs font-semibold text-brand tabular-nums">{beat.index}</span>
                           {/* 内容 */}
-                          <div className="flex-1 min-w-0 space-y-2">
+                          <div className="min-w-0 flex-1 space-y-2">
                             <div className="flex items-start justify-between gap-2">
                               <div className="min-w-0">
-                                <p className="text-sm font-semibold text-content truncate">{beat.title}</p>
-                                {beat.description && <p className="text-xs text-content-secondary mt-1 leading-relaxed line-clamp-3">{beat.description}</p>}
+                                <p className="truncate text-sm font-semibold text-content">{beat.title}</p>
+                                {beat.description && <p className="mt-1 line-clamp-3 text-xs leading-5 text-content-secondary">{beat.description}</p>}
                               </div>
-                              <span className={cn(
-                                'shrink-0 text-[11px] font-medium rounded-full px-2 py-0.5',
-                                isCompleted ? 'bg-emerald-100 text-emerald-700'
-                                  : isInProgress ? 'bg-blue-100 text-blue-700'
-                                    : 'bg-gray-100 text-gray-500'
-                              )}>{statusText}</span>
+                              <span className={cn(STATUS_TAG, 'shrink-0', statusTag)}>{statusText}</span>
                             </div>
                             {/* 进度条 */}
                             <div>
-                              <div className="flex items-center justify-between text-[11px] text-content-secondary mb-1">
+                              <div className="mb-1 flex items-center justify-between text-[11px] text-content-secondary">
                                 <span>覆盖度</span>
-                                <span className="font-medium">{(beat.coverage * 100).toFixed(0)}%</span>
+                                <span className="font-medium tabular-nums">{(beat.coverage * 100).toFixed(0)}%</span>
                               </div>
-                              <div className="h-1.5 rounded-full bg-surface-hover overflow-hidden">
-                                <div className={cn('h-full rounded-full transition-all duration-500', barColor)} style={{ width: `${Math.max(0, Math.min(100, beat.coverage * 100))}%` }} />
+                              <div className="hh-progress h-1">
+                                <div className="hh-progress-bar" style={{ width: `${Math.max(0, Math.min(100, beat.coverage * 100))}%` }} />
                               </div>
                             </div>
                             {/* 底部元信息 */}
@@ -1200,34 +1301,29 @@ function PlotLinesView({ plotLines, projectId, outlines, plotCards, createPlotLi
                   })}
                 </div>
               ) : (
-                <div className="flex flex-col items-center justify-center py-10 rounded-lg border border-dashed border-surface-border bg-surface/20">
-                  <GitBranch className="w-8 h-8 text-content-tertiary mb-2" />
-                  <p className="text-sm text-content-secondary">{viewingProgress?.message || '暂无节点数据'}</p>
-                  <p className="text-xs text-content-tertiary mt-1">点击下方「编辑节点」可添加剧情节点</p>
+                <div className="flex flex-col items-center justify-center border border-dashed border-surface-border px-6 py-10 text-center">
+                  <span className="flex h-12 w-12 items-center justify-center bg-brand/10 text-brand">
+                    <GitBranch className="h-6 w-6" />
+                  </span>
+                  <p className="mt-3 text-sm text-content-secondary">{viewingProgress?.message || '暂无节点数据'}</p>
+                  <p className="mt-1 text-xs text-content-tertiary">点击下方「编辑节点」可添加剧情节点</p>
                 </div>
               )}
             </div>
           </div>
-          <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
-            <button onClick={() => { const current = viewing; setViewing(null); setViewingProgress(null); if (current) openEdit(current) }} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm inline-flex items-center gap-1.5 transition-colors">
-              <Pencil className="w-3.5 h-3.5" />编辑节点
-            </button>
-            <button onClick={() => { setViewing(null); setViewingProgress(null) }} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">关闭</button>
-          </div>
         </Modal>
       )}
-    </div>
+    </section>
   )
 }
 // ==================== Tab 4: 章纲 ====================
-function ChapterOutlinesView({ chapterOutlines, projectId, createChapterOutline, updateChapterOutline, deleteChapterOutline, batchCreateChapterOutlines, generateChapterOutlines, plotLines }: {
+function ChapterOutlinesView({ chapterOutlines, projectId, createChapterOutline, updateChapterOutline, deleteChapterOutline, batchCreateChapterOutlines, plotLines }: {
   chapterOutlines: ChapterOutline[]
   projectId?: string
   createChapterOutline: (data: ChapterOutlineCreate) => Promise<ChapterOutline>
   updateChapterOutline: (id: string, data: ChapterOutlineUpdate) => Promise<ChapterOutline>
   deleteChapterOutline: (id: string) => Promise<void>
   batchCreateChapterOutlines: (data: ChapterOutlineBatchCreateRequest) => Promise<ChapterOutline[]>
-  generateChapterOutlines: (data: ChapterOutlineGenerateRequest) => Promise<ChapterOutline[]>
   plotLines: PlotLine[]
 }) {
   const [showModal, setShowModal] = useState(false)
@@ -1237,13 +1333,6 @@ function ChapterOutlinesView({ chapterOutlines, projectId, createChapterOutline,
   const [showBatchModal, setShowBatchModal] = useState(false)
   const [batchCount, setBatchCount] = useState(5)
   const [batchCreating, setBatchCreating] = useState(false)
-  const [generating, setGenerating] = useState(false)
-  const [showGenModal, setShowGenModal] = useState(false)
-  const [genForm, setGenForm] = useState({ chapter_count: 5, target_word_count: 3000, prompt: '', plot_line_id: '', auto_generate_plot_cards: true })
-  const [genEnableMcp, setGenEnableMcp] = useState(false)
-  const [genPlugins, setGenPlugins] = useState<string[]>([])
-  // R8：拆书参考包选择器
-  const [genRefPack, setGenRefPack] = useState<ReferencePackSelectorValue>(DEFAULT_SELECTOR_VALUE)
 
   // 关联管理
   const [expandedLinkId, setExpandedLinkId] = useState<string | null>(null)
@@ -1334,33 +1423,6 @@ function ChapterOutlinesView({ chapterOutlines, projectId, createChapterOutline,
     } catch { /* hook 已 toast */ } finally { setBatchCreating(false) }
   }
 
-  const handleGenerate = async () => {
-    if (!projectId) return
-    const startNum = sorted.length > 0 ? sorted[sorted.length - 1].chapter_number + 1 : 1
-    setGenerating(true)
-    setShowGenModal(false)
-    try {
-      await generateChapterOutlines({
-        project_id: projectId,
-        start_chapter: startNum,
-        chapter_count: genForm.chapter_count,
-        target_word_count: genForm.target_word_count,
-        based_on_outline: true,
-        plot_line_id: genForm.plot_line_id || undefined,
-        auto_generate_plot_cards: genForm.auto_generate_plot_cards,
-        prompt: genForm.prompt.trim() || undefined,
-        enable_mcp: genEnableMcp,
-        selected_plugins: genPlugins,
-        // R8：仅 enabled 时透传拆书参考包参数
-        ...(genRefPack.enabled ? {
-          pack_ids: genRefPack.packIds.length > 0 ? genRefPack.packIds : undefined,
-          dimensions: genRefPack.dimensions.length > 0 ? genRefPack.dimensions : undefined,
-          strength: genRefPack.strength,
-        } : {}),
-      })
-    } catch { /* hook 已 toast */ } finally { setGenerating(false) }
-  }
-
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -1398,242 +1460,231 @@ function ChapterOutlinesView({ chapterOutlines, projectId, createChapterOutline,
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold text-content">章纲</h2>
-        <div className="flex gap-2">
-          <button onClick={() => setShowGenModal(true)} disabled={generating} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-3 py-2 text-sm transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
-            {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-            AI 生成
-          </button>
+    <section className="hh-panel p-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h2 className="text-lg font-semibold tracking-tight text-content">章纲</h2>
+          <p className="mt-1 text-sm leading-6 text-content-secondary">
+            逐章的剧情要点、场景与视角，是生成正文前的最后一层规划，共 {chapterOutlines.length} 章。
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2.5">
           {chapterOutlines.length > 0 && (
-            <button onClick={handleDeleteSelected} disabled={selectedIds.size === 0} className="border border-red-200 text-red-500 hover:bg-red-50 rounded-btn px-3 py-2 text-sm transition-colors inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
-              <Trash2 className="w-4 h-4" />删除{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}
+            <button onClick={handleDeleteSelected} disabled={selectedIds.size === 0} className="hh-btn-ghost text-red-500 hover:bg-red-50 hover:text-red-600">
+              <Trash2 className="h-4 w-4" />删除{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}
             </button>
           )}
-          <button onClick={() => setShowBatchModal(true)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-3 py-2 text-sm transition-colors inline-flex items-center gap-1.5">
-            <Plus className="w-4 h-4" />批量创建
+          <button onClick={() => setShowBatchModal(true)} className="hh-btn-ghost">
+            <Plus className="h-4 w-4" />批量创建
           </button>
-          <button onClick={openCreate} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5">
-            <Plus className="w-4 h-4" />新建章纲
+          <Link to={`/project/${projectId}/plot-bridges`} className="hh-btn-secondary">
+            <Sparkles className="h-4 w-4 text-brand" />去桥段规划生成章纲
+          </Link>
+          <button onClick={openCreate} className="hh-btn-primary">
+            <Plus className="h-4 w-4" />新建章纲
           </button>
         </div>
       </div>
 
       {sorted.length === 0 ? (
-        <div className="text-center py-12 text-content-secondary text-sm">暂无章纲</div>
+        <EmptyBlock
+          icon={BookOpen}
+          title="还没有章纲"
+          hint="章纲由「桥段规划」展开生成（每桥段 4 章，章号由桥段序号决定）；也可点「新建章纲」手动添加或「批量创建」占位。"
+        />
       ) : (
-        <div className="space-y-3">
-          <div className="flex items-center gap-2 px-1">
-            <input type="checkbox" checked={selectedIds.size === chapterOutlines.length && chapterOutlines.length > 0} onChange={toggleSelectAll} className="w-4 h-4 accent-brand" />
-            <span className="text-xs text-content-secondary">{selectedIds.size > 0 ? `已选 ${selectedIds.size}/${chapterOutlines.length}` : '全选'}</span>
+        <div className="mt-6 space-y-3">
+          <div className="flex items-center gap-2.5 px-1">
+            <input type="checkbox" checked={selectedIds.size === chapterOutlines.length && chapterOutlines.length > 0} onChange={toggleSelectAll} className="h-4 w-4" />
+            <span className="text-xs text-content-secondary tabular-nums">{selectedIds.size > 0 ? `已选 ${selectedIds.size}/${chapterOutlines.length}` : '全选'}</span>
           </div>
           {sorted.map(co => (
-            <div key={co.id} className={`bg-white border rounded-card p-4 transition-colors ${selectedIds.has(co.id) ? 'border-brand/40 bg-brand/5' : 'border-surface-border'}`}>
+            <article key={co.id} className={cn('hh-subpanel p-4 transition-colors', selectedIds.has(co.id) && 'border-brand/40 bg-brand/[0.04]')}>
               <div className="flex items-start justify-between gap-3">
-                <div className="flex items-start gap-3 flex-1 min-w-0">
-                  <input type="checkbox" checked={selectedIds.has(co.id)} onChange={() => toggleSelect(co.id)} className="w-4 h-4 accent-brand mt-0.5 shrink-0" />
-                  <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-mono bg-surface-hover text-content-secondary rounded px-1.5 py-0.5 shrink-0">#{co.chapter_number}</span>
-                    <h3 className="text-sm font-semibold text-content truncate">{co.title}</h3>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-xs text-content-secondary">
-                    {co.scene && <span>场景: {co.scene}</span>}
-                    {co.pov && <span>视角: {co.pov}</span>}
-                    <span>目标字数: {co.target_word_count}</span>
-                    {co.plot_line_count != null && <span>关联剧情线: {co.plot_line_count}</span>}
-                  </div>
-                  {co.plot_points && <p className="text-xs text-content-secondary mt-1.5 line-clamp-2">{co.plot_points}</p>}
-                  {co.key_events && co.key_events.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1.5">
-                      {co.key_events.map((ev, i) => (
-                        <span key={i} className="text-xs bg-surface-hover text-content-secondary rounded px-1.5 py-0.5">{ev}</span>
-                      ))}
+                <div className="flex min-w-0 flex-1 items-start gap-3">
+                  <input type="checkbox" checked={selectedIds.has(co.id)} onChange={() => toggleSelect(co.id)} className="mt-1 h-4 w-4 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={cn(STATUS_TAG, 'shrink-0 bg-brand/10 text-brand tabular-nums')}>#{co.chapter_number}</span>
+                      <h3 className="min-w-0 max-w-full truncate text-[15px] font-semibold text-content">{co.title}</h3>
                     </div>
-                  )}
-                  <button onClick={() => toggleLinks(co.id)} className="inline-flex items-center gap-1 mt-2 text-xs text-brand hover:text-brand-600 transition-colors">
-                    <Link2 className="w-3 h-3" />关联剧情线
-                    {expandedLinkId === co.id ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                  </button>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-content-tertiary">
+                      {co.scene && <span>场景: {co.scene}</span>}
+                      {co.pov && <span>视角: {co.pov}</span>}
+                      <span>目标字数: {co.target_word_count}</span>
+                      {co.plot_line_count != null && <span>关联剧情线: {co.plot_line_count}</span>}
+                    </div>
+                    {co.plot_points && <p className="mt-1.5 line-clamp-2 text-[13px] leading-6 text-content-secondary">{co.plot_points}</p>}
+                    {co.key_events && co.key_events.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {co.key_events.map((ev, i) => (
+                          <span key={i} className="bg-surface-hover px-2 py-0.5 text-[11px] text-content-secondary">{ev}</span>
+                        ))}
+                      </div>
+                    )}
+                    <button onClick={() => toggleLinks(co.id)} className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand hover:text-brand-600">
+                      <Link2 className="h-3 w-3" />关联剧情线
+                      {expandedLinkId === co.id ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                    </button>
                   </div>
                 </div>
-                <div className="flex gap-1 shrink-0">
-                  <button onClick={() => setViewingChapterOutline(co)} className="p-1.5 rounded hover:bg-surface-hover text-content-secondary transition-colors" title="查看章纲详情"><Eye className="w-3.5 h-3.5" /></button>
-                  <button onClick={() => openEdit(co)} className="p-1.5 rounded hover:bg-surface-hover text-content-secondary transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
-                  <button onClick={() => handleDelete(co)} className="p-1.5 rounded hover:bg-red-50 text-content-secondary hover:text-red-500 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button onClick={() => setViewingChapterOutline(co)} className="hh-icon-btn-plain h-8 w-8" title="查看章纲详情"><Eye className="h-3.5 w-3.5" /></button>
+                  <button onClick={() => openEdit(co)} className="hh-icon-btn-plain h-8 w-8" title="编辑"><Pencil className="h-3.5 w-3.5" /></button>
+                  <button onClick={() => handleDelete(co)} className="hh-icon-btn-plain h-8 w-8 hover:text-red-500" title="删除"><Trash2 className="h-3.5 w-3.5" /></button>
                 </div>
               </div>
               {expandedLinkId === co.id && (
-                <div className="mt-3 pt-3 border-t border-surface-border">
+                <div className="mt-3 border-t border-surface-border/80 pt-3">
                   {loadingLink === co.id ? (
-                    <div className="flex items-center gap-2 text-xs text-content-secondary"><Loader2 className="w-3 h-3 animate-spin" />加载中...</div>
+                    <div className="flex items-center gap-2 text-xs text-content-secondary"><Loader2 className="h-3 w-3 animate-spin" />加载中...</div>
                   ) : (
                     <>
                       {(linkedLines[co.id] || []).length > 0 ? (
-                        <div className="flex flex-wrap gap-2 mb-2">
+                        <div className="mb-2 flex flex-wrap gap-2">
                           {(linkedLines[co.id] || []).map(pl => (
-                            <span key={pl.id} className="inline-flex items-center gap-1 text-xs bg-blue-50 text-blue-700 rounded px-2 py-1">
-                              <GitBranch className="w-3 h-3" />{pl.title}
-                              <button onClick={() => handleUnlink(co.id, pl.id)} className="ml-1 text-blue-400 hover:text-red-500" title="取消关联">&times;</button>
+                            <span key={pl.id} className="hh-tag">
+                              <GitBranch className="h-3 w-3" />{pl.title}
+                              <button onClick={() => handleUnlink(co.id, pl.id)} className="ml-1 text-brand/60 hover:text-red-500" title="取消关联">&times;</button>
                             </span>
                           ))}
                         </div>
                       ) : (
-                        <p className="text-xs text-content-tertiary mb-2">暂无关联剧情线</p>
+                        <p className="mb-2 text-xs text-content-tertiary">暂无关联剧情线</p>
                       )}
-                      <button onClick={() => openLinkModal(co.id)} className="inline-flex items-center gap-1 text-xs text-brand hover:text-brand-600">
-                        <Plus className="w-3 h-3" />添加关联
+                      <button onClick={() => openLinkModal(co.id)} className="inline-flex items-center gap-1 text-xs font-medium text-brand hover:text-brand-600">
+                        <Plus className="h-3 w-3" />添加关联
                       </button>
                     </>
                   )}
                 </div>
               )}
-            </div>
+            </article>
           ))}
         </div>
       )}
 
-      {/* AI 生成章纲弹窗 */}
-      {showGenModal && (
-        <Modal title="AI 生成章纲" onClose={() => setShowGenModal(false)}>
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm text-content-secondary mb-1">生成数量</label>
-                <input type="number" min={1} max={50} value={genForm.chapter_count} onChange={e => setGenForm(f => ({ ...f, chapter_count: Number(e.target.value) }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand outline-none" />
-              </div>
-              <div>
-                <label className="block text-sm text-content-secondary mb-1">每章目标字数</label>
-                <input type="number" min={500} value={genForm.target_word_count} onChange={e => setGenForm(f => ({ ...f, target_word_count: Number(e.target.value) }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand outline-none" />
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm text-content-secondary mb-1">关联剧情线（可选）</label>
-              <select value={genForm.plot_line_id} onChange={e => setGenForm(f => ({ ...f, plot_line_id: e.target.value }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand outline-none bg-white">
-                <option value="">不指定（自动基于大纲生成）</option>
-                {plotLines.map(pl => (
-                  <option key={pl.id} value={pl.id}>{pl.title}{pl.line_type ? ` [${getPlotLineTypeLabel(pl.line_type)}]` : ''}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm text-content-secondary mb-1">提示词（可选）</label>
-              <textarea value={genForm.prompt} onChange={e => setGenForm(f => ({ ...f, prompt: e.target.value }))} placeholder="对章纲的特殊要求..." rows={2} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand outline-none resize-none" />
-            </div>
-            <label className="flex items-center gap-2 text-sm cursor-pointer">
-              <input type="checkbox" checked={genForm.auto_generate_plot_cards} onChange={e => setGenForm(f => ({ ...f, auto_generate_plot_cards: e.target.checked }))} className="w-4 h-4" />
-              <span>同时自动生成关联剧情卡片</span>
-            </label>
-            <MCPSelector value={{ enable: genEnableMcp, selected: genPlugins }} onChange={({ enable, selected }) => { setGenEnableMcp(enable); setGenPlugins(selected) }} />
-            {projectId && (
-              <ReferencePackSelector
-                projectId={projectId}
-                value={genRefPack}
-                onChange={setGenRefPack}
-                hint="让本次章纲参考拆书的结构手法/节奏密度"
-                disabledTitle="使用拆书参考包作为对标"
-              />
-            )}
-            <p className="text-xs text-content-secondary">将从第 {sorted.length > 0 ? sorted[sorted.length - 1].chapter_number + 1 : 1} 章开始生成。</p>
-          </div>
-          <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
-            <button onClick={() => setShowGenModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
-            <button onClick={handleGenerate} disabled={generating} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
-              {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-              开始生成
-            </button>
-          </div>
-        </Modal>
-      )}
-
       {/* 创建/编辑弹窗 */}
       {showModal && (
-        <Modal title={editing ? '编辑章纲' : '新建章纲'} onClose={() => setShowModal(false)} size="xl">
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
+        <Modal
+          title={editing ? '编辑章纲' : '新建章纲'}
+          onClose={() => setShowModal(false)}
+          size="xl"
+          closeOnMaskClick={false}
+          footer={(
+            <>
+              <button onClick={() => setShowModal(false)} className="hh-btn-ghost">取消</button>
+              <button onClick={handleSubmit} className="hh-btn-primary">确定</button>
+            </>
+          )}
+        >
+          <div className="space-y-5">
+            <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <label className="block text-sm text-content-secondary mb-1">章节序号</label>
-                <input type="number" value={form.chapter_number} onChange={e => setForm(f => ({ ...f, chapter_number: Number(e.target.value) }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+                <label className="hh-label">章节序号</label>
+                <input type="number" value={form.chapter_number} onChange={e => setForm(f => ({ ...f, chapter_number: Number(e.target.value) }))} className="hh-field" />
               </div>
               <div>
-                <label className="block text-sm text-content-secondary mb-1">目标字数</label>
-                <input type="number" value={form.target_word_count} onChange={e => setForm(f => ({ ...f, target_word_count: Number(e.target.value) }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm text-content-secondary mb-1">标题</label>
-              <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm text-content-secondary mb-1">场景</label>
-                <input value={form.scene} onChange={e => setForm(f => ({ ...f, scene: e.target.value }))} placeholder="如：拳击场→后台" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
-              </div>
-              <div>
-                <label className="block text-sm text-content-secondary mb-1">视角角色</label>
-                <input value={form.pov} onChange={e => setForm(f => ({ ...f, pov: e.target.value }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+                <label className="hh-label">目标字数</label>
+                <input type="number" value={form.target_word_count} onChange={e => setForm(f => ({ ...f, target_word_count: Number(e.target.value) }))} className="hh-field" />
               </div>
             </div>
             <div>
-              <label className="block text-sm text-content-secondary mb-1">剧情要点</label>
-              <textarea value={form.plot_points} onChange={e => setForm(f => ({ ...f, plot_points: e.target.value }))} rows={4} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors resize-none" />
+              <label className="hh-label">标题</label>
+              <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} className="hh-field" />
             </div>
-          </div>
-          <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
-            <button onClick={() => setShowModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
-            <button onClick={handleSubmit} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">确定</button>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="hh-label">场景</label>
+                <input value={form.scene} onChange={e => setForm(f => ({ ...f, scene: e.target.value }))} placeholder="如：拳击场→后台" className="hh-field" />
+              </div>
+              <div>
+                <label className="hh-label">视角角色</label>
+                <input value={form.pov} onChange={e => setForm(f => ({ ...f, pov: e.target.value }))} className="hh-field" />
+              </div>
+            </div>
+            <div>
+              <label className="hh-label">剧情要点</label>
+              <textarea value={form.plot_points} onChange={e => setForm(f => ({ ...f, plot_points: e.target.value }))} rows={4} className="hh-textarea" />
+            </div>
           </div>
         </Modal>
       )}
 
       {/* 删除确认弹窗 */}
       {confirmDelete && (
-        <Modal title="确认删除" onClose={() => setConfirmDelete(false)}>
+        <Modal
+          title="确认删除"
+          onClose={() => setConfirmDelete(false)}
+          size="md"
+          footer={(
+            <>
+              <button onClick={() => setConfirmDelete(false)} disabled={deleting} className="hh-btn-ghost">取消</button>
+              <button onClick={executeDelete} disabled={deleting} className="hh-btn-danger">
+                {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                确认删除 ({selectedIds.size})
+              </button>
+            </>
+          )}
+        >
           <div className="space-y-3">
-            <p className="text-sm text-content">
-              确定删除选中的 {selectedIds.size} 个章纲？此操作不可撤销。
+            <p className="text-sm leading-7 text-content-secondary">
+              确定删除选中的 <span className="font-medium text-content">{selectedIds.size}</span> 个章纲？此操作不可撤销。
             </p>
-            <div className="text-xs text-content-secondary space-y-0.5 max-h-32 overflow-y-auto">
+            <div className="hh-subpanel max-h-32 space-y-0.5 overflow-y-auto px-4 py-3 text-xs text-content-secondary">
               {chapterOutlines.filter(co => selectedIds.has(co.id)).map(co => (
                 <div key={co.id}>• 第{co.chapter_number}章：{co.title}</div>
               ))}
             </div>
-          </div>
-          <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
-            <button onClick={() => setConfirmDelete(false)} disabled={deleting} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
-            <button onClick={executeDelete} disabled={deleting} className="bg-red-500 hover:bg-red-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
-              {deleting && <Loader2 className="w-4 h-4 animate-spin" />}
-              确认删除 ({selectedIds.size})
-            </button>
           </div>
         </Modal>
       )}
 
       {/* 批量创建弹窗 */}
       {showBatchModal && (
-        <Modal title="批量创建章纲" onClose={() => setShowBatchModal(false)}>
+        <Modal
+          title="批量创建章纲"
+          onClose={() => setShowBatchModal(false)}
+          size="md"
+          closeOnMaskClick={false}
+          footer={(
+            <>
+              <button onClick={() => setShowBatchModal(false)} className="hh-btn-ghost">取消</button>
+              <button onClick={handleBatchCreate} disabled={batchCreating} className="hh-btn-primary">
+                {batchCreating && <Loader2 className="h-4 w-4 animate-spin" />}
+                确定创建
+              </button>
+            </>
+          )}
+        >
           <div className="space-y-3">
             <div>
-              <label className="block text-sm text-content-secondary mb-1">创建数量</label>
-              <input type="number" min={1} max={50} value={batchCount} onChange={e => setBatchCount(Number(e.target.value))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+              <label className="hh-label">创建数量</label>
+              <input type="number" min={1} max={50} value={batchCount} onChange={e => setBatchCount(Number(e.target.value))} className="hh-field" />
             </div>
-            <p className="text-xs text-content-secondary">将从第 {sorted.length > 0 ? sorted[sorted.length - 1].chapter_number + 1 : 1} 章开始，自动编号创建 {batchCount} 个章纲。</p>
-          </div>
-          <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
-            <button onClick={() => setShowBatchModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
-            <button onClick={handleBatchCreate} disabled={batchCreating} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
-              {batchCreating && <Loader2 className="w-4 h-4 animate-spin" />}
-              确定创建
-            </button>
+            <p className="text-xs leading-5 text-content-tertiary">将从第 {sorted.length > 0 ? sorted[sorted.length - 1].chapter_number + 1 : 1} 章开始，自动编号创建 {batchCount} 个章纲。</p>
           </div>
         </Modal>
       )}
 
       {/* 关联剧情线选择弹窗 */}
       {showLinkModal && (
-        <Modal title="关联剧情线" onClose={() => setShowLinkModal(null)}>
-          <div className="space-y-2 max-h-60 overflow-y-auto">
+        <Modal
+          title="关联剧情线"
+          onClose={() => setShowLinkModal(null)}
+          size="lg"
+          closeOnMaskClick={false}
+          footer={(
+            <>
+              <button onClick={() => setShowLinkModal(null)} className="hh-btn-ghost">取消</button>
+              <button onClick={handleLink} disabled={linkSaving || selectedLinkIds.length === 0} className="hh-btn-primary">
+                {linkSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+                确定关联 ({selectedLinkIds.length})
+              </button>
+            </>
+          )}
+        >
+          <div className="max-h-60 space-y-1.5 overflow-y-auto">
             {plotLines.length === 0 ? (
               <p className="text-sm text-content-secondary">暂无可选剧情线，请先创建剧情线</p>
             ) : (
@@ -1642,8 +1693,8 @@ function ChapterOutlinesView({ chapterOutlines, projectId, createChapterOutline,
                 const selected = selectedLinkIds.includes(pl.id)
                 return (
                   <label key={pl.id} className={cn(
-                    "flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-colors text-sm",
-                    alreadyLinked ? "bg-surface-hover opacity-50 cursor-not-allowed" : selected ? "bg-brand/10 border border-brand" : "hover:bg-surface-hover border border-transparent"
+                    'flex items-center gap-2.5 border px-3 py-2.5 text-sm text-content transition-colors',
+                    alreadyLinked ? 'cursor-not-allowed border-transparent bg-surface-hover opacity-50' : selected ? 'cursor-pointer border-brand bg-brand/10' : 'cursor-pointer border-transparent hover:bg-surface-hover'
                   )}>
                     <input
                       type="checkbox"
@@ -1653,51 +1704,53 @@ function ChapterOutlinesView({ chapterOutlines, projectId, createChapterOutline,
                         if (alreadyLinked) return
                         setSelectedLinkIds(prev => prev.includes(pl.id) ? prev.filter(id => id !== pl.id) : [...prev, pl.id])
                       }}
-                      className="rounded"
+                      className="h-4 w-4"
                     />
-                    <GitBranch className="w-3.5 h-3.5 text-content-secondary shrink-0" />
+                    <GitBranch className="h-3.5 w-3.5 shrink-0 text-brand" />
                     <span className="truncate">{pl.title}</span>
-                    <span className="text-xs text-content-tertiary shrink-0">{getPlotLineTypeLabel(pl.line_type)}</span>
-                    {alreadyLinked && <span className="text-xs text-content-tertiary ml-auto">已关联</span>}
+                    <span className="shrink-0 text-xs text-content-tertiary">{getPlotLineTypeLabel(pl.line_type)}</span>
+                    {alreadyLinked && <span className="ml-auto text-xs text-content-tertiary">已关联</span>}
                   </label>
                 )
               })
             )}
           </div>
-          <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
-            <button onClick={() => setShowLinkModal(null)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
-            <button onClick={handleLink} disabled={linkSaving || selectedLinkIds.length === 0} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
-              {linkSaving && <Loader2 className="w-4 h-4 animate-spin" />}
-              确定关联 ({selectedLinkIds.length})
-            </button>
-          </div>
         </Modal>
       )}
 
       {viewingChapterOutline && (
-        <Modal title={`章纲详情：第${viewingChapterOutline.chapter_number}章`} onClose={() => setViewingChapterOutline(null)} size="xl">
-          <div className="space-y-3">
+        <Modal
+          title={`章纲详情：第${viewingChapterOutline.chapter_number}章`}
+          onClose={() => setViewingChapterOutline(null)}
+          size="xl"
+          footer={(
+            <button onClick={() => { const current = viewingChapterOutline; setViewingChapterOutline(null); if (current) openEdit(current) }} className="hh-btn-primary">
+              <Pencil className="h-3.5 w-3.5" />编辑
+            </button>
+          )}
+        >
+          <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-2 text-xs text-content-secondary">
-              <span className="bg-surface-hover rounded px-2 py-1">#{viewingChapterOutline.chapter_number}</span>
+              <span className={cn(STATUS_TAG, 'bg-brand/10 text-brand tabular-nums')}>#{viewingChapterOutline.chapter_number}</span>
               {viewingChapterOutline.scene && <span>场景：{viewingChapterOutline.scene}</span>}
               {viewingChapterOutline.pov && <span>视角：{viewingChapterOutline.pov}</span>}
               <span>目标字数：{viewingChapterOutline.target_word_count}</span>
               <span>关联剧情线：{viewingChapterOutline.plot_line_count ?? 0}</span>
             </div>
-            <div className="rounded-btn border border-surface-border bg-surface/40 p-3">
-              <p className="text-xs text-content-secondary mb-1">标题</p>
-              <p className="text-sm font-medium text-content">{viewingChapterOutline.title}</p>
+            <div className="hh-subpanel p-4">
+              <p className="text-xs font-medium text-content-tertiary">标题</p>
+              <p className="mt-1.5 text-sm font-medium text-content">{viewingChapterOutline.title}</p>
             </div>
-            <div className="rounded-btn border border-surface-border bg-surface/40 p-3">
-              <p className="text-xs text-content-secondary mb-1">剧情要点</p>
-              <p className="text-sm text-content whitespace-pre-wrap">{viewingChapterOutline.plot_points || '暂无内容'}</p>
+            <div className="hh-subpanel p-4">
+              <p className="text-xs font-medium text-content-tertiary">剧情要点</p>
+              <p className="mt-1.5 whitespace-pre-wrap text-sm leading-7 text-content">{viewingChapterOutline.plot_points || '暂无内容'}</p>
             </div>
             {viewingChapterOutline.key_events && viewingChapterOutline.key_events.length > 0 && (
-              <div className="rounded-btn border border-surface-border bg-surface/40 p-3">
-                <p className="text-xs text-content-secondary mb-2">关键事件</p>
-                <div className="flex flex-wrap gap-1.5">
+              <div className="hh-subpanel p-4">
+                <p className="text-xs font-medium text-content-tertiary">关键事件</p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
                   {viewingChapterOutline.key_events.map((event, index) => (
-                    <span key={`key-event-${index}`} className="text-xs bg-white border border-surface-border rounded px-2 py-1 text-content-secondary">
+                    <span key={`key-event-${index}`} className="bg-surface-hover px-2 py-1 text-xs text-content-secondary">
                       {event}
                     </span>
                   ))}
@@ -1705,15 +1758,9 @@ function ChapterOutlinesView({ chapterOutlines, projectId, createChapterOutline,
               </div>
             )}
           </div>
-          <div className="sticky bottom-0 -mx-6 -mb-5 mt-4 flex justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 backdrop-blur-sm">
-            <button onClick={() => { const current = viewingChapterOutline; setViewingChapterOutline(null); if (current) openEdit(current) }} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm inline-flex items-center gap-1.5">
-              <Pencil className="w-3.5 h-3.5" />编辑
-            </button>
-            <button onClick={() => setViewingChapterOutline(null)} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">关闭</button>
-          </div>
         </Modal>
       )}
-    </div>
+    </section>
   )
 }
 // ==================== Tab 5: 关联总览 ====================
@@ -1727,10 +1774,10 @@ function OverviewPanel({ plotCards, plotLines, chapterOutlines }: {
   const totalRelations = totalCardLinks + totalLineLinks
 
   const stats = [
-    { label: '剧情卡片', value: plotCards.length, color: 'bg-blue-50 text-blue-700 border-blue-200' },
-    { label: '剧情线', value: plotLines.length, color: 'bg-purple-50 text-purple-700 border-purple-200' },
-    { label: '章纲', value: chapterOutlines.length, color: 'bg-green-50 text-green-700 border-green-200' },
-    { label: '关联关系', value: totalRelations, color: 'bg-orange-50 text-orange-700 border-orange-200' },
+    { label: '剧情卡片', value: plotCards.length },
+    { label: '剧情线', value: plotLines.length },
+    { label: '章纲', value: chapterOutlines.length },
+    { label: '关联关系', value: totalRelations },
   ]
 
   // 简易关联网络图：节点 = 剧情线 + 章纲，用 SVG 绘制
@@ -1751,90 +1798,104 @@ function OverviewPanel({ plotCards, plotLines, chapterOutlines }: {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-base font-semibold text-content">关联总览</h2>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <section className="hh-panel grid grid-cols-2 divide-surface-border/80 md:grid-cols-4 md:divide-x">
         {stats.map(s => (
-          <div key={s.label} className={cn("border rounded-card p-5 text-center", s.color)}>
-            <div className="text-3xl font-bold">{s.value}</div>
-            <div className="text-sm mt-1 opacity-80">{s.label}</div>
+          <div key={s.label} className="px-5 py-4 md:px-6">
+            <p className="text-xs text-content-tertiary">{s.label}</p>
+            <p className="mt-1 text-2xl font-semibold tracking-tight text-content tabular-nums">{s.value}</p>
           </div>
         ))}
-      </div>
+      </section>
+
+      {plotLines.length === 0 && chapterOutlines.length === 0 && (
+        <section className="hh-panel flex flex-col items-center px-6 py-14 text-center">
+          <span className="flex h-14 w-14 items-center justify-center bg-brand/10 text-brand">
+            <BarChart3 className="h-7 w-7" />
+          </span>
+          <h2 className="mt-5 text-xl font-semibold tracking-tight text-content">还没有可分析的关联</h2>
+          <p className="mt-2 max-w-md text-sm leading-6 text-content-secondary">
+            先在「剧情线」和「章纲」里创建内容并建立关联，这里会汇总关联网络与章纲覆盖情况。
+          </p>
+        </section>
+      )}
 
       {/* 关联网络图 */}
       {plotLines.length > 0 && sortedCO.length > 0 && (
-        <div className="bg-white border border-surface-border rounded-card p-4 space-y-3">
-          <h3 className="text-sm font-semibold text-content">关联网络图</h3>
-          <p className="text-xs text-content-secondary">左侧为剧情线，右侧为章纲。圆圈大小代表关联数量。</p>
-          <div className="overflow-x-auto">
+        <section className="hh-panel p-6">
+          <h3 className="text-lg font-semibold tracking-tight text-content">关联网络图</h3>
+          <p className="mt-1 text-sm leading-6 text-content-secondary">左侧为剧情线，右侧为章纲，圆点大小代表关联数量。</p>
+          <div className="mt-5 overflow-x-auto">
             <svg width={svgW} height={svgH} className="mx-auto">
               {/* 连线占位：根据关联数量画虚线 */}
               {lineNodes.map(ln => coNodes.filter(cn => cn.linkCount > 0 || ln.linkCount > 0).slice(0, ln.linkCount || 1).map((cn, ci) => (
                 <line key={`${ln.id}-${cn.id}-${ci}`} x1={ln.x + 8} y1={ln.y} x2={cn.x - 8} y2={cn.y}
-                  stroke="#d1d5db" strokeWidth={1} strokeDasharray="4,3" opacity={0.5} />
+                  stroke="#b9d7ff" strokeWidth={1} strokeDasharray="4,3" opacity={0.8} />
               )))}
               {/* 剧情线节点 */}
               {lineNodes.map(n => (
                 <g key={n.id}>
-                  <circle cx={n.x} cy={n.y} r={Math.max(6, Math.min(14, 6 + n.linkCount * 2))} fill="#8b5cf6" opacity={0.8} />
-                  <text x={n.x - 14} y={n.y + 4} textAnchor="end" fontSize={11} fill="#6b7280" className="select-none">{n.label}</text>
+                  <circle cx={n.x} cy={n.y} r={Math.max(6, Math.min(14, 6 + n.linkCount * 2))} fill="#007aff" opacity={0.85} />
+                  <text x={n.x - 14} y={n.y + 4} textAnchor="end" fontSize={11} fill="#5f7090" className="select-none">{n.label}</text>
                 </g>
               ))}
               {/* 章纲节点 */}
               {coNodes.map(n => (
                 <g key={n.id}>
-                  <circle cx={n.x} cy={n.y} r={Math.max(6, Math.min(14, 6 + n.linkCount * 2))} fill="#10b981" opacity={0.8} />
-                  <text x={n.x + 14} y={n.y + 4} textAnchor="start" fontSize={11} fill="#6b7280" className="select-none">{n.label}</text>
+                  <circle cx={n.x} cy={n.y} r={Math.max(6, Math.min(14, 6 + n.linkCount * 2))} fill="#5f7090" opacity={0.85} />
+                  <text x={n.x + 14} y={n.y + 4} textAnchor="start" fontSize={11} fill="#5f7090" className="select-none">{n.label}</text>
                 </g>
               ))}
               {/* 图例 */}
-              <circle cx={20} cy={svgH - 20} r={6} fill="#8b5cf6" />
-              <text x={32} y={svgH - 16} fontSize={10} fill="#6b7280">剧情线</text>
-              <circle cx={90} cy={svgH - 20} r={6} fill="#10b981" />
-              <text x={102} y={svgH - 16} fontSize={10} fill="#6b7280">章纲</text>
+              <circle cx={20} cy={svgH - 20} r={6} fill="#007aff" />
+              <text x={32} y={svgH - 16} fontSize={10} fill="#5f7090">剧情线</text>
+              <circle cx={90} cy={svgH - 20} r={6} fill="#5f7090" />
+              <text x={102} y={svgH - 16} fontSize={10} fill="#5f7090">章纲</text>
             </svg>
           </div>
-        </div>
+        </section>
       )}
 
       {/* 剧情线概览 */}
       {plotLines.length > 0 && (
-        <div className="bg-white border border-surface-border rounded-card p-4 space-y-3">
-          <h3 className="text-sm font-semibold text-content">剧情线分布</h3>
-          <div className="space-y-2">
+        <section className="hh-panel p-6">
+          <h3 className="text-lg font-semibold tracking-tight text-content">剧情线分布</h3>
+          <div className="mt-4 divide-y divide-surface-border/80">
             {plotLines.map(l => (
-              <div key={l.id} className="flex items-center justify-between text-sm">
-                <div className="flex items-center gap-2">
-                  <GitBranch className="w-3.5 h-3.5 text-content-secondary" />
-                  <span className="text-content">{l.title}</span>
-                  <span className="text-xs text-content-secondary">({getPlotLineTypeLabel(l.line_type)})</span>
+              <div key={l.id} className="flex items-center justify-between gap-3 py-3 text-sm">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center bg-brand/10 text-brand">
+                    <GitBranch className="h-4 w-4" />
+                  </span>
+                  <span className="truncate text-content">{l.title}</span>
+                  <span className={cn(STATUS_TAG, 'shrink-0', getPlotLineTypeColor(l.line_type))}>{getPlotLineTypeLabel(l.line_type)}</span>
                 </div>
-                <div className="flex items-center gap-3 text-xs text-content-secondary">
+                <div className="flex shrink-0 items-center gap-3 text-xs text-content-secondary tabular-nums">
                   <span>卡片 {l.plot_card_count ?? 0}</span>
                   <span>章纲 {l.chapter_outline_count ?? 0}</span>
                 </div>
               </div>
             ))}
           </div>
-        </div>
+        </section>
       )}
 
       {/* 章纲覆盖 */}
       {chapterOutlines.length > 0 && (
-        <div className="bg-white border border-surface-border rounded-card p-4 space-y-3">
-          <h3 className="text-sm font-semibold text-content">章纲覆盖</h3>
-          <div className="flex flex-wrap gap-1.5">
+        <section className="hh-panel p-6">
+          <h3 className="text-lg font-semibold tracking-tight text-content">章纲覆盖</h3>
+          <p className="mt-1 text-sm leading-6 text-content-secondary">已关联剧情线的章纲会高亮显示。</p>
+          <div className="mt-4 flex flex-wrap gap-1.5">
             {sortedCO.map(co => (
               <span key={co.id} className={cn(
-                "text-xs rounded px-2 py-1",
-                (co.plot_line_count ?? 0) > 0 ? "bg-green-50 text-green-700" : "bg-surface-hover text-content-secondary"
+                'px-2 py-1 text-xs',
+                (co.plot_line_count ?? 0) > 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-surface-hover text-content-secondary'
               )}>
                 #{co.chapter_number} {co.title}
                 {(co.plot_line_count ?? 0) > 0 && <span className="ml-1 opacity-60">({co.plot_line_count}线)</span>}
               </span>
             ))}
           </div>
-        </div>
+        </section>
       )}
     </div>
   )

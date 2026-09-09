@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   User as UserIcon,
@@ -10,8 +11,7 @@ import {
   EyeOff,
   Menu,
   ChevronDown,
-  Sparkles,
-  BookOpenText,
+  ChevronRight,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { authApi } from '@/services/api'
@@ -21,11 +21,13 @@ interface HeaderProps {
   onMenuClick?: () => void
 }
 
-const ROUTE_META: Array<{ match: RegExp; title: string; subtitle: string }> = [
-  { match: /^\/projects?$/, title: '我的项目', subtitle: '统一查看作品、更新时间与当前创作进度。' },
-  { match: /^\/settings$/, title: '创作设置', subtitle: '调整模型、参数与偏好，让创作方式更贴合你的流程。' },
-  { match: /^\/mcp-plugins$/, title: '插件工坊', subtitle: '扩展工具能力，让写作流程更完整。' },
-  { match: /^\/user-management$/, title: '成员管理', subtitle: '统一查看用户权限与协作状态。' },
+const ROUTE_META: Array<{ match: RegExp; title: string }> = [
+  { match: /^\/(projects?)?$/, title: '我的项目' },
+  { match: /^\/book-dissect/, title: '拆书参考' },
+  { match: /^\/reference-packs/, title: '参考库' },
+  { match: /^\/settings$/, title: '设置' },
+  { match: /^\/mcp-plugins$/, title: 'MCP 插件' },
+  { match: /^\/user-management$/, title: '用户管理' },
 ]
 
 export function Header({ onMenuClick }: HeaderProps) {
@@ -68,118 +70,83 @@ export function Header({ onMenuClick }: HeaderProps) {
     setPasswordModalOpen(true)
   }
 
-  const pageMeta = useMemo(() => {
-    return ROUTE_META.find((item) => item.match.test(location.pathname)) ?? {
-      title: '创作工作台',
-      subtitle: '围绕项目、设定与章节构建更清晰的创作空间。',
-    }
-  }, [location.pathname])
+  const pageTitle = useMemo(
+    () => ROUTE_META.find((item) => item.match.test(location.pathname))?.title ?? '创作工作台',
+    [location.pathname],
+  )
 
   return (
-    <header className="relative z-20 border-b border-white/70 bg-white/65 px-4 py-3 backdrop-blur-xl md:px-6">
-      <div className="absolute inset-x-10 top-0 h-20 rounded-full bg-brand/8 blur-3xl" />
-      <div className="relative flex items-center justify-between gap-4">
-        <div className="flex min-w-0 items-center gap-3 md:gap-4">
-          <button
-            onClick={onMenuClick}
-            className="fanqie-toolbar-btn h-11 w-11 p-0 md:hidden"
-            aria-label="切换侧栏"
-          >
-            <Menu className="h-5 w-5" />
-          </button>
+    <header className="relative z-20 flex h-16 shrink-0 items-center justify-between gap-4 border-b border-white/80 bg-white/45 px-4 backdrop-blur-xl md:px-8">
+      <div className="flex min-w-0 items-center gap-3">
+        <button
+          onClick={onMenuClick}
+          className="hh-icon-btn md:hidden"
+          aria-label="切换侧栏"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
 
-          <div className="hidden h-11 w-11 items-center justify-center rounded-2xl bg-brand/10 text-brand md:flex">
-            <BookOpenText className="h-5 w-5" />
-          </div>
+        <nav className="flex min-w-0 items-center gap-1.5 text-sm" aria-label="面包屑">
+          <span className="hidden text-content-tertiary sm:inline">创作台</span>
+          <ChevronRight className="hidden h-3.5 w-3.5 text-content-tertiary sm:inline" />
+          <span className="truncate font-medium text-content">{pageTitle}</span>
+        </nav>
+      </div>
 
-          <div className="min-w-0">
-            <div className="mb-1 flex items-center gap-2">
-              <span className="fanqie-chip border-brand/10 bg-brand/5 text-brand">HH小说创作</span>
-              <span className="hidden text-xs text-content-tertiary md:inline">/</span>
-              <span className="hidden text-xs text-content-secondary md:inline">{pageMeta.title}</span>
-            </div>
-            <div className="min-w-0">
-              <h1 className="truncate text-lg font-semibold text-content md:text-[22px]">{pageMeta.title}</h1>
-              <p className="hidden truncate text-sm text-content-secondary md:block">{pageMeta.subtitle}</p>
-            </div>
-          </div>
-        </div>
+      <div className="relative" ref={menuRef}>
+        <button
+          onClick={() => setMenuOpen((prev) => !prev)}
+          className="flex items-center gap-2.5 border border-transparent py-1 pl-1 pr-2 hover:border-surface-border hover:bg-white/70"
+        >
+          {user?.avatar_url ? (
+            <img src={user.avatar_url} alt="" className="h-8 w-8 object-cover" />
+          ) : (
+            <span className="flex h-8 w-8 items-center justify-center bg-brand/10 text-brand">
+              <UserIcon className="h-4 w-4" />
+            </span>
+          )}
+          <span className="hidden max-w-[140px] truncate text-sm font-medium text-content md:inline">
+            {user?.display_name || '用户'}
+          </span>
+          <ChevronDown className="h-4 w-4 text-content-tertiary" />
+        </button>
 
-        <div className="flex items-center gap-2.5 md:gap-3">
-          <div className="hidden items-center gap-2 rounded-pill border border-brand/15 bg-brand/5 px-3 py-2 text-sm text-content-secondary md:flex">
-            <Sparkles className="h-4 w-4 text-brand" />
-            保持创作节奏
-          </div>
-
-          <div className="relative" ref={menuRef}>
-            <button
-              onClick={() => setMenuOpen((prev) => !prev)}
-              className="flex items-center gap-2 rounded-pill border border-white/80 bg-white/80 py-1.5 pl-1.5 pr-2 shadow-xs hover:bg-white"
-            >
+        {menuOpen && (
+          <div className="hh-menu absolute right-0 top-full mt-2 w-[240px]">
+            <div className="flex items-center gap-3 px-3 py-3">
               {user?.avatar_url ? (
-                <img src={user.avatar_url} alt="" className="h-9 w-9 rounded-full object-cover ring-2 ring-brand/10" />
+                <img src={user.avatar_url} alt="" className="h-10 w-10 object-cover" />
               ) : (
-                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-brand/10 text-brand">
-                  <UserIcon className="h-[18px] w-[18px]" />
+                <span className="flex h-10 w-10 items-center justify-center bg-brand/10 text-brand">
+                  <UserIcon className="h-5 w-5" />
                 </span>
               )}
-              <div className="hidden text-left md:block">
-                <p className="max-w-[120px] truncate text-sm font-medium text-content">{user?.display_name || '用户'}</p>
-                <p className="text-xs text-content-tertiary">{user?.is_admin ? '管理员权限' : '创作者'}</p>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <p className="truncate text-sm font-semibold text-content">{user?.display_name || '用户'}</p>
+                  {user?.is_admin && (
+                    <span className="hh-tag px-1.5 py-0.5 text-[10px]">
+                      <Shield className="h-3 w-3" />
+                      管理员
+                    </span>
+                  )}
+                </div>
+                <p className="truncate text-xs text-content-tertiary">{user?.username || '未命名用户'}</p>
               </div>
-              <ChevronDown className="h-4 w-4 text-content-tertiary" />
+            </div>
+
+            <div className="my-1 h-px bg-surface-border/80" />
+
+            <button onClick={openPasswordModal} className="hh-menu-item">
+              <KeyRound className="h-4 w-4 text-content-secondary" />
+              修改密码
             </button>
-
-            {menuOpen && (
-              <div className="absolute right-0 top-full z-50 mt-3 w-[260px] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-lg backdrop-blur-md animate-slide-down">
-                <div className="border-b border-surface-border px-4 py-4">
-                  <div className="flex items-center gap-3">
-                    {user?.avatar_url ? (
-                      <img src={user.avatar_url} alt="" className="h-11 w-11 rounded-full object-cover ring-2 ring-brand/10" />
-                    ) : (
-                      <span className="flex h-11 w-11 items-center justify-center rounded-full bg-brand/10 text-brand">
-                        <UserIcon className="h-5 w-5" />
-                      </span>
-                    )}
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="truncate text-sm font-semibold text-content">{user?.display_name || '用户'}</p>
-                        {user?.is_admin && (
-                          <span className="inline-flex items-center gap-1 rounded-pill bg-brand/10 px-2 py-0.5 text-[10px] font-semibold text-brand">
-                            <Shield className="h-3 w-3" />
-                            管理员
-                          </span>
-                        )}
-                      </div>
-                      <p className="truncate text-xs text-content-tertiary">{user?.username || '未命名用户'}</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-2">
-                  <button
-                    onClick={openPasswordModal}
-                    className="flex w-full items-center gap-3 rounded-[18px] px-3 py-3 text-sm text-content hover:bg-surface-hover"
-                  >
-                    <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-brand/10 text-brand">
-                      <KeyRound className="h-[18px] w-[18px]" />
-                    </span>
-                    修改密码
-                  </button>
-                  <button
-                    onClick={handleLogout}
-                    className="flex w-full items-center gap-3 rounded-[18px] px-3 py-3 text-sm text-red-500 hover:bg-red-50"
-                  >
-                    <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-red-50 text-red-500">
-                      <LogOut className="h-[18px] w-[18px]" />
-                    </span>
-                    退出登录
-                  </button>
-                </div>
-              </div>
-            )}
+            <button onClick={handleLogout} className="hh-menu-item text-red-500 hover:bg-red-50">
+              <LogOut className="h-4 w-4" />
+              退出登录
+            </button>
           </div>
-        </div>
+        )}
       </div>
 
       {passwordModalOpen && (
@@ -230,38 +197,25 @@ function PasswordModal({ onClose }: { onClose: () => void }) {
     }
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-[#2d130d]/50 backdrop-blur-sm" />
-
-      <div
-        className="relative w-full max-w-[430px] overflow-hidden rounded-modal border border-white/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.96)_0%,rgba(255,247,240,0.98)_100%)] shadow-xl animate-scale-in"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="border-b border-surface-border px-6 py-5">
-          <div className="mb-2 inline-flex items-center gap-2 rounded-pill bg-brand/10 px-3 py-1 text-xs font-medium text-brand">
-            <Sparkles className="h-3.5 w-3.5" />
-            安全中心
+  return createPortal(
+    <div className="hh-modal-mask" onClick={onClose}>
+      <div className="hh-modal max-w-[420px]" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+        <div className="hh-modal-head">
+          <div>
+            <p className="hh-eyebrow">账号安全</p>
+            <h3 className="mt-2 text-xl font-semibold tracking-tight text-content">{hasPassword ? '修改密码' : '设置密码'}</h3>
+            <p className="mt-1 text-sm text-content-secondary">为你的创作账号设置更安全的访问方式。</p>
           </div>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-lg font-semibold text-content">{hasPassword ? '修改密码' : '设置密码'}</h3>
-              <p className="mt-1 text-sm text-content-secondary">为你的创作账号设置更安全的访问方式。</p>
-            </div>
-            <button
-              onClick={onClose}
-              className="fanqie-toolbar-btn h-10 w-10 p-0"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
+          <button onClick={onClose} className="hh-icon-btn-plain -mr-2 -mt-1" aria-label="关闭">
+            <X className="h-4 w-4" />
+          </button>
         </div>
 
         {checking ? (
-          <div className="px-6 py-12 text-center text-sm text-content-secondary">正在检查密码状态...</div>
+          <div className="px-7 py-12 text-center text-sm text-content-secondary">正在检查密码状态...</div>
         ) : (
-          <form onSubmit={handleSubmit}>
-            <div className="space-y-4 px-6 py-5">
+          <form onSubmit={handleSubmit} className="flex min-h-0 flex-col">
+            <div className="hh-modal-body space-y-4">
               <PasswordField
                 label="新密码"
                 value={newPassword}
@@ -280,26 +234,19 @@ function PasswordModal({ onClose }: { onClose: () => void }) {
               />
             </div>
 
-            <div className="flex justify-end gap-3 border-t border-surface-border px-6 py-4">
-              <button
-                type="button"
-                onClick={onClose}
-                className="fanqie-secondary-btn"
-              >
+            <div className="hh-modal-foot">
+              <button type="button" onClick={onClose} className="hh-btn-ghost">
                 取消
               </button>
-              <button
-                type="submit"
-                disabled={loading}
-                className="fanqie-primary-btn disabled:cursor-not-allowed disabled:opacity-50"
-              >
+              <button type="submit" disabled={loading} className="hh-btn-primary">
                 {loading ? '提交中...' : '确认保存'}
               </button>
             </div>
           </form>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -320,7 +267,7 @@ function PasswordField({
 }) {
   return (
     <div>
-      <label className="mb-2 block text-sm font-medium text-content">{label}</label>
+      <label className="hh-label">{label}</label>
       <div className="relative">
         <input
           type={visible ? 'text' : 'password'}
@@ -328,12 +275,13 @@ function PasswordField({
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
           required
-          className="h-12 w-full rounded-[18px] px-4 pr-11 text-sm"
+          className="hh-field pr-11"
         />
         <button
           type="button"
           onClick={onToggle}
-          className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-content-tertiary hover:bg-surface-hover hover:text-content-secondary"
+          className="absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center text-content-tertiary hover:text-content-secondary"
+          aria-label={visible ? '隐藏密码' : '显示密码'}
         >
           {visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
         </button>

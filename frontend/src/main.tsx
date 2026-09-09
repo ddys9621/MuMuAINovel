@@ -10,6 +10,13 @@ createRoot(document.getElementById('root')!).render(
     <ConfigProvider
       theme={{
         token: {
+          colorPrimary: '#007aff',
+          colorText: '#0b1a33',
+          colorTextSecondary: '#5f7090',
+          colorTextTertiary: '#93a4be',
+          colorBorder: '#d9e4f3',
+          colorBorderSecondary: '#e8eff8',
+          fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif',
           borderRadius: 0,
           borderRadiusXS: 0,
           borderRadiusSM: 0,

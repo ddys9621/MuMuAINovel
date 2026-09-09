@@ -10,9 +10,11 @@
  * 设计动机：见 @/agent-docs/features/book_dissect_v3_imitation_design.md §5
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Sparkles, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Loader2, RefreshCw, Sparkles, StopCircle, X } from 'lucide-react';
 import { toast } from 'sonner';
 
+import { cn } from '@/lib/utils';
 import { imitationApi, referencePackApi } from '@/services/api';
 import { SSEPostClient } from '@/utils/sseClient';
 import type {
@@ -194,6 +196,15 @@ export function ImitationDialog({
         setProgress(p);
         if (message) setProgressMsg(message);
       },
+      // 流内 meta 事件：后端已按"实际产出"收敛 used_dimensions，这里直接消费，
+      // 不再依赖 onBlur 的 preview 请求（其结果可能过期）
+      onMeta: (m) => {
+        setMeta({
+          used_packs: (m.used_packs as ImitationPackUsage[]) ?? [],
+          used_dimensions: (m.used_dimensions as string[]) ?? [],
+          strength: (m.strength as ReferenceStrength) ?? 'medium',
+        });
+      },
       onChunk: (chunk) => {
         setDraft((prev) => {
           const next = prev + chunk;
@@ -226,10 +237,9 @@ export function ImitationDialog({
     }
   };
 
-  // 拦截 meta 事件：sseClient 走 default 分支，我们注入一个手动监听
-  // 通过 eventStream 不方便额外回调，这里用一种取巧方法：每次 onChunk 之前若 draft 还为空，可以借助一段内置文本透出 meta；
-  // 改进的思路：扩展 sseClient 增加 onMessage hook。当前简单做法 — 调用 preview 也能拿到 meta，但费一次请求。
-  // 折中：开始流之前先发一次 preview 请求，预填 meta（开销低且立即给用户反馈）。
+  // meta 获取有两条路：
+  // 1) 生成时：SSE 流内 type=meta 事件（上方 onMeta，权威来源，含"实际产出"的维度）
+  // 2) 生成前：意图输入框失焦时调一次 preview 做预估展示（下方，可能与最终选择有出入）
   const fetchMetaPreview = async () => {
     if (!userIntent.trim() || selectedPackIds.length === 0) return;
     try {
@@ -268,7 +278,8 @@ export function ImitationDialog({
       return;
     }
     onApply(draft);
-    toast.success('已追加到正文');
+    // 如实提示：此时只写入了编辑器 state，尚未持久化到数据库
+    toast.success('已追加到编辑器，请记得点击「保存」写入正文');
     onClose();
   };
 
@@ -278,70 +289,78 @@ export function ImitationDialog({
     (x) => x.pack_summary.status === 'ready' || x.pack_summary.status === 'partial',
   );
 
-  return (
-    <div className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-black/50 px-4 py-8">
-      <div className="relative my-auto bg-white shadow-xl w-full max-w-3xl mx-4 rounded-modal animate-scale-in max-h-[calc(100vh-4rem)] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 pt-5 pb-3 border-b border-surface-border flex-shrink-0">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-brand" />
-            <h2 className="text-lg font-bold text-content">
-              一键仿写：{targetChapterTitle}
-            </h2>
+  return createPortal(
+    <div className="hh-modal-mask z-[60]">
+      <div className="hh-modal max-w-[760px]" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+        <div className="hh-modal-head">
+          <div className="min-w-0">
+            <p className="hh-eyebrow">一键仿写</p>
+            <h2 className="mt-2 text-xl font-semibold tracking-tight text-content">为本章生成仿写草稿</h2>
+            <p className="mt-1 text-sm leading-6 text-content-secondary">
+              目标章节：{targetChapterTitle}。基于已挂载的拆书参考包生成草稿，确认后可追加到正文。
+            </p>
           </div>
-          <button onClick={onClose} className="text-content-tertiary hover:text-content">
-            <X className="w-5 h-5" />
+          <button onClick={onClose} className="hh-icon-btn-plain -mr-2 -mt-1" aria-label="关闭">
+            <X className="h-4 w-4" />
           </button>
         </div>
 
-        {/* Body */}
-        <div className="px-6 py-4 space-y-4 overflow-y-auto flex-1">
+        <div className="hh-modal-body space-y-5">
           {/* 已挂载参考包选择 */}
           <section>
-            <label className="block text-sm font-medium text-content mb-1.5">参考包（多选）</label>
+            <label className="hh-label">
+              参考包
+              <span className="ml-1.5 text-xs font-normal text-content-tertiary">可多选</span>
+            </label>
             {loadingAttachments ? (
-              <div className="flex items-center gap-2 text-sm text-content-tertiary">
-                <Loader2 className="w-4 h-4 animate-spin" />加载已挂载参考包…
+              <div className="flex items-center gap-2 text-sm text-content-secondary">
+                <Loader2 className="h-4 w-4 animate-spin text-brand" />
+                加载已挂载参考包…
               </div>
             ) : readyAttachments.length === 0 ? (
-              <div className="rounded-card border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              <div className="border border-amber-200 bg-amber-50/80 px-4 py-3 text-xs leading-5 text-amber-700">
                 当前项目尚未挂载任何就绪的参考包。请先到「项目设置 · 参考库」挂载至少一个参考包后再使用一键仿写。
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-                {readyAttachments.map((item) => (
-                  <label
-                    key={item.pack_id}
-                    className={`flex items-start gap-2 rounded-btn border px-3 py-2 cursor-pointer transition-colors ${
-                      selectedPackIds.includes(item.pack_id)
-                        ? 'border-brand bg-brand/5'
-                        : 'border-surface-border hover:bg-surface-hover'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      className="mt-0.5 accent-brand"
-                      checked={selectedPackIds.includes(item.pack_id)}
-                      onChange={() => togglePack(item.pack_id)}
-                    />
-                    <span className="flex-1 min-w-0">
-                      <span className="block text-sm font-medium text-content truncate">
-                        {item.pack_summary.source_book_title}
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {readyAttachments.map((item) => {
+                  const checked = selectedPackIds.includes(item.pack_id);
+                  return (
+                    <label
+                      key={item.pack_id}
+                      className={cn(
+                        'hh-subpanel flex cursor-pointer items-start gap-3 px-4 py-3 transition-colors',
+                        checked ? 'border-brand bg-brand/5' : 'hover:border-brand/40',
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 h-4 w-4"
+                        checked={checked}
+                        onChange={() => togglePack(item.pack_id)}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-content">
+                          {item.pack_summary.source_book_title}
+                        </span>
+                        <span className="mt-0.5 block text-[11px] text-content-tertiary">
+                          生成维度：{item.pack_summary.generated_dimensions.length} 个 · 默认强度：
+                          {STRENGTH_LABELS[item.default_strength] || item.default_strength}
+                        </span>
                       </span>
-                      <span className="block text-[11px] text-content-tertiary mt-0.5">
-                        生成维度：{item.pack_summary.generated_dimensions.length} 个 · 默认强度：
-                        {STRENGTH_LABELS[item.default_strength] || item.default_strength}
-                      </span>
-                    </span>
-                  </label>
-                ))}
+                    </label>
+                  );
+                })}
               </div>
             )}
           </section>
 
           {/* 维度多选 */}
           <section>
-            <label className="block text-sm font-medium text-content mb-1.5">参考维度（多选）</label>
+            <label className="hh-label">
+              参考维度
+              <span className="ml-1.5 text-xs font-normal text-content-tertiary">可多选</span>
+            </label>
             <div className="flex flex-wrap gap-1.5">
               {(Object.keys(DIMENSION_LABELS) as ReferenceDimension[]).map((d) => {
                 const enabled = availableDimensions.has(d);
@@ -352,51 +371,50 @@ export function ImitationDialog({
                     type="button"
                     disabled={!enabled}
                     onClick={() => toggleDimension(d)}
-                    className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-                      !enabled
-                        ? 'border-surface-border text-content-tertiary opacity-40 cursor-not-allowed'
-                        : checked
-                          ? 'border-brand bg-brand text-white'
-                          : 'border-surface-border text-content-secondary hover:bg-surface-hover'
-                    }`}
+                    className={cn('hh-chip', enabled && checked && 'hh-chip--active')}
                   >
                     {DIMENSION_LABELS[d]}
                   </button>
                 );
               })}
             </div>
-            <p className="mt-1 text-[11px] text-content-tertiary">
-              灰色项表示所选参考包未生成该维度，无法启用。"灵感语料"始终可用（来自原书章节摘要）。
+            <p className="mt-2 text-xs leading-5 text-content-tertiary">
+              灰色项表示所选参考包未生成该维度，无法启用。「灵感语料」始终可用（来自原书章节摘要）。
             </p>
           </section>
 
           {/* 强度 */}
           <section>
-            <label className="block text-sm font-medium text-content mb-1.5">参考强度</label>
-            <div className="inline-flex rounded-btn border border-surface-border overflow-hidden">
-              {(Object.keys(STRENGTH_LABELS) as ReferenceStrength[]).map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setStrength(s)}
-                  className={`px-3 py-1.5 text-xs transition-colors ${
-                    strength === s ? 'bg-brand text-white' : 'text-content-secondary hover:bg-surface-hover'
-                  }`}
-                >
-                  {STRENGTH_LABELS[s]}
-                </button>
-              ))}
+            <label className="hh-label">参考强度</label>
+            <div className="inline-flex border border-surface-border bg-white/60 p-1">
+              {(Object.keys(STRENGTH_LABELS) as ReferenceStrength[]).map((s) => {
+                const selected = strength === s;
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setStrength(s)}
+                    className={cn(
+                      'px-3.5 py-1.5 text-xs font-medium transition-colors',
+                      selected ? 'bg-brand text-white shadow-[0_8px_20px_-12px_rgba(0,122,255,0.6)]' : 'text-content-secondary hover:text-content',
+                    )}
+                  >
+                    {STRENGTH_LABELS[s]}
+                  </button>
+                );
+              })}
             </div>
-            <p className="mt-1 text-[11px] text-content-tertiary">
+            <p className="mt-2 text-xs leading-5 text-content-tertiary">
               轻：仅文风 · 中：核心维度按需裁剪 · 深：全维度足量参考（成本最高）
             </p>
           </section>
 
           {/* 目标字数 */}
           <section>
-            <label className="block text-sm font-medium text-content mb-1">
-              目标字数：{targetWordCount.toLocaleString()} 字
-            </label>
+            <div className="mb-1.5 flex items-center justify-between gap-3">
+              <label className="text-[13px] font-medium text-content">目标字数</label>
+              <span className="text-xs text-content-tertiary tabular-nums">{targetWordCount.toLocaleString()} 字</span>
+            </div>
             <input
               type="range"
               min={500}
@@ -410,83 +428,76 @@ export function ImitationDialog({
 
           {/* 意图 */}
           <section>
-            <label className="block text-sm font-medium text-content mb-1">本次创作意图</label>
+            <label className="hh-label">本次创作意图</label>
             <textarea
               value={userIntent}
               onChange={(e) => setUserIntent(e.target.value)}
               onBlur={fetchMetaPreview}
               placeholder="例如：主角第一次面对宿敌；要写出从压抑到爆发的情绪曲线，结尾留个钩子"
               rows={3}
-              className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none resize-y leading-relaxed"
+              className="hh-textarea"
             />
           </section>
 
           {/* Meta 预览 */}
           {meta && !generating && (
-            <div className="rounded-card border border-surface-border bg-surface/40 px-3 py-2 text-xs text-content-secondary leading-6">
-              本次将启用 <strong>{meta.used_packs.length}</strong> 个参考包，
-              共 <strong>{meta.used_dimensions.length}</strong> 个维度（
+            <div className="hh-subpanel px-4 py-3 text-xs leading-6 text-content-secondary">
+              本次将启用 <strong className="font-semibold text-content">{meta.used_packs.length}</strong> 个参考包，
+              共 <strong className="font-semibold text-content">{meta.used_dimensions.length}</strong> 个维度（
               {meta.used_dimensions.map((d) => DIMENSION_LABELS[d as ReferenceDimension] || d).join(' · ')}），
-              强度 <strong>{STRENGTH_LABELS[meta.strength] || meta.strength}</strong>。
+              强度 <strong className="font-semibold text-content">{STRENGTH_LABELS[meta.strength] || meta.strength}</strong>。
             </div>
           )}
 
           {errorMsg && (
-            <div className="rounded-card border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
+            <div className="border border-red-200 bg-red-50/80 px-4 py-3 text-xs leading-5 text-red-600">
               {errorMsg}
             </div>
           )}
 
           {/* 草稿区 */}
           {(generating || draft) && (
-            <section className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="block text-sm font-medium text-content">生成草稿</label>
-                <span className="text-xs text-content-tertiary">
+            <section>
+              <div className="mb-1.5 flex items-center justify-between gap-3">
+                <label className="text-[13px] font-medium text-content">生成草稿</label>
+                <span className="truncate text-xs text-content-tertiary tabular-nums">
                   {draft.length.toLocaleString()} 字 · {progress}%
                   {progressMsg ? ` · ${progressMsg}` : ''}
                 </span>
               </div>
+              {generating && (
+                <div className="hh-progress mb-2">
+                  <div className="hh-progress-bar" style={{ width: `${Math.min(progress, 100)}%` }} />
+                </div>
+              )}
               <textarea
                 ref={draftRef}
                 value={draft}
                 readOnly
                 rows={10}
-                className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm bg-surface/30 leading-relaxed resize-y"
+                className="hh-textarea leading-7"
                 placeholder={generating ? 'AI 正在创作中…' : '生成完成'}
               />
             </section>
           )}
         </div>
 
-        {/* Footer */}
-        <div className="flex justify-end gap-2 px-6 py-3 border-t border-surface-border flex-shrink-0">
-          <button
-            onClick={onClose}
-            className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm transition-colors"
-          >
+        <div className="hh-modal-foot">
+          <button onClick={onClose} className="hh-btn-ghost">
             关闭
           </button>
           {generating ? (
-            <button
-              onClick={handleCancel}
-              className="border border-red-200 text-red-600 hover:bg-red-50 rounded-btn px-4 py-2 text-sm transition-colors"
-            >
+            <button onClick={handleCancel} className="hh-btn-ghost text-red-500 hover:bg-red-50 hover:text-red-600">
+              <StopCircle className="h-4 w-4" />
               取消生成
             </button>
           ) : draft ? (
             <>
-              <button
-                onClick={handleStart}
-                disabled={selectedPackIds.length === 0}
-                className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm transition-colors disabled:opacity-50"
-              >
+              <button onClick={handleStart} disabled={selectedPackIds.length === 0} className="hh-btn-secondary">
+                <RefreshCw className="h-4 w-4" />
                 重新生成
               </button>
-              <button
-                onClick={handleApply}
-                className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm transition-colors"
-              >
+              <button onClick={handleApply} className="hh-btn-primary">
                 追加到正文
               </button>
             </>
@@ -494,14 +505,16 @@ export function ImitationDialog({
             <button
               onClick={handleStart}
               disabled={selectedPackIds.length === 0 || !userIntent.trim() || readyAttachments.length === 0}
-              className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm transition-colors disabled:opacity-50"
+              className="hh-btn-primary"
             >
+              <Sparkles className="h-4 w-4" />
               生成草稿
             </button>
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

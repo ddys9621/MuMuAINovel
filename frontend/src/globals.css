@@ -22,9 +22,10 @@
   body {
     @apply bg-surface text-content font-sans antialiased;
     background-image:
-      radial-gradient(circle at top left, rgba(255, 140, 102, 0.16), transparent 30%),
-      radial-gradient(circle at top right, rgba(255, 203, 148, 0.16), transparent 28%),
-      linear-gradient(180deg, #fffaf4 0%, #fff7f0 45%, #fff4eb 100%);
+      radial-gradient(ellipse 55% 45% at 10% 5%, rgba(0, 122, 255, 0.12), transparent 70%),
+      radial-gradient(ellipse 50% 45% at 90% 95%, rgba(96, 170, 255, 0.14), transparent 70%),
+      linear-gradient(180deg, #f6f9fd 0%, #eaf1fb 100%);
+    background-attachment: fixed;
   }
 
   a,
@@ -43,15 +44,27 @@
   input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
   textarea,
   select {
-    @apply border border-surface-border bg-white/90 text-content placeholder:text-content-tertiary;
+    @apply border border-surface-border bg-white/65 text-content placeholder:text-content-tertiary;
     border-radius: 0;
-    box-shadow: 0 2px 8px rgba(166, 74, 33, 0.05);
+    box-shadow: 0 1px 2px rgba(15, 43, 96, 0.04);
   }
 
   input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):focus,
   textarea:focus,
   select:focus {
-    @apply border-brand outline-none ring-4 ring-brand/10;
+    @apply border-brand bg-white/95 outline-none;
+    box-shadow: 0 0 0 4px rgba(0, 122, 255, 0.16);
+  }
+
+  input[type='checkbox'],
+  input[type='radio'] {
+    accent-color: #007aff;
+  }
+
+  /* 页面里直接写的全屏弹窗遮罩（fixed inset-0）常是 space-y-* 容器的子元素，
+     会被兄弟间距加上 margin-top，导致遮罩顶部露出一条；全屏定位层不应受兄弟间距影响 */
+  .fixed.inset-0 {
+    margin: 0 !important;
   }
 
   ::-webkit-scrollbar {
@@ -64,127 +77,188 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: rgba(186, 125, 92, 0.35);
+    background: rgba(95, 112, 144, 0.28);
     border-radius: 0;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(186, 125, 92, 0.55);
+    background: rgba(95, 112, 144, 0.45);
   }
 
   ::selection {
-    background: rgba(255, 90, 60, 0.18);
+    background: rgba(0, 122, 255, 0.18);
   }
 }
 
 @layer components {
-  .fanqie-card {
-    @apply border border-white/80 bg-white/90 shadow-card backdrop-blur-sm;
+  /* ─── 背景光斑 / 玻璃面板 ─── */
+  .hh-orb {
+    @apply pointer-events-none absolute;
+    border-radius: 50%;
+    filter: blur(96px);
   }
 
-  .fanqie-soft-card {
-    @apply border border-[#f4e1d5] bg-gradient-to-br from-white via-[#fffaf6] to-[#fff1e8] shadow-card;
+  .hh-glass {
+    @apply relative border backdrop-blur-2xl backdrop-saturate-150;
+    border-color: rgba(255, 255, 255, 0.78);
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.74) 0%, rgba(255, 255, 255, 0.5) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.95),
+      0 0 0 1px rgba(15, 43, 96, 0.05),
+      0 30px 80px -36px rgba(15, 43, 96, 0.35);
   }
 
-  .fanqie-outline-card {
-    @apply border border-dashed border-brand/25 bg-white/70;
+  /* 注意：panel 会包裹页面内容，不能用 backdrop-filter / transform —— 它们会把内部 position: fixed 的弹窗遮罩
+     圈在面板范围内（containing block），模糊效果只放在 hh-glass（弹窗壳 / 侧栏 / 菜单）上 */
+  .hh-panel {
+    @apply relative border;
+    border-color: rgba(255, 255, 255, 0.85);
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.72) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.95),
+      0 0 0 1px rgba(15, 43, 96, 0.04),
+      0 18px 40px -28px rgba(15, 43, 96, 0.28);
   }
 
-  .fanqie-chip {
-    @apply inline-flex items-center gap-1 border border-white/70 bg-white/80 px-3 py-1 text-xs font-medium text-content-secondary shadow-xs backdrop-blur-sm;
+  .hh-subpanel {
+    @apply border border-surface-border bg-white/60;
   }
 
-  .fanqie-primary-btn {
-    @apply inline-flex items-center justify-center gap-2 bg-brand px-4 py-2.5 text-sm font-medium text-white shadow-xs shadow-brand/25 hover:bg-brand-600 active:scale-[0.98];
-  }
-
-  .fanqie-secondary-btn {
-    @apply inline-flex items-center justify-center gap-2 border border-surface-border bg-white/85 px-4 py-2.5 text-sm font-medium text-content-secondary shadow-xs hover:bg-surface-hover hover:text-content;
-  }
-
-  .fanqie-toolbar-btn {
-    @apply inline-flex items-center justify-center gap-2 border border-white/80 bg-white/75 px-3 py-2 text-sm text-content-secondary shadow-xs hover:-translate-y-0.5 hover:bg-white hover:text-content;
-  }
-
-  .mu-page-header {
-    @apply relative border border-surface-border bg-white/95 shadow-xs;
-    border-left-width: 3px;
-    border-left-color: #ff5a3c;
-  }
-
-  .mu-page-header__row {
-    @apply flex flex-col gap-3 px-5 py-4 md:flex-row md:items-start md:justify-between md:gap-6;
-  }
-
-  .mu-page-header__eyebrow {
+  /* ─── 文字 ─── */
+  .hh-eyebrow {
     @apply inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.22em] text-brand;
   }
 
-  .mu-page-header__title {
-    @apply mt-2 text-[20px] font-semibold leading-tight text-content md:text-[22px];
+  .hh-label {
+    @apply mb-1.5 block text-[13px] font-medium text-content;
   }
 
-  .mu-page-header__subtitle {
-    @apply mt-1 text-xs leading-6 text-content-secondary md:text-[13px];
+  /* ─── 表单 ─── */
+  .hh-field {
+    @apply h-11 w-full px-4 text-sm;
   }
 
-  .mu-page-header__actions {
-    @apply flex shrink-0 flex-wrap items-center gap-2;
+  .hh-textarea {
+    @apply w-full resize-none px-4 py-3 text-sm leading-6;
   }
 
-  .mu-page-header__btn {
-    @apply inline-flex items-center gap-1.5 border border-surface-border bg-white px-3.5 py-2 text-sm text-content-secondary shadow-xs hover:border-brand hover:text-brand;
+  /* ─── 按钮 ─── */
+  .hh-btn-primary {
+    @apply inline-flex h-11 items-center justify-center gap-2 bg-brand px-5 text-sm font-medium text-white hover:bg-brand-600 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 disabled:active:scale-100;
+    box-shadow: 0 12px 28px -12px rgba(0, 122, 255, 0.55);
   }
 
-  .mu-page-header__btn-primary {
-    @apply inline-flex items-center gap-1.5 border border-brand bg-brand px-3.5 py-2 text-sm font-medium text-white shadow-xs hover:bg-brand-600 active:scale-[0.98];
+  .hh-btn-secondary {
+    @apply inline-flex h-11 items-center justify-center gap-2 border border-surface-border bg-white/70 px-5 text-sm font-medium text-content hover:border-brand/40 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60;
+    box-shadow: 0 1px 2px rgba(15, 43, 96, 0.04);
   }
 
-  .mu-page-header__stats {
-    @apply flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-surface-border-light bg-[#fff9f3] px-5 py-2.5;
+  .hh-btn-ghost {
+    @apply inline-flex h-11 items-center justify-center gap-2 px-4 text-sm font-medium text-content-secondary hover:bg-brand/5 hover:text-content disabled:cursor-not-allowed disabled:opacity-60;
   }
 
-  .mu-page-header__stat {
-    @apply inline-flex items-center gap-1.5 text-xs text-content-secondary;
+  .hh-btn-danger {
+    @apply inline-flex h-11 items-center justify-center gap-2 bg-red-500 px-5 text-sm font-medium text-white hover:bg-red-600 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60;
+    box-shadow: 0 12px 28px -12px rgba(239, 68, 68, 0.5);
   }
 
-  .mu-page-header__stat-value {
-    @apply text-sm font-semibold text-content tabular-nums;
+  .hh-btn-sm {
+    @apply h-9 px-3.5 text-[13px];
   }
 
-  .mu-page-header__stat-divider {
-    @apply hidden h-3 w-px bg-surface-border md:inline-block;
+  .hh-icon-btn {
+    @apply inline-flex h-10 w-10 shrink-0 items-center justify-center border border-surface-border bg-white/70 text-content-secondary hover:border-brand/40 hover:bg-white hover:text-content disabled:cursor-not-allowed disabled:opacity-50;
   }
 
-  .hh-hero-shell {
-    @apply relative overflow-hidden border border-white/70 text-white shadow-lg;
-    background: linear-gradient(135deg, rgba(255, 130, 86, 0.96) 0%, rgba(255, 170, 95, 0.9) 58%, rgba(255, 220, 170, 0.84) 100%);
+  .hh-icon-btn-plain {
+    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center text-content-tertiary hover:bg-brand/5 hover:text-content;
   }
 
-  .hh-hero-eyebrow {
-    @apply inline-flex items-center gap-2 bg-white/15 px-3 py-1.5 text-xs font-medium backdrop-blur-sm;
+  /* ─── 选择 chip ─── */
+  .hh-chip {
+    @apply inline-flex items-center gap-1.5 border border-surface-border bg-white/70 px-3 py-1.5 text-xs font-medium text-content-secondary hover:border-brand/40 hover:text-brand disabled:cursor-not-allowed disabled:opacity-50;
   }
 
-  .hh-hero-tag {
-    @apply bg-white/15 px-3 py-1 text-xs font-medium text-white/90;
+  .hh-chip--active {
+    @apply border-brand bg-brand text-white hover:text-white;
+    box-shadow: 0 8px 20px -12px rgba(0, 122, 255, 0.6);
   }
 
-  .hh-hero-sidecard {
-    @apply border p-4 backdrop-blur-sm;
-    border-color: rgba(255, 255, 255, 0.16);
-    background-color: rgba(255, 255, 255, 0.12);
-    box-shadow: 0 26px 50px -34px rgba(120, 53, 25, 0.45);
+  .hh-tag {
+    @apply inline-flex items-center gap-1 bg-brand/[0.08] px-2.5 py-1 text-xs font-medium text-brand;
   }
 
-  .hh-hero-metric {
-    @apply px-4 py-4 backdrop-blur-sm;
-    background-color: rgba(255, 255, 255, 0.14);
+  /* ─── 下拉菜单 ─── */
+  .hh-menu {
+    @apply hh-glass z-30 p-1.5 animate-slide-down;
   }
 
-  .hh-sidebar-note {
-    @apply relative border p-3.5 text-sidebar-text backdrop-blur-sm;
-    border-color: rgba(255, 255, 255, 0.1);
-    background-color: rgba(255, 255, 255, 0.05);
-    box-shadow: 0 20px 40px -28px rgba(0, 0, 0, 0.45);
+  .hh-menu-item {
+    @apply flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm text-content hover:bg-brand/[0.08];
+  }
+
+  /* ─── 弹窗 ─── */
+  .hh-modal-mask {
+    @apply fixed inset-0 z-50 flex items-center justify-center px-4 py-6 animate-fade-in;
+    background: rgba(11, 26, 51, 0.32);
+    backdrop-filter: blur(6px);
+  }
+
+  .hh-modal {
+    @apply hh-glass flex w-full flex-col overflow-hidden animate-scale-in;
+    max-height: calc(100dvh - 3rem);
+  }
+
+  .hh-modal-head {
+    @apply flex shrink-0 items-start justify-between gap-4 border-b px-7 pt-6 pb-5;
+    border-color: rgba(217, 228, 243, 0.8);
+  }
+
+  .hh-modal-body {
+    @apply min-h-0 flex-1 overflow-y-auto px-7 py-6;
+  }
+
+  .hh-modal-foot {
+    @apply flex shrink-0 flex-wrap items-center justify-end gap-2.5 border-t px-7 py-4;
+    border-color: rgba(217, 228, 243, 0.8);
+    background: rgba(255, 255, 255, 0.35);
+  }
+
+  /* ─── 进度条 ─── */
+  .hh-progress {
+    @apply h-1.5 w-full overflow-hidden bg-brand/10;
+  }
+
+  .hh-progress-bar {
+    @apply h-full bg-brand transition-all duration-500;
+  }
+
+  /* ─── 兼容旧类名（章节阅读器 / 项目详情仍在使用）─── */
+  .fanqie-card {
+    @apply hh-panel;
+  }
+
+  .fanqie-soft-card {
+    @apply hh-panel;
+  }
+
+  .fanqie-outline-card {
+    @apply border border-dashed border-brand/30 bg-white/50;
+  }
+
+  .fanqie-chip {
+    @apply inline-flex items-center gap-1 border border-surface-border bg-white/70 px-3 py-1 text-xs font-medium text-content-secondary;
+  }
+
+  .fanqie-primary-btn {
+    @apply hh-btn-primary h-10 px-4;
+  }
+
+  .fanqie-secondary-btn {
+    @apply hh-btn-secondary h-10 px-4;
+  }
+
+  .fanqie-toolbar-btn {
+    @apply inline-flex items-center justify-center gap-2 border border-surface-border bg-white/70 px-3 py-2 text-sm text-content-secondary hover:bg-white hover:text-content;
   }
 }

@@ -1,6 +1,8 @@
-import { useEffect, useState, useCallback } from 'react'
-import { GitBranch, Plus, Pencil, Trash2, Loader2, Heart, Swords, Users, Handshake, Minus } from 'lucide-react'
+import { useEffect, useState, useCallback, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { GitBranch, Plus, Pencil, Trash2, Loader2, Heart, Swords, Users, Handshake, Minus, X } from 'lucide-react'
 import { toast } from 'sonner'
+import { cn } from '@/lib/utils'
 import { useStore } from '@/store/index'
 import { relationshipApi, characterApi } from '@/services/api'
 import { Modal } from '@/components/ui/Modal'
@@ -41,14 +43,14 @@ interface RelationshipForm {
   description: string
 }
 
-const CATEGORY_STYLES: Record<string, { bg: string; text: string; icon: React.ReactNode }> = {
-  friendly:  { bg: 'bg-green-100', text: 'text-green-700', icon: <Handshake className="w-3.5 h-3.5" /> },
-  hostile:   { bg: 'bg-red-100',   text: 'text-red-700',   icon: <Swords className="w-3.5 h-3.5" /> },
-  neutral:   { bg: 'bg-gray-100',  text: 'text-gray-600',  icon: <Minus className="w-3.5 h-3.5" /> },
-  romantic:  { bg: 'bg-pink-100',  text: 'text-pink-700',  icon: <Heart className="w-3.5 h-3.5" /> },
-  family:    { bg: 'bg-blue-100',  text: 'text-blue-700',  icon: <Users className="w-3.5 h-3.5" /> },
+const CATEGORY_STYLES: Record<string, { icon: ReactNode }> = {
+  friendly:  { icon: <Handshake className="h-3.5 w-3.5" /> },
+  hostile:   { icon: <Swords className="h-3.5 w-3.5" /> },
+  neutral:   { icon: <Minus className="h-3.5 w-3.5" /> },
+  romantic:  { icon: <Heart className="h-3.5 w-3.5" /> },
+  family:    { icon: <Users className="h-3.5 w-3.5" /> },
 }
-const DEFAULT_STYLE = { bg: 'bg-gray-100', text: 'text-gray-600', icon: <GitBranch className="w-3.5 h-3.5" /> }
+const DEFAULT_STYLE = { icon: <GitBranch className="h-3.5 w-3.5" /> }
 
 const STATUS_OPTIONS = [
   { value: 'active', label: '进行中' },
@@ -56,6 +58,13 @@ const STATUS_OPTIONS = [
   { value: 'past', label: '已结束' },
   { value: 'complicated', label: '复杂' },
 ]
+
+const STATUS_STYLES: Record<string, string> = {
+  active: 'bg-emerald-50 text-emerald-600',
+  broken: 'bg-red-50 text-red-600',
+  past: 'bg-surface-hover text-content-secondary',
+  complicated: 'bg-amber-50 text-amber-600',
+}
 
 const emptyForm: RelationshipForm = {
   character_from_id: '',
@@ -118,6 +127,7 @@ export default function Relationships() {
     if (!t) return DEFAULT_STYLE
     return CATEGORY_STYLES[t.category] ?? DEFAULT_STYLE
   }
+  const getStatusLabel = (status: string) => STATUS_OPTIONS.find(o => o.value === status)?.label ?? status
 
   const openCreate = () => {
     setEditingId(null)
@@ -201,158 +211,195 @@ export default function Relationships() {
 
   const selectableChars = characters.filter(c => !c.is_organization)
 
-  return (
-    <div className="space-y-6">
-      {/* 标题区 */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-content">关系管理</h1>
-        <button onClick={openCreate} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5">
-          <Plus className="w-4 h-4" />
-          添加关系
-        </button>
-      </div>
+  const hasRelationships = relationships.length > 0
+  const involvedCount = new Set(relationships.flatMap(r => [r.character_from_id, r.character_to_id])).size
+  const activeCount = relationships.filter(r => r.status === 'active').length
+  const avgIntimacy = hasRelationships
+    ? Math.round(relationships.reduce((sum, r) => sum + (r.intimacy_level ?? 0), 0) / relationships.length)
+    : 0
+  const deletingRel = deleteConfirmId ? relationships.find(r => r.id === deleteConfirmId) : undefined
 
-      {/* 内容区 */}
-      {loading ? (
-        <div className="flex justify-center py-12">
-          <Loader2 className="w-6 h-6 animate-spin text-content-secondary" />
+  return (
+    <div className="animate-fade-in space-y-6">
+      <section className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-[28px] font-semibold tracking-tight text-content md:text-[32px]">关系管理</h1>
+          <p className="mt-2 max-w-[560px] text-sm leading-6 text-content-secondary">
+            记录角色两两之间的关系类型、亲密度与当前状态，理清人物脉络。
+            {hasRelationships && `当前共 ${relationships.length} 条关系。`}
+          </p>
         </div>
-      ) : relationships.length === 0 ? (
-        <div className="text-center py-16 text-content-secondary text-sm">
-          <GitBranch className="w-10 h-10 mx-auto mb-3 opacity-30" />
-          <p className="mb-4">还没有角色关系</p>
-          <button onClick={openCreate} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5">
-            <Plus className="w-4 h-4" />
-            创建第一个关系
+        <div className="flex shrink-0 flex-wrap items-center gap-2.5">
+          <button onClick={openCreate} className="hh-btn-primary">
+            <Plus className="h-4 w-4" />
+            添加关系
           </button>
         </div>
-      ) : (
-        <div className="space-y-3">
-          {relationships.map(rel => {
-            const style = getTypeStyle(rel.relationship_type_id)
-            return (
-              <div key={rel.id} className="bg-white border border-surface-border rounded-card p-4">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <span className="text-sm font-medium text-content shrink-0">{getCharName(rel.character_from_id)}</span>
-                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium shrink-0 ${style.bg} ${style.text}`}>
-                      {style.icon}
-                      {rel.relationship_name || getTypeName(rel.relationship_type_id)}
-                    </span>
-                    <span className="text-sm font-medium text-content shrink-0">{getCharName(rel.character_to_id)}</span>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-xs text-content-secondary">亲密度: {rel.intimacy_level}</span>
-                    <button onClick={() => openEdit(rel)} className="p-1.5 text-content-secondary hover:text-brand rounded transition-colors" title="编辑">
-                      <Pencil className="w-4 h-4" />
-                    </button>
-                    {deleteConfirmId === rel.id ? (
-                      <div className="flex items-center gap-1">
-                        <button onClick={() => handleDelete(rel.id)} className="px-2 py-1 text-xs bg-red-500 text-white rounded-btn hover:bg-red-600 transition-colors">确认</button>
-                        <button onClick={() => setDeleteConfirmId(null)} className="px-2 py-1 text-xs border border-surface-border text-content-secondary rounded-btn hover:bg-surface-hover transition-colors">取消</button>
-                      </div>
-                    ) : (
-                      <button onClick={() => setDeleteConfirmId(rel.id)} className="p-1.5 text-content-secondary hover:text-red-500 rounded transition-colors" title="删除">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-                {rel.description && (
-                  <p className="mt-2 text-xs text-content-secondary leading-relaxed">{rel.description}</p>
-                )}
-              </div>
-            )
-          })}
-        </div>
+      </section>
+
+      {hasRelationships && !loading && (
+        <section className="hh-panel grid grid-cols-2 divide-surface-border/80 md:grid-cols-4 md:divide-x">
+          <StatItem label="关系总数" value={relationships.length} />
+          <StatItem label="涉及角色" value={involvedCount} />
+          <StatItem label="进行中" value={activeCount} />
+          <StatItem label="平均亲密度" value={avgIntimacy} />
+        </section>
       )}
 
-      {/* 添加/编辑弹窗 */}
+      {loading ? (
+        <section className="hh-panel flex items-center justify-center py-14">
+          <Loader2 className="h-6 w-6 animate-spin text-brand" />
+        </section>
+      ) : !hasRelationships ? (
+        <section className="hh-panel flex flex-col items-center px-6 py-14 text-center">
+          <span className="flex h-14 w-14 items-center justify-center bg-brand/10 text-brand">
+            <GitBranch className="h-7 w-7" />
+          </span>
+          <h2 className="mt-5 text-xl font-semibold tracking-tight text-content">还没有角色关系</h2>
+          <p className="mt-2 max-w-md text-sm leading-6 text-content-secondary">
+            点击右上角「添加关系」，选择两位角色并标注他们之间的关系类型、亲密度与状态。
+          </p>
+        </section>
+      ) : (
+        <section className="hh-panel overflow-hidden">
+          <ul className="divide-y divide-surface-border/80">
+            {relationships.map(rel => {
+              const style = getTypeStyle(rel.relationship_type_id)
+              return (
+                <li key={rel.id} className="px-5 py-4 transition-colors hover:bg-brand/[0.04] md:px-6">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2.5">
+                      <span className="text-[15px] font-semibold text-content">{getCharName(rel.character_from_id)}</span>
+                      <span className="hh-tag">
+                        {style.icon}
+                        {rel.relationship_name || getTypeName(rel.relationship_type_id)}
+                      </span>
+                      <span className="text-[15px] font-semibold text-content">{getCharName(rel.character_to_id)}</span>
+                      <span
+                        className={cn(
+                          'px-2 py-0.5 text-[11px] font-medium',
+                          STATUS_STYLES[rel.status] ?? 'bg-surface-hover text-content-secondary',
+                        )}
+                      >
+                        {getStatusLabel(rel.status)}
+                      </span>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <span className="mr-2 text-xs text-content-tertiary">
+                        亲密度 <span className="font-medium text-content tabular-nums">{rel.intimacy_level}</span>
+                      </span>
+                      <button onClick={() => openEdit(rel)} className="hh-icon-btn-plain h-8 w-8" title="编辑" aria-label="编辑">
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => setDeleteConfirmId(rel.id)}
+                        className="hh-icon-btn-plain h-8 w-8 hover:text-red-500"
+                        title="删除"
+                        aria-label="删除"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                  {rel.description && (
+                    <p className="mt-2 text-[13px] leading-6 text-content-secondary">{rel.description}</p>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      )}
+
       {showModal && (
         <Modal
           title={editingId ? '编辑关系' : '添加关系'}
           onClose={closeModal}
           size="xl"
+          closeOnMaskClick={false}
           footer={(
             <>
-              <button onClick={closeModal} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm transition-colors">
+              <button onClick={closeModal} className="hh-btn-ghost">
                 取消
               </button>
-              <button onClick={handleSave} disabled={saving} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 inline-flex items-center gap-1.5">
-                {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+              <button onClick={handleSave} disabled={saving} className="hh-btn-primary">
+                {saving && <Loader2 className="h-4 w-4 animate-spin" />}
                 {editingId ? '保存' : '创建'}
               </button>
             </>
           )}
         >
-          <div className="space-y-4">
-            {/* 角色A */}
-            <div>
-              <label className="block text-sm font-medium text-content mb-1">角色A</label>
-              <select
-                value={form.character_from_id}
-                onChange={e => setForm(f => ({ ...f, character_from_id: e.target.value }))}
-                disabled={!!editingId}
-                className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <option value="">请选择角色</option>
-                {selectableChars.map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
+          <div className="space-y-5">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="hh-label">角色A</label>
+                <select
+                  value={form.character_from_id}
+                  onChange={e => setForm(f => ({ ...f, character_from_id: e.target.value }))}
+                  disabled={!!editingId}
+                  className="hh-field disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="">请选择角色</option>
+                  {selectableChars.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="hh-label">角色B</label>
+                <select
+                  value={form.character_to_id}
+                  onChange={e => setForm(f => ({ ...f, character_to_id: e.target.value }))}
+                  disabled={!!editingId}
+                  className="hh-field disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="">请选择角色</option>
+                  {selectableChars.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
             </div>
 
-            {/* 角色B */}
-            <div>
-              <label className="block text-sm font-medium text-content mb-1">角色B</label>
-              <select
-                value={form.character_to_id}
-                onChange={e => setForm(f => ({ ...f, character_to_id: e.target.value }))}
-                disabled={!!editingId}
-                className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <option value="">请选择角色</option>
-                {selectableChars.map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="hh-label">关系类型</label>
+                <select
+                  value={form.relationship_type_id}
+                  onChange={e => {
+                    const val = e.target.value
+                    setForm(f => ({ ...f, relationship_type_id: val === '' ? '' : Number(val) }))
+                  }}
+                  className="hh-field"
+                >
+                  <option value="">请选择关系类型</option>
+                  {types.map(t => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="hh-label">
+                  自定义关系名称
+                  <span className="ml-1.5 text-xs font-normal text-content-tertiary">可选</span>
+                </label>
+                <input
+                  type="text"
+                  value={form.relationship_name}
+                  onChange={e => setForm(f => ({ ...f, relationship_name: e.target.value }))}
+                  placeholder="如不填则使用关系类型名称"
+                  className="hh-field"
+                />
+              </div>
             </div>
 
-            {/* 关系类型 */}
             <div>
-              <label className="block text-sm font-medium text-content mb-1">关系类型</label>
-              <select
-                value={form.relationship_type_id}
-                onChange={e => {
-                  const val = e.target.value
-                  setForm(f => ({ ...f, relationship_type_id: val === '' ? '' : Number(val) }))
-                }}
-                className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none"
-              >
-                <option value="">请选择关系类型</option>
-                {types.map(t => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* 自定义关系名称 */}
-            <div>
-              <label className="block text-sm font-medium text-content mb-1">自定义关系名称（可选）</label>
-              <input
-                type="text"
-                value={form.relationship_name}
-                onChange={e => setForm(f => ({ ...f, relationship_name: e.target.value }))}
-                placeholder="如不填则使用关系类型名称"
-                className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none"
-              />
-            </div>
-
-            {/* 亲密度 */}
-            <div>
-              <label className="block text-sm font-medium text-content mb-1">
-                亲密度: {form.intimacy_level}
-              </label>
+              <div className="mb-1.5 flex items-center justify-between gap-3">
+                <label className="text-[13px] font-medium text-content">亲密度</label>
+                <span className="text-xs text-content-tertiary tabular-nums">{form.intimacy_level}</span>
+              </div>
               <input
                 type="range"
                 min={-100}
@@ -361,20 +408,19 @@ export default function Relationships() {
                 onChange={e => setForm(f => ({ ...f, intimacy_level: Number(e.target.value) }))}
                 className="w-full"
               />
-              <div className="flex justify-between text-xs text-content-secondary">
-                <span>-100 (敌对)</span>
+              <div className="mt-1 flex justify-between text-xs text-content-tertiary">
+                <span>-100 敌对</span>
                 <span>0</span>
-                <span>100 (亲密)</span>
+                <span>100 亲密</span>
               </div>
             </div>
 
-            {/* 状态 */}
             <div>
-              <label className="block text-sm font-medium text-content mb-1">状态</label>
+              <label className="hh-label">状态</label>
               <select
                 value={form.status}
                 onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
-                className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none"
+                className="hh-field"
               >
                 {STATUS_OPTIONS.map(o => (
                   <option key={o.value} value={o.value}>{o.label}</option>
@@ -382,20 +428,66 @@ export default function Relationships() {
               </select>
             </div>
 
-            {/* 关系描述 */}
             <div>
-              <label className="block text-sm font-medium text-content mb-1">关系描述</label>
+              <label className="hh-label">关系描述</label>
               <textarea
                 value={form.description}
                 onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
                 placeholder="描述两个角色之间的关系..."
                 rows={3}
-                className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none resize-none"
+                className="hh-textarea"
               />
             </div>
           </div>
         </Modal>
       )}
+
+      {deleteConfirmId && createPortal(
+        <div className="hh-modal-mask" onClick={() => setDeleteConfirmId(null)}>
+          <div className="hh-modal max-w-[420px]" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="hh-modal-head">
+              <div>
+                <p className="hh-eyebrow text-red-500">危险操作</p>
+                <h2 className="mt-2 text-xl font-semibold tracking-tight text-content">删除关系</h2>
+              </div>
+              <button onClick={() => setDeleteConfirmId(null)} className="hh-icon-btn-plain -mr-2 -mt-1" aria-label="关闭">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="hh-modal-body">
+              <p className="text-sm leading-7 text-content-secondary">
+                确定要删除
+                {deletingRel && (
+                  <>
+                    「<span className="font-medium text-content">{getCharName(deletingRel.character_from_id)}</span>」与「
+                    <span className="font-medium text-content">{getCharName(deletingRel.character_to_id)}</span>」之间的
+                  </>
+                )}
+                这条关系吗？此操作不可撤销。
+              </p>
+            </div>
+            <div className="hh-modal-foot">
+              <button onClick={() => setDeleteConfirmId(null)} className="hh-btn-ghost">
+                取消
+              </button>
+              <button onClick={() => handleDelete(deleteConfirmId)} className="hh-btn-danger">
+                <Trash2 className="h-4 w-4" />
+                确认删除
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </div>
+  )
+}
+
+function StatItem({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="px-5 py-4 md:px-6">
+      <p className="text-xs text-content-tertiary">{label}</p>
+      <p className="mt-1 text-2xl font-semibold tracking-tight text-content tabular-nums">{value}</p>
     </div>
   )
 }

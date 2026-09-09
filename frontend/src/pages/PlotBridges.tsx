@@ -499,8 +499,7 @@ export default function PlotBridgesPage() {
     <div className="animate-fade-in space-y-6">
       <section className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
         <div className="min-w-0">
-          <p className="hh-eyebrow">桥段</p>
-          <h1 className="mt-2 text-[28px] font-semibold tracking-tight text-content md:text-[32px]">桥段规划</h1>
+          <h1 className="text-[28px] font-semibold tracking-tight text-content md:text-[32px]">桥段规划</h1>
           <p className="mt-2 max-w-[640px] text-sm leading-6 text-content-secondary">
             每个桥段 4 章：
             <span className="font-medium text-content">C1 代入 → C2 拉扯 → C3 兑现 → C4 善后</span>

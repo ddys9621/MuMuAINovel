@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Pencil,
   Save,
@@ -10,10 +11,11 @@ import {
   RefreshCw,
   Trash2,
   Loader2,
-  Sparkles,
   BookOpenText,
+  type LucideIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 import { useStore } from '@/store';
 import { useProjectSync } from '@/store/hooks';
 import { wizardStreamApi } from '@/services/api';
@@ -27,11 +29,7 @@ import {
 interface WorldBlock {
   key: 'world_time_period' | 'world_location' | 'world_atmosphere' | 'world_rules';
   label: string;
-  icon: typeof Globe;
-  tone: string;
-  accent: string;
-  panel: string;
-  glow: string;
+  icon: LucideIcon;
   placeholder: string;
   description: string;
 }
@@ -52,45 +50,29 @@ const BLOCKS: WorldBlock[] = [
     key: 'world_time_period',
     label: '时代背景',
     icon: Globe,
-    tone: 'text-blue-700',
-    accent: 'bg-blue-600',
-    panel: 'from-blue-50 via-white to-blue-100/70',
-    glow: 'shadow-[0_18px_45px_-32px_rgba(37,99,235,0.55)]',
     placeholder: '描述故事发生的时代背景…',
-    description: '交代时代演进、社会结构与故事发生前的历史惯性。',
+    description: '时代演进、社会结构与故事发生前的历史惯性。',
   },
   {
     key: 'world_location',
     label: '地点设定',
     icon: MapPin,
-    tone: 'text-emerald-700',
-    accent: 'bg-emerald-500',
-    panel: 'from-emerald-50 via-white to-emerald-100/70',
-    glow: 'shadow-[0_18px_45px_-32px_rgba(16,185,129,0.5)]',
     placeholder: '描述故事发生的主要地点…',
-    description: '明确核心舞台、地理关系与关键势力的空间分布。',
+    description: '核心舞台、地理关系与关键势力的空间分布。',
   },
   {
     key: 'world_atmosphere',
     label: '氛围基调',
     icon: Cloud,
-    tone: 'text-orange-700',
-    accent: 'bg-orange-500',
-    panel: 'from-orange-50 via-white to-amber-100/70',
-    glow: 'shadow-[0_18px_45px_-32px_rgba(249,115,22,0.5)]',
     placeholder: '描述故事的整体氛围和基调…',
-    description: '定义读者进入这个世界时最先感受到的情绪温度与质地。',
+    description: '读者进入这个世界时最先感受到的情绪温度与质地。',
   },
   {
     key: 'world_rules',
     label: '世界规则',
     icon: ScrollText,
-    tone: 'text-rose-700',
-    accent: 'bg-rose-500',
-    panel: 'from-rose-50 via-white to-red-100/70',
-    glow: 'shadow-[0_18px_45px_-32px_rgba(244,63,94,0.5)]',
     placeholder: '描述世界中的特殊规则或设定…',
-    description: '写清这个世界的底层运作方式、禁忌、约束与代价。',
+    description: '这个世界的底层运作方式、禁忌、约束与代价。',
   },
 ];
 
@@ -234,110 +216,74 @@ export default function WorldSetting() {
 
   return (
     <div className="animate-fade-in space-y-6">
-      <section className="relative overflow-hidden rounded-[28px] border border-surface-border bg-white shadow-card">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(228,57,60,0.12),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(212,165,116,0.16),transparent_28%)]" />
-        <div className="absolute -right-20 top-8 h-40 w-40 rounded-full bg-brand/10 blur-3xl" />
-        <div className="absolute left-1/3 top-0 h-24 w-24 rounded-full bg-gold/20 blur-2xl" />
+      <section className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-[28px] font-semibold tracking-tight text-content md:text-[32px]">世界设定</h1>
+          <p className="mt-2 max-w-[560px] text-sm leading-6 text-content-secondary">
+            把时代、地点、氛围与规则分开整理，先立好框架，再往里填充细节。
+          </p>
+        </div>
 
-        <div className="relative flex flex-col gap-6 p-6 lg:p-8">
-          <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
-            <div className="max-w-3xl space-y-4">
-              <span className="inline-flex items-center gap-2 rounded-pill border border-brand/15 bg-brand/5 px-3 py-1 text-xs font-medium text-brand">
-                <Sparkles className="h-3.5 w-3.5" />
-                世界观设定面板
-              </span>
-
-              <div className="space-y-2">
-                <h1 className="text-2xl font-bold tracking-tight text-content lg:text-[30px]">
-                  世界设定
-                </h1>
-                <p className="max-w-2xl text-sm leading-6 text-content-secondary lg:text-[15px]">
-                  把时代、空间、氛围和规则拆开整理，先建立清晰框架，再往里填充细节。这个页面现在更适合长文本阅读和后续补全。
-                </p>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                <SummaryPill
-                  label="完成模块"
-                  value={`${filledBlocks}/${BLOCKS.length}`}
-                  hint={filledBlocks === BLOCKS.length ? '结构完整' : '仍可补充'}
-                />
-                <SummaryPill
-                  label="内容字数"
-                  value={String(totalChars)}
-                  hint={totalChars > 0 ? '当前已录入' : '尚未填写'}
-                />
-                <SummaryPill
-                  label="当前状态"
-                  value={editing ? '编辑中' : hasContent ? '已成稿' : '空白'}
-                  hint={editing ? '可直接修改' : '支持 AI 重生成'}
-                />
-                <SummaryPill
-                  label="提示词"
-                  value={`${promptChars} 字`}
-                  hint={promptChars > 0 ? '已启用微调' : '未填写'}
-                />
-              </div>
-            </div>
-
-            {!editing ? (
-              <div className="flex flex-wrap items-center gap-2 xl:max-w-[420px] xl:justify-end">
-                <ActionButton
-                  onClick={() => setShowRegenModal(true)}
-                  disabled={regenerating}
-                  icon={regenerating ? Loader2 : RefreshCw}
-                  label="重新生成"
-                  className="border border-surface-border bg-white text-content-secondary hover:border-brand/20 hover:bg-brand/5 hover:text-brand"
-                  spinning={regenerating}
-                />
-                <ActionButton
-                  onClick={handleCleanup}
-                  disabled={cleaning}
-                  icon={cleaning ? Loader2 : Trash2}
-                  label="清理向导数据"
-                  className="border border-red-200 bg-red-50/70 text-red-600 hover:bg-red-50"
-                  spinning={cleaning}
-                />
-                <ActionButton
-                  onClick={() => setEditing(true)}
-                  icon={Pencil}
-                  label="编辑内容"
-                  className="bg-brand text-white shadow-[0_14px_30px_-18px_rgba(228,57,60,0.8)] hover:bg-brand-600"
-                />
-              </div>
-            ) : (
-              <div className="flex flex-wrap items-center gap-2 xl:max-w-[360px] xl:justify-end">
-                <ActionButton
-                  onClick={handleCancel}
-                  icon={X}
-                  label="取消"
-                  className="border border-surface-border bg-white text-content-secondary hover:bg-surface-hover"
-                />
-                <ActionButton
-                  onClick={handleSave}
-                  disabled={saving}
-                  icon={saving ? Loader2 : Save}
-                  label={saving ? '保存中…' : '保存修改'}
-                  className="bg-brand text-white shadow-[0_14px_30px_-18px_rgba(228,57,60,0.8)] hover:bg-brand-600"
-                  spinning={saving}
-                />
-              </div>
-            )}
-          </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2.5">
+          {!editing ? (
+            <>
+              <button
+                onClick={handleCleanup}
+                disabled={cleaning}
+                className="hh-btn-ghost text-red-500 hover:bg-red-50 hover:text-red-600"
+                title="删除向导生成的角色、大纲等数据"
+              >
+                {cleaning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                清理向导数据
+              </button>
+              <button onClick={() => setShowRegenModal(true)} disabled={regenerating} className="hh-btn-secondary">
+                {regenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                重新生成
+              </button>
+              <button onClick={() => setEditing(true)} className="hh-btn-primary">
+                <Pencil className="h-4 w-4" />
+                编辑内容
+              </button>
+            </>
+          ) : (
+            <>
+              <button onClick={handleCancel} className="hh-btn-ghost">
+                <X className="h-4 w-4" />
+                取消
+              </button>
+              <button onClick={handleSave} disabled={saving} className="hh-btn-primary">
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                {saving ? '保存中…' : '保存修改'}
+              </button>
+            </>
+          )}
         </div>
       </section>
 
-      <section className="rounded-[24px] border border-surface-border bg-white p-5 shadow-card">
+      <section className="hh-panel grid grid-cols-2 divide-surface-border/80 md:grid-cols-4 md:divide-x">
+        <StatItem
+          label="完成模块"
+          value={`${filledBlocks}/${BLOCKS.length}`}
+          hint={filledBlocks === BLOCKS.length ? '结构完整' : '仍可补充'}
+        />
+        <StatItem label="内容字数" value={totalChars} hint={totalChars > 0 ? '当前已录入' : '尚未填写'} />
+        <StatItem
+          label="当前状态"
+          value={editing ? '编辑中' : hasContent ? '已成稿' : '空白'}
+          hint={editing ? '可直接修改' : '支持 AI 重生成'}
+        />
+        <StatItem label="最终提示词" value={`${promptChars} 字`} hint={promptChars > 0 ? '已启用微调' : '未填写'} />
+      </section>
+
+      <section className="hh-panel p-6">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-content">项目信息与最终提示词</h2>
+            <h2 className="text-lg font-semibold tracking-tight text-content">项目信息与最终提示词</h2>
             <p className="mt-1 text-sm leading-6 text-content-secondary">
-              这里会影响后续提交给 AI 的项目上下文。最终提示词会追加到章节、场景、剧情和世界观重生成的最终 prompt 末尾。
+              这里会影响后续提交给 AI 的项目上下文。最终提示词会追加到章节、场景、剧情和世界观重生成的 prompt 末尾。
             </p>
           </div>
-          <span className="rounded-pill bg-brand/6 px-3 py-1 text-xs font-medium text-brand">
-            项目级微调
-          </span>
+          <span className="hh-tag shrink-0">项目级微调</span>
         </div>
 
         <div className="mt-5 grid gap-4 lg:grid-cols-3">
@@ -364,10 +310,10 @@ export default function WorldSetting() {
           />
         </div>
 
-        <div className="mt-4">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <label className="text-sm font-medium text-content">最终提示词微调</label>
-            <span className="text-xs text-content-tertiary">{promptChars} 字</span>
+        <div className="mt-5">
+          <div className="mb-1.5 flex items-center justify-between gap-3">
+            <label className="text-[13px] font-medium text-content">最终提示词微调</label>
+            <span className="text-xs text-content-tertiary tabular-nums">{promptChars} 字</span>
           </div>
           {editing ? (
             <textarea
@@ -375,11 +321,11 @@ export default function WorldSetting() {
               onChange={(e) => setForm((prev) => ({ ...prev, generation_prompt: e.target.value }))}
               placeholder="写会影响最终提交 prompt 的补充要求，例如：节奏更快、减少解释、对白更口语、每场戏必须有冲突。"
               rows={6}
-              className="min-h-[160px] w-full rounded-[18px] border border-surface-border bg-surface/40 px-4 py-3 text-sm leading-7 text-content outline-none transition focus:border-brand/30 focus:bg-white focus:ring-4 focus:ring-brand/10 resize-none"
+              className="hh-textarea min-h-[160px] leading-7"
             />
           ) : (
-            <div className="min-h-[120px] rounded-[18px] border border-surface-border bg-surface/40 p-4">
-              <p className="whitespace-pre-wrap text-sm leading-7 text-content-secondary">
+            <div className="hh-subpanel min-h-[120px] p-4">
+              <p className={cn('whitespace-pre-wrap text-sm leading-7', form.generation_prompt.trim() ? 'text-content' : 'text-content-tertiary')}>
                 {form.generation_prompt.trim() || '未填写。'}
               </p>
             </div>
@@ -388,17 +334,17 @@ export default function WorldSetting() {
       </section>
 
       {!hasContent && !editing ? (
-        <section className="rounded-[24px] border border-dashed border-surface-border bg-white/80 p-10 text-center shadow-xs">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-brand/6 text-brand">
+        <section className="hh-panel flex flex-col items-center px-6 py-14 text-center">
+          <span className="flex h-14 w-14 items-center justify-center bg-brand/10 text-brand">
             <BookOpenText className="h-7 w-7" />
-          </div>
-          <h2 className="mt-4 text-lg font-semibold text-content">还没有任何世界设定</h2>
-          <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-content-secondary">
-            先手动填写，或者用“重新生成”让系统根据项目资料自动生成初稿，再回来细修。
+          </span>
+          <h2 className="mt-5 text-xl font-semibold tracking-tight text-content">还没有任何世界设定</h2>
+          <p className="mt-2 max-w-md text-sm leading-6 text-content-secondary">
+            点击右上角「编辑内容」手动填写，或用「重新生成」让 AI 根据项目资料生成初稿，再回来细修。
           </p>
         </section>
       ) : (
-        <section className="grid gap-5 xl:grid-cols-2">
+        <section className="grid gap-4 xl:grid-cols-2">
           {BLOCKS.map((block) => {
             const Icon = block.icon;
             const value = form[block.key];
@@ -406,53 +352,46 @@ export default function WorldSetting() {
             const wordCount = value.trim().length;
 
             return (
-              <article
-                key={block.key}
-                className={`group relative overflow-hidden rounded-[24px] border border-surface-border bg-gradient-to-br ${block.panel} p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg ${block.glow}`}
-              >
-                <div className="absolute right-0 top-0 h-24 w-24 translate-x-8 -translate-y-8 rounded-full bg-white/50 blur-2xl" />
-                <div className="relative flex h-full flex-col">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-start gap-3">
-                      <span className={`mt-0.5 inline-flex h-11 w-11 items-center justify-center rounded-2xl text-white shadow-md ${block.accent}`}>
-                        <Icon className="h-5 w-5" />
-                      </span>
-                      <div className="space-y-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="text-base font-semibold text-content">{block.label}</h3>
-                          <span
-                            className={`rounded-pill px-2.5 py-1 text-[11px] font-medium ${filled ? 'bg-white text-content shadow-xs' : 'bg-white/70 text-content-secondary'}`}
-                          >
-                            {filled ? '已设定' : '待补充'}
-                          </span>
-                        </div>
-                        <p className="text-sm leading-6 text-content-secondary">
-                          {block.description}
-                        </p>
-                      </div>
-                    </div>
-                    <span className={`shrink-0 text-xs font-medium ${block.tone}`}>
-                      {wordCount} 字
+              <article key={block.key} className="hh-panel flex flex-col p-6">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center bg-brand/10 text-brand">
+                      <Icon className="h-5 w-5" />
                     </span>
-                  </div>
-
-                  <div className="mt-5 flex-1">
-                    {editing ? (
-                      <textarea
-                        value={value}
-                        onChange={(e) => setForm((prev) => ({ ...prev, [block.key]: e.target.value }))}
-                        placeholder={block.placeholder}
-                        rows={8}
-                        className="min-h-[220px] w-full rounded-[18px] border border-white/80 bg-white/90 px-4 py-3 text-sm leading-7 text-content shadow-inner outline-none transition focus:border-brand/30 focus:bg-white focus:ring-4 focus:ring-brand/10 resize-none"
-                      />
-                    ) : (
-                      <div className="min-h-[220px] rounded-[18px] border border-white/80 bg-white/80 p-4 shadow-inner">
-                        <p className="text-[15px] leading-8 text-content-secondary whitespace-pre-wrap">
-                          {filled ? value : '暂未设定'}
-                        </p>
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-base font-semibold text-content">{block.label}</h3>
+                        <span
+                          className={cn(
+                            'px-2 py-0.5 text-[11px] font-medium',
+                            filled ? 'bg-emerald-50 text-emerald-600' : 'bg-surface-hover text-content-secondary',
+                          )}
+                        >
+                          {filled ? '已设定' : '待补充'}
+                        </span>
                       </div>
-                    )}
+                      <p className="mt-1 text-[13px] leading-6 text-content-secondary">{block.description}</p>
+                    </div>
                   </div>
+                  <span className="shrink-0 text-xs text-content-tertiary tabular-nums">{wordCount} 字</span>
+                </div>
+
+                <div className="mt-5 flex-1">
+                  {editing ? (
+                    <textarea
+                      value={value}
+                      onChange={(e) => setForm((prev) => ({ ...prev, [block.key]: e.target.value }))}
+                      placeholder={block.placeholder}
+                      rows={8}
+                      className="hh-textarea min-h-[220px] leading-7"
+                    />
+                  ) : (
+                    <div className="hh-subpanel min-h-[220px] p-4">
+                      <p className={cn('whitespace-pre-wrap text-[15px] leading-8', filled ? 'text-content' : 'text-content-tertiary')}>
+                        {filled ? value : '暂未设定'}
+                      </p>
+                    </div>
+                  )}
                 </div>
               </article>
             );
@@ -460,23 +399,23 @@ export default function WorldSetting() {
         </section>
       )}
 
-      {showRegenModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm"
-          onClick={() => setShowRegenModal(false)}
-        >
-          <div
-            className="w-full max-w-lg rounded-[24px] border border-white/60 bg-white p-6 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="space-y-2">
-              <h2 className="text-xl font-bold text-content">重新生成世界设定</h2>
-              <p className="text-sm leading-6 text-content-secondary">
-                系统会基于项目已有信息生成新版本，当前四个模块的内容会被覆盖。确认前建议先手动保存重要文本。
-              </p>
+      {showRegenModal && createPortal(
+        <div className="hh-modal-mask" onClick={() => setShowRegenModal(false)}>
+          <div className="hh-modal max-w-[520px]" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="hh-modal-head">
+              <div>
+                <p className="hh-eyebrow">AI 重生成</p>
+                <h2 className="mt-2 text-xl font-semibold tracking-tight text-content">重新生成世界设定</h2>
+                <p className="mt-1 text-sm leading-6 text-content-secondary">
+                  系统会基于项目已有信息生成新版本，当前四个模块的内容会被覆盖。确认前建议先保存重要文本。
+                </p>
+              </div>
+              <button onClick={() => setShowRegenModal(false)} className="hh-icon-btn-plain -mr-2 -mt-1" aria-label="关闭">
+                <X className="h-4 w-4" />
+              </button>
             </div>
 
-            <div className="mt-5 rounded-[18px] border border-surface-border bg-surface/60 p-4">
+            <div className="hh-modal-body space-y-3">
               <MCPSelector
                 value={{ enable: regenEnableMcp, selected: regenPlugins }}
                 onChange={({ enable, selected }) => {
@@ -485,37 +424,39 @@ export default function WorldSetting() {
                 }}
               />
               {currentProject?.id && (
-                <div className="mt-3">
-                  <ReferencePackSelector
-                    projectId={currentProject.id}
-                    value={regenRefPack}
-                    onChange={setRegenRefPack}
-                    hint="让本次重生成参考拆书的世界观建模手法"
-                    disabledTitle="使用拆书参考包作为对标"
-                  />
-                </div>
+                <ReferencePackSelector
+                  projectId={currentProject.id}
+                  value={regenRefPack}
+                  onChange={setRegenRefPack}
+                  hint="让本次重生成参考拆书的世界观建模手法"
+                  disabledTitle="使用拆书参考包作为对标"
+                />
               )}
             </div>
 
-            <div className="mt-6 flex flex-wrap justify-end gap-2">
-              <ActionButton
-                onClick={() => setShowRegenModal(false)}
-                icon={X}
-                label="取消"
-                className="border border-surface-border bg-white text-content-secondary hover:bg-surface-hover"
-              />
-              <ActionButton
-                onClick={handleRegenerate}
-                disabled={regenerating}
-                icon={regenerating ? Loader2 : RefreshCw}
-                label="确认重新生成"
-                className="bg-brand text-white hover:bg-brand-600"
-                spinning={regenerating}
-              />
+            <div className="hh-modal-foot">
+              <button onClick={() => setShowRegenModal(false)} className="hh-btn-ghost">
+                取消
+              </button>
+              <button onClick={handleRegenerate} disabled={regenerating} className="hh-btn-primary">
+                {regenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                确认重新生成
+              </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
+    </div>
+  );
+}
+
+function StatItem({ label, value, hint }: { label: string; value: ReactNode; hint: string }) {
+  return (
+    <div className="px-5 py-4 md:px-6">
+      <p className="text-xs text-content-tertiary">{label}</p>
+      <p className="mt-1 text-2xl font-semibold tracking-tight text-content tabular-nums">{value}</p>
+      <p className="mt-0.5 text-xs text-content-tertiary">{hint}</p>
     </div>
   );
 }
@@ -535,58 +476,14 @@ function ProjectField({
 }) {
   return (
     <div>
-      <label className="mb-2 block text-sm font-medium text-content">{label}</label>
+      <label className="hh-label">{label}</label>
       {editing ? (
-        <input
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          className="h-11 w-full rounded-[14px] border border-surface-border bg-surface/40 px-3 text-sm text-content outline-none transition focus:border-brand/30 focus:bg-white focus:ring-4 focus:ring-brand/10"
-        />
+        <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="hh-field" />
       ) : (
-        <div className="flex min-h-11 items-center rounded-[14px] border border-surface-border bg-surface/40 px-3 text-sm text-content-secondary">
+        <div className={cn('hh-subpanel flex min-h-11 items-center px-4 text-sm', value.trim() ? 'text-content' : 'text-content-tertiary')}>
           {value.trim() || '未填写'}
         </div>
       )}
     </div>
-  );
-}
-
-function SummaryPill({ label, value, hint }: { label: string; value: string; hint: string }) {
-  return (
-    <div className="rounded-[18px] border border-white/70 bg-white/80 px-4 py-3 shadow-xs backdrop-blur">
-      <div className="text-xs font-medium uppercase tracking-[0.14em] text-content-tertiary">
-        {label}
-      </div>
-      <div className="mt-2 text-lg font-semibold text-content">{value}</div>
-      <div className="mt-1 text-xs text-content-secondary">{hint}</div>
-    </div>
-  );
-}
-
-function ActionButton({
-  onClick,
-  disabled,
-  icon: Icon,
-  label,
-  className,
-  spinning = false,
-}: {
-  onClick: () => void;
-  disabled?: boolean;
-  icon: typeof Pencil;
-  label: string;
-  className: string;
-  spinning?: boolean;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={`inline-flex items-center gap-2 rounded-[14px] px-4 py-2.5 text-sm font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
-    >
-      <Icon className={`h-4 w-4 ${spinning ? 'animate-spin' : ''}`} />
-      {label}
-    </button>
   );
 }

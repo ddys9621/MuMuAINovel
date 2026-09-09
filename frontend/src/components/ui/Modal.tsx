@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -54,47 +55,45 @@ export function Modal({
 
   if (!open) return null
 
-  return (
+  // 挂到 body：避免被页面布局里的 stacking context（如 relative + z-index / backdrop-filter）困住，
+  // 否则 fixed 遮罩会盖不住侧栏和顶栏
+  return createPortal(
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm px-4 py-8 sm:py-12 animate-fade-in"
+      className="hh-modal-mask z-[60]"
       onClick={() => closeOnMaskClick && closable && onClose()}
     >
       <div
-        className={cn(
-          'relative flex w-full flex-col bg-white shadow-xl border border-surface-border animate-scale-in',
-          'max-h-[calc(100dvh-6rem)]',
-          SIZE_MAP[size],
-        )}
+        className={cn('hh-modal', SIZE_MAP[size])}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
       >
         {!hideHeader && (
-          <div className="relative flex items-start justify-between gap-4 border-b border-surface-border bg-gradient-to-r from-surface/40 via-white to-white px-6 py-4 flex-shrink-0">
-            <span className="absolute left-0 top-3 bottom-3 w-1 bg-brand" aria-hidden />
-            <h2 className="text-base font-semibold text-content leading-6 pl-2">{title}</h2>
+          <div className="hh-modal-head items-center py-4">
+            <h2 className="text-base font-semibold leading-6 text-content">{title}</h2>
             {closable && (
               <button
                 type="button"
                 onClick={onClose}
-                className="text-content-tertiary hover:text-content hover:bg-surface-hover -mt-1 -mr-1 p-1.5 transition-colors"
+                className="hh-icon-btn-plain -mr-2"
                 aria-label="关闭"
               >
-                <X className="w-5 h-5" />
+                <X className="h-4 w-4" />
               </button>
             )}
           </div>
         )}
-        <div className={cn('flex-1 overflow-y-auto px-6 py-5', bodyClassName)}>
+        <div className={cn('hh-modal-body', bodyClassName)}>
           {children}
         </div>
         {footer && (
-          <div className="flex items-center justify-end gap-2 border-t border-surface-border bg-white/95 px-6 py-3 flex-shrink-0">
+          <div className="hh-modal-foot">
             {footer}
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

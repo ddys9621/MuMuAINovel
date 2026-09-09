@@ -1,6 +1,7 @@
-import { useEffect, useState, useCallback } from 'react'
-import { Plus, Pencil, Trash2, Building, Loader2, Users, UserPlus, ChevronDown, ChevronUp } from 'lucide-react'
+import { useEffect, useState, useCallback, type ReactNode } from 'react'
+import { Plus, Pencil, Trash2, Building, Loader2, Users, UserPlus, ChevronDown, ChevronUp, MapPin } from 'lucide-react'
 import { toast } from 'sonner'
+import { cn } from '@/lib/utils'
 import { useStore } from '@/store/index'
 import { organizationApi, characterApi } from '@/services/api'
 import { Modal } from '@/components/ui/Modal'
@@ -68,18 +69,6 @@ const EMPTY_ORG_FORM: OrgForm = {
 const EMPTY_MEMBER_FORM: MemberForm = { character_id: '', position: '', rank: 0, loyalty: 50 }
 
 const ORG_TYPES = ['门派', '帮会', '家族', '王朝', '商会', '军队', '宗教', '学院', '其他'] as const
-
-const TYPE_COLORS: Record<string, string> = {
-  门派: 'bg-purple-50 text-purple-600',
-  帮会: 'bg-red-50 text-red-600',
-  家族: 'bg-amber-50 text-amber-700',
-  王朝: 'bg-yellow-50 text-yellow-700',
-  商会: 'bg-emerald-50 text-emerald-600',
-  军队: 'bg-slate-100 text-slate-600',
-  宗教: 'bg-indigo-50 text-indigo-600',
-  学院: 'bg-blue-50 text-blue-600',
-  其他: 'bg-gray-100 text-gray-500',
-}
 
 /* ------------------------------------------------------------------ */
 /*  主组件                                                              */
@@ -280,204 +269,263 @@ export default function Organizations() {
     } catch { /* api 层已 toast */ }
   }
 
+  const hasOrgs = orgs.length > 0
+  const totalMembers = orgs.reduce((sum, o) => sum + (o.member_count ?? 0), 0)
+  const avgPower = hasOrgs ? Math.round(orgs.reduce((sum, o) => sum + (o.power_level ?? 0), 0) / orgs.length) : 0
+  const typeCount = new Set(orgs.map(o => o.type).filter(Boolean)).size
+
   /* ---- 渲染：标题区 + 卡片网格 ---- */
   return (
-    <div className="space-y-6">
-      {/* 标题区 */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-content">组织管理</h1>
-        <button onClick={openCreateOrg} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5">
-          <Plus className="w-4 h-4" />
-          创建组织
-        </button>
-      </div>
-
-      {/* 主体 */}
-      {loading ? (
-        <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-content-secondary" /></div>
-      ) : orgs.length === 0 ? (
-        <div className="text-center py-12 text-content-secondary text-sm">
-          <Building className="w-8 h-8 mx-auto mb-2 opacity-40" />
-          暂无组织，点击上方按钮创建
+    <div className="animate-fade-in space-y-6">
+      <section className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-[28px] font-semibold tracking-tight text-content md:text-[32px]">组织管理</h1>
+          <p className="mt-2 max-w-[560px] text-sm leading-6 text-content-secondary">
+            管理故事中的门派、家族、王朝等势力，维护它们的宗旨、势力等级与成员构成。
+            {hasOrgs && `当前共 ${orgs.length} 个组织。`}
+          </p>
         </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2.5">
+          <button onClick={openCreateOrg} className="hh-btn-primary">
+            <Plus className="h-4 w-4" />
+            创建组织
+          </button>
+        </div>
+      </section>
+
+      {hasOrgs && !loading && (
+        <section className="hh-panel grid grid-cols-2 divide-surface-border/80 md:grid-cols-4 md:divide-x">
+          <StatItem label="组织总数" value={orgs.length} />
+          <StatItem label="成员总数" value={totalMembers} />
+          <StatItem label="平均势力" value={avgPower} />
+          <StatItem label="组织类型" value={typeCount} />
+        </section>
+      )}
+
+      {loading ? (
+        <section className="hh-panel flex items-center justify-center py-14">
+          <Loader2 className="h-6 w-6 animate-spin text-brand" />
+        </section>
+      ) : !hasOrgs ? (
+        <section className="hh-panel flex flex-col items-center px-6 py-14 text-center">
+          <span className="flex h-14 w-14 items-center justify-center bg-brand/10 text-brand">
+            <Building className="h-7 w-7" />
+          </span>
+          <h2 className="mt-5 text-xl font-semibold tracking-tight text-content">还没有任何组织</h2>
+          <p className="mt-2 max-w-md text-sm leading-6 text-content-secondary">
+            点击右上角「创建组织」，为故事建立门派、家族或势力，再往里添加成员与职位。
+          </p>
+        </section>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {orgs.map(org => (
-            <div key={org.id} className="bg-white border border-surface-border rounded-card p-4 space-y-3">
-              {/* 卡片头部 */}
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <h3 className="text-sm font-semibold text-content truncate">{org.name}</h3>
-                  <div className="flex items-center gap-2 mt-1 flex-wrap">
-                    {org.type && (
-                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${TYPE_COLORS[org.type] || TYPE_COLORS['其他']}`}>
-                        {org.type}
-                      </span>
-                    )}
-                    <span className="text-xs text-content-secondary">
-                      {org.member_count ?? 0} 名成员
+        <section className="grid gap-4 lg:grid-cols-2">
+          {orgs.map(org => {
+            const expanded = expandedOrgId === org.id
+            return (
+              <article key={org.id} className="hh-panel flex flex-col p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center bg-brand/10 text-brand">
+                      <Building className="h-5 w-5" />
                     </span>
-                    {org.power_level != null && (
-                      <span className="text-xs text-content-secondary">
-                        势力 {org.power_level}
-                      </span>
-                    )}
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="min-w-0 truncate text-[15px] font-semibold text-content">{org.name}</h3>
+                        {org.type && <span className="hh-tag">{org.type}</span>}
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-content-tertiary">
+                        <span className="inline-flex items-center gap-1">
+                          <Users className="h-3.5 w-3.5" />
+                          {org.member_count ?? 0} 名成员
+                        </span>
+                        {org.location && (
+                          <span className="inline-flex items-center gap-1">
+                            <MapPin className="h-3.5 w-3.5" />
+                            {org.location}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-                <div className="flex gap-1 shrink-0">
-                  <button onClick={() => toggleMembers(org.id)} className="p-1.5 rounded hover:bg-surface-hover text-content-secondary transition-colors" title="查看成员">
-                    <Users className="w-3.5 h-3.5" />
-                  </button>
-                  <button onClick={() => openEditOrg(org)} className="p-1.5 rounded hover:bg-surface-hover text-content-secondary transition-colors" title="编辑">
-                    <Pencil className="w-3.5 h-3.5" />
-                  </button>
-                  <button onClick={() => handleDeleteOrg(org)} className="p-1.5 rounded hover:bg-red-50 text-content-secondary hover:text-red-500 transition-colors" title="删除">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-
-              {/* 额外信息 */}
-              {org.purpose && <p className="text-xs text-content-secondary/80">目标：{org.purpose}</p>}
-              {org.location && <p className="text-xs text-content-secondary/80">所在地：{org.location}</p>}
-              {org.motto && <p className="text-xs text-content-secondary/80 italic">「{org.motto}」</p>}
-
-              {/* 展开/收起成员面板 */}
-              <button
-                onClick={() => toggleMembers(org.id)}
-                className="flex items-center gap-1 text-xs text-brand hover:text-brand-600 transition-colors"
-              >
-                {expandedOrgId === org.id ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                {expandedOrgId === org.id ? '收起成员' : '查看成员'}
-              </button>
-
-              {/* 成员面板 */}
-              {expandedOrgId === org.id && (
-                <div className="border-t border-surface-border pt-3 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-content-secondary">成员列表</span>
-                    <button onClick={openAddMember} className="inline-flex items-center gap-1 text-xs text-brand hover:text-brand-600 transition-colors">
-                      <UserPlus className="w-3 h-3" /> 添加成员
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    <button onClick={() => openEditOrg(org)} className="hh-icon-btn-plain h-8 w-8" title="编辑" aria-label="编辑">
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                    <button onClick={() => handleDeleteOrg(org)} className="hh-icon-btn-plain h-8 w-8 hover:text-red-500" title="删除" aria-label="删除">
+                      <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
+                </div>
 
-                  {membersLoading ? (
-                    <div className="flex justify-center py-4"><Loader2 className="w-4 h-4 animate-spin text-content-secondary" /></div>
-                  ) : members.length === 0 ? (
-                    <p className="text-xs text-content-secondary/60 py-2 text-center">暂无成员</p>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {members.map(m => (
-                        <div key={m.id} className="flex items-center justify-between bg-surface-hover/50 rounded px-3 py-2">
-                          <div className="min-w-0">
-                            <span className="text-sm text-content font-medium">{m.character_name || '未知角色'}</span>
-                            {(m.position || m.rank) && (
-                              <span className="ml-2 text-xs text-content-secondary">
-                                {[m.position, m.rank ? `等级${m.rank}` : ''].filter(Boolean).join(' · ')}
-                              </span>
-                            )}
-                            {m.loyalty != null && (
-                              <span className="ml-2 text-xs text-content-secondary/70">
-                                忠诚 {m.loyalty}
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex gap-1 shrink-0">
-                            <button onClick={() => openEditMember(m)} className="p-1 rounded hover:bg-white text-content-secondary transition-colors" title="编辑">
-                              <Pencil className="w-3 h-3" />
-                            </button>
-                            <button onClick={() => handleRemoveMember(m)} className="p-1 rounded hover:bg-red-50 text-content-secondary hover:text-red-500 transition-colors" title="移除">
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </div>
+                {(org.purpose || org.motto) && (
+                  <div className="mt-4 space-y-1.5">
+                    {org.purpose && <p className="text-[13px] leading-6 text-content-secondary">目标：{org.purpose}</p>}
+                    {org.motto && <p className="text-[13px] leading-6 text-content-tertiary">「{org.motto}」</p>}
+                  </div>
+                )}
+
+                {org.power_level != null && (
+                  <div className="mt-4">
+                    <div className="flex items-center justify-between text-xs text-content-tertiary">
+                      <span>势力等级</span>
+                      <span className="font-medium text-content tabular-nums">{org.power_level}</span>
+                    </div>
+                    <div className="hh-progress mt-1.5">
+                      <div className="hh-progress-bar" style={{ width: `${Math.min(Math.max(org.power_level, 0), 100)}%` }} />
+                    </div>
+                  </div>
+                )}
+
+                <div className="mt-4 border-t border-surface-border/80 pt-3">
+                  <button
+                    onClick={() => toggleMembers(org.id)}
+                    className="flex w-full items-center justify-between gap-3 text-left text-[13px] font-medium text-content-secondary hover:text-brand"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <Users className="h-4 w-4" />
+                      {expanded ? '收起成员' : '查看成员'}
+                    </span>
+                    {expanded ? <ChevronUp className="h-4 w-4 shrink-0" /> : <ChevronDown className="h-4 w-4 shrink-0" />}
+                  </button>
+
+                  {expanded && (
+                    <div className="hh-subpanel mt-3">
+                      <div className="flex items-center justify-between gap-3 border-b border-surface-border/80 px-4 py-2.5">
+                        <span className="text-xs font-medium text-content-secondary">成员列表</span>
+                        <button onClick={openAddMember} className="hh-btn-ghost hh-btn-sm h-8 px-2.5 text-xs text-brand hover:text-brand-600">
+                          <UserPlus className="h-3.5 w-3.5" />
+                          添加成员
+                        </button>
+                      </div>
+
+                      {membersLoading ? (
+                        <div className="flex justify-center py-6">
+                          <Loader2 className="h-4 w-4 animate-spin text-brand" />
                         </div>
-                      ))}
+                      ) : members.length === 0 ? (
+                        <p className="px-4 py-6 text-center text-xs text-content-tertiary">暂无成员</p>
+                      ) : (
+                        <ul className="divide-y divide-surface-border/80">
+                          {members.map(m => (
+                            <li key={m.id} className="flex items-center justify-between gap-3 px-4 py-2.5 transition-colors hover:bg-brand/[0.04]">
+                              <div className="min-w-0 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                                <span className="text-sm font-medium text-content">{m.character_name || '未知角色'}</span>
+                                {(m.position || m.rank) && (
+                                  <span className="text-xs text-content-secondary">
+                                    {[m.position, m.rank ? `等级${m.rank}` : ''].filter(Boolean).join(' · ')}
+                                  </span>
+                                )}
+                                {m.loyalty != null && (
+                                  <span className="text-xs text-content-tertiary tabular-nums">
+                                    忠诚 {m.loyalty}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex shrink-0 items-center gap-0.5">
+                                <button onClick={() => openEditMember(m)} className="hh-icon-btn-plain h-7 w-7" title="编辑" aria-label="编辑成员">
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                                <button onClick={() => handleRemoveMember(m)} className="hh-icon-btn-plain h-7 w-7 hover:text-red-500" title="移除" aria-label="移除成员">
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
                   )}
                 </div>
-              )}
-            </div>
-          ))}
-        </div>
+              </article>
+            )
+          })}
+        </section>
       )}
 
-      {/* 创建/编辑组织弹窗 */}
       {showOrgModal && (
         <Modal
           title={editingOrg ? '编辑组织' : '创建组织'}
           onClose={() => setShowOrgModal(false)}
           size="xl"
+          closeOnMaskClick={false}
           footer={(
             <>
-              <button onClick={() => setShowOrgModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm transition-colors">取消</button>
-              <button onClick={handleOrgSubmit} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">确定</button>
+              <button onClick={() => setShowOrgModal(false)} className="hh-btn-ghost">取消</button>
+              <button onClick={handleOrgSubmit} className="hh-btn-primary">{editingOrg ? '保存' : '创建'}</button>
             </>
           )}
         >
-          <div className="space-y-3">
+          <div className="space-y-5">
             <div>
-              <label className="block text-sm text-content-secondary mb-1">名称 <span className="text-red-500">*</span></label>
-              <input value={orgForm.name} onChange={e => setOrgForm(f => ({ ...f, name: e.target.value }))} placeholder="组织名称" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+              <label className="hh-label">名称 <span className="text-red-500">*</span></label>
+              <input value={orgForm.name} onChange={e => setOrgForm(f => ({ ...f, name: e.target.value }))} placeholder="组织名称" className="hh-field" />
             </div>
             <div>
-              <label className="block text-sm text-content-secondary mb-1">类型</label>
+              <label className="hh-label">类型</label>
               <div className="flex flex-wrap gap-1.5">
                 {ORG_TYPES.map(t => (
-                  <button key={t} onClick={() => setOrgForm(f => ({ ...f, organization_type: f.organization_type === t ? '' : t }))}
-                    className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${orgForm.organization_type === t ? 'bg-brand text-white' : 'bg-gray-100 text-content-secondary hover:bg-gray-200'}`}
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setOrgForm(f => ({ ...f, organization_type: f.organization_type === t ? '' : t }))}
+                    className={cn('hh-chip', orgForm.organization_type === t && 'hh-chip--active')}
                   >{t}</button>
                 ))}
               </div>
             </div>
             <div>
-              <label className="block text-sm text-content-secondary mb-1">描述</label>
-              <textarea value={orgForm.description} onChange={e => setOrgForm(f => ({ ...f, description: e.target.value }))} rows={3} placeholder="组织的背景描述…" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors resize-none" />
+              <label className="hh-label">描述</label>
+              <textarea value={orgForm.description} onChange={e => setOrgForm(f => ({ ...f, description: e.target.value }))} rows={3} placeholder="组织的背景描述…" className="hh-textarea" />
             </div>
             <div>
-              <label className="block text-sm text-content-secondary mb-1">目标/宗旨</label>
-              <textarea value={orgForm.purpose} onChange={e => setOrgForm(f => ({ ...f, purpose: e.target.value }))} rows={2} placeholder="组织的核心目标…" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors resize-none" />
+              <label className="hh-label">目标/宗旨</label>
+              <textarea value={orgForm.purpose} onChange={e => setOrgForm(f => ({ ...f, purpose: e.target.value }))} rows={2} placeholder="组织的核心目标…" className="hh-textarea" />
             </div>
             <div>
-              <label className="block text-sm text-content-secondary mb-1">势力等级 ({orgForm.power_level})</label>
+              <div className="mb-1.5 flex items-center justify-between gap-3">
+                <label className="text-[13px] font-medium text-content">势力等级</label>
+                <span className="text-xs text-content-tertiary tabular-nums">{orgForm.power_level}</span>
+              </div>
               <input type="range" min={0} max={100} value={orgForm.power_level} onChange={e => setOrgForm(f => ({ ...f, power_level: Number(e.target.value) }))} className="w-full" />
             </div>
-            <div>
-              <label className="block text-sm text-content-secondary mb-1">所在地</label>
-              <input value={orgForm.location} onChange={e => setOrgForm(f => ({ ...f, location: e.target.value }))} placeholder="如：昆仑山、中原…" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="hh-label">所在地</label>
+                <input value={orgForm.location} onChange={e => setOrgForm(f => ({ ...f, location: e.target.value }))} placeholder="如：昆仑山、中原…" className="hh-field" />
+              </div>
+              <div>
+                <label className="hh-label">座右铭</label>
+                <input value={orgForm.motto} onChange={e => setOrgForm(f => ({ ...f, motto: e.target.value }))} placeholder="组织的座右铭…" className="hh-field" />
+              </div>
             </div>
             <div>
-              <label className="block text-sm text-content-secondary mb-1">座右铭</label>
-              <input value={orgForm.motto} onChange={e => setOrgForm(f => ({ ...f, motto: e.target.value }))} placeholder="组织的座右铭…" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
-            </div>
-            <div>
-              <label className="block text-sm text-content-secondary mb-1">代表颜色</label>
-              <input type="color" value={orgForm.color || '#6366f1'} onChange={e => setOrgForm(f => ({ ...f, color: e.target.value }))} className="w-10 h-8 rounded border border-surface-border cursor-pointer" />
+              <label className="hh-label">代表颜色</label>
+              <input type="color" value={orgForm.color || '#6366f1'} onChange={e => setOrgForm(f => ({ ...f, color: e.target.value }))} className="h-11 w-16 cursor-pointer border border-surface-border bg-white/65 p-1" />
             </div>
           </div>
         </Modal>
       )}
 
-      {/* 添加/编辑成员弹窗 */}
       {showMemberModal && (
         <Modal
           title={editingMember ? '编辑成员' : '添加成员'}
           onClose={() => setShowMemberModal(false)}
           size="lg"
+          closeOnMaskClick={false}
           footer={(
             <>
-              <button onClick={() => setShowMemberModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm transition-colors">取消</button>
-              <button onClick={handleMemberSubmit} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">确定</button>
+              <button onClick={() => setShowMemberModal(false)} className="hh-btn-ghost">取消</button>
+              <button onClick={handleMemberSubmit} className="hh-btn-primary">{editingMember ? '保存' : '添加'}</button>
             </>
           )}
         >
-          <div className="space-y-3">
+          <div className="space-y-5">
             {!editingMember && (
               <div>
-                <label className="block text-sm text-content-secondary mb-1">选择角色 <span className="text-red-500">*</span></label>
+                <label className="hh-label">选择角色 <span className="text-red-500">*</span></label>
                 <select
                   value={memberForm.character_id}
                   onChange={e => setMemberForm(f => ({ ...f, character_id: e.target.value }))}
-                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors"
+                  className="hh-field"
                 >
                   <option value="">请选择角色…</option>
                   {characters
@@ -488,20 +536,32 @@ export default function Organizations() {
               </div>
             )}
             <div>
-              <label className="block text-sm text-content-secondary mb-1">职位 <span className="text-red-500">*</span></label>
-              <input value={memberForm.position} onChange={e => setMemberForm(f => ({ ...f, position: e.target.value }))} placeholder="如：掌门、长老、弟子…" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+              <label className="hh-label">职位 <span className="text-red-500">*</span></label>
+              <input value={memberForm.position} onChange={e => setMemberForm(f => ({ ...f, position: e.target.value }))} placeholder="如：掌门、长老、弟子…" className="hh-field" />
             </div>
             <div>
-              <label className="block text-sm text-content-secondary mb-1">等级</label>
-              <input type="number" min={0} value={memberForm.rank} onChange={e => setMemberForm(f => ({ ...f, rank: Number(e.target.value) }))} placeholder="职位等级（数字）" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+              <label className="hh-label">等级</label>
+              <input type="number" min={0} value={memberForm.rank} onChange={e => setMemberForm(f => ({ ...f, rank: Number(e.target.value) }))} placeholder="职位等级（数字）" className="hh-field" />
             </div>
             <div>
-              <label className="block text-sm text-content-secondary mb-1">忠诚度 ({memberForm.loyalty})</label>
+              <div className="mb-1.5 flex items-center justify-between gap-3">
+                <label className="text-[13px] font-medium text-content">忠诚度</label>
+                <span className="text-xs text-content-tertiary tabular-nums">{memberForm.loyalty}</span>
+              </div>
               <input type="range" min={0} max={100} value={memberForm.loyalty} onChange={e => setMemberForm(f => ({ ...f, loyalty: Number(e.target.value) }))} className="w-full" />
             </div>
           </div>
         </Modal>
       )}
+    </div>
+  )
+}
+
+function StatItem({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="px-5 py-4 md:px-6">
+      <p className="text-xs text-content-tertiary">{label}</p>
+      <p className="mt-1 text-2xl font-semibold tracking-tight text-content tabular-nums">{value}</p>
     </div>
   )
 }

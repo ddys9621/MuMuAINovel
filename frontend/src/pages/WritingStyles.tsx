@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Plus, Pencil, Trash2, Star, Palette, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { cn } from '@/lib/utils'
 import { useStore } from '@/store/index'
 import { writingStyleApi } from '@/services/api'
 import { Modal } from '@/components/ui/Modal'
@@ -87,89 +88,126 @@ export default function WritingStyles() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-content">写作风格</h1>
-        <button onClick={openCreate} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5">
-          <Plus className="w-4 h-4" />
-          添加风格
-        </button>
-      </div>
+    <div className="animate-fade-in space-y-6">
+      <section className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-[28px] font-semibold tracking-tight text-content md:text-[32px]">写作风格</h1>
+          <p className="mt-2 max-w-[560px] text-sm leading-6 text-content-secondary">
+            定义叙述语气与遣词习惯，AI 生成正文时会按默认风格执行。
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2.5">
+          <button onClick={openCreate} className="hh-btn-primary">
+            <Plus className="h-4 w-4" />
+            添加风格
+          </button>
+        </div>
+      </section>
 
       {loading ? (
-        <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-content-secondary" /></div>
+        <section className="hh-panel flex items-center justify-center py-14">
+          <Loader2 className="h-6 w-6 animate-spin text-brand" />
+        </section>
       ) : styles.length === 0 ? (
-        <div className="text-center py-12 text-content-secondary text-sm">
-          <Palette className="w-8 h-8 mx-auto mb-2 opacity-40" />
-          暂无风格，点击上方按钮添加
-        </div>
+        <section className="hh-panel flex flex-col items-center px-6 py-14 text-center">
+          <span className="flex h-14 w-14 items-center justify-center bg-brand/10 text-brand">
+            <Palette className="h-7 w-7" />
+          </span>
+          <h2 className="mt-5 text-xl font-semibold tracking-tight text-content">还没有写作风格</h2>
+          <p className="mt-2 max-w-md text-sm leading-6 text-content-secondary">
+            点击右上角「添加风格」，可从预设快速创建或自定义 Prompt；设为默认后 AI 生成正文时会自动遵循。
+          </p>
+        </section>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {styles.map(s => (
-            <div key={s.id} className={`bg-white border rounded-card p-4 space-y-2 ${s.is_default ? 'border-brand' : 'border-surface-border'}`}>
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <h3 className="text-sm font-semibold text-content">{s.name}</h3>
-                    {s.is_default && <Star className="w-3.5 h-3.5 text-brand fill-brand" />}
+            <article key={s.id} className={cn('hh-panel flex flex-col p-5', s.is_default && 'border-brand')}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-start gap-3">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center bg-brand/10 text-brand">
+                    <Palette className="h-5 w-5" />
+                  </span>
+                  <div className="min-w-0">
+                    <h3 className="truncate text-[15px] font-semibold text-content">{s.name}</h3>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      <span className="bg-surface-hover px-2 py-0.5 text-[11px] font-medium text-content-secondary">
+                        {s.style_type === 'preset' ? '预设' : '自定义'}
+                      </span>
+                      {s.is_default && (
+                        <span className="inline-flex items-center gap-1 bg-brand/10 px-2 py-0.5 text-[11px] font-medium text-brand">
+                          <Star className="h-3 w-3 fill-current" />
+                          默认
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <span className="text-xs text-content-secondary">{s.style_type === 'preset' ? '预设' : '自定义'}</span>
                 </div>
-                <div className="flex gap-1 shrink-0">
+                <div className="flex shrink-0 items-center gap-0.5">
                   {!s.is_default && (
-                    <button onClick={() => handleSetDefault(s)} title="设为默认" className="p-1.5 rounded hover:bg-surface-hover text-content-secondary transition-colors"><Star className="w-3.5 h-3.5" /></button>
+                    <button onClick={() => handleSetDefault(s)} title="设为默认" aria-label="设为默认" className="hh-icon-btn-plain h-8 w-8">
+                      <Star className="h-4 w-4" />
+                    </button>
                   )}
-                  <button onClick={() => openEdit(s)} className="p-1.5 rounded hover:bg-surface-hover text-content-secondary transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
-                  <button onClick={() => handleDelete(s)} className="p-1.5 rounded hover:bg-red-50 text-content-secondary hover:text-red-500 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                  <button onClick={() => openEdit(s)} title="编辑" aria-label="编辑" className="hh-icon-btn-plain h-8 w-8">
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                  <button onClick={() => handleDelete(s)} title="删除" aria-label="删除" className="hh-icon-btn-plain h-8 w-8 hover:text-red-500">
+                    <Trash2 className="h-4 w-4" />
+                  </button>
                 </div>
               </div>
-              {s.description && <p className="text-xs text-content-secondary line-clamp-2">{s.description}</p>}
-              <p className="text-xs text-content-secondary/70 line-clamp-3 font-mono">{s.prompt_content}</p>
-            </div>
+              <div className="mt-4 space-y-3">
+                {s.description && <p className="line-clamp-2 text-[13px] leading-6 text-content-secondary">{s.description}</p>}
+                <div className="hh-subpanel px-3.5 py-3">
+                  <p className="line-clamp-3 font-mono text-xs leading-5 text-content-tertiary">{s.prompt_content}</p>
+                </div>
+              </div>
+            </article>
           ))}
         </div>
       )}
 
-      {/* 弹窗 */}
       {showModal && (
         <Modal
           title={editingStyle ? '编辑风格' : '添加风格'}
           onClose={() => setShowModal(false)}
-          size="xl"
+          size="lg"
+          closeOnMaskClick={false}
           footer={(
             <>
-              <button onClick={() => setShowModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
-              <button onClick={handleSubmit} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">确定</button>
+              <button onClick={() => setShowModal(false)} className="hh-btn-ghost">取消</button>
+              <button onClick={handleSubmit} className="hh-btn-primary">{editingStyle ? '保存修改' : '创建风格'}</button>
             </>
           )}
         >
-          {/* 预设选择 */}
-          {!editingStyle && presets.length > 0 && (
-            <div className="mb-3">
-              <label className="block text-sm text-content-secondary mb-1">从预设创建</label>
-              <select
-                value={form.preset_id}
-                onChange={e => handlePresetSelect(e.target.value)}
-                className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors"
-              >
-                <option value="">自定义风格</option>
-                {presets.map(p => <option key={p.id} value={p.id}>{p.name} — {p.description}</option>)}
-              </select>
-            </div>
-          )}
-
-          <div className="space-y-3">
+          <div className="space-y-5">
+            {!editingStyle && presets.length > 0 && (
+              <div>
+                <label className="hh-label">从预设创建</label>
+                <select
+                  value={form.preset_id}
+                  onChange={e => handlePresetSelect(e.target.value)}
+                  className="hh-field"
+                >
+                  <option value="">自定义风格</option>
+                  {presets.map(p => <option key={p.id} value={p.id}>{p.name} — {p.description}</option>)}
+                </select>
+                <p className="mt-1.5 text-xs text-content-tertiary">选择预设后会自动填入名称、描述与 Prompt，仍可继续修改。</p>
+              </div>
+            )}
             <div>
-              <label className="block text-sm text-content-secondary mb-1">名称</label>
-              <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
-            </div>
-            <div>
-              <label className="block text-sm text-content-secondary mb-1">描述</label>
-              <input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+              <label className="hh-label">
+                名称 <span className="text-red-500">*</span>
+              </label>
+              <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="如：冷峭克制、轻松幽默" className="hh-field" />
             </div>
             <div>
-              <label className="block text-sm text-content-secondary mb-1">Prompt 内容</label>
-              <textarea value={form.prompt_content} onChange={e => setForm(f => ({ ...f, prompt_content: e.target.value }))} rows={6} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors resize-none font-mono" />
+              <label className="hh-label">描述</label>
+              <input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="一句话说明这种风格适合什么场景" className="hh-field" />
+            </div>
+            <div>
+              <label className="hh-label">Prompt 内容</label>
+              <textarea value={form.prompt_content} onChange={e => setForm(f => ({ ...f, prompt_content: e.target.value }))} rows={6} placeholder="写给 AI 的风格指令：句式长短、用词偏好、叙述节奏…" className="hh-textarea font-mono" />
             </div>
           </div>
         </Modal>

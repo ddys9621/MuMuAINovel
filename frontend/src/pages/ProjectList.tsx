@@ -1,18 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Plus,
-  FolderOpen,
-  Pen,
   FileText,
-  CheckCircle,
   MoreHorizontal,
   Download,
   Upload,
-  Settings,
   Trash2,
   Clock,
-  BookOpen,
   Sparkles,
   Loader2,
   AlertTriangle,
@@ -21,46 +17,41 @@ import {
   Minimize2,
   Maximize2,
   StopCircle,
+  ChevronDown,
+  ChevronUp,
+  ArrowRight,
+  Wand2,
+  type LucideIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { cn } from '@/lib/utils'
 import { useStore } from '@/store/index'
 import { useProjectSync } from '@/store/hooks'
 import { projectApi, referencePackApi, wizardStreamApi } from '@/services/api'
-import InspirationDrawer from '@/components/inspiration/InspirationDrawer'
+import InspirationModal from '@/components/inspiration/InspirationModal'
 import { MCPSelector } from '@/components/MCPSelector'
 import {
   ReferencePackSelector,
   DEFAULT_SELECTOR_VALUE as DEFAULT_REF_PACK_VALUE,
   type ReferencePackSelectorValue,
 } from '@/components/ReferencePackSelector'
+import { BrandLogo } from '@/components/ui/BrandLogo'
 import type { Project } from '@/types'
 
 /* ─── 常量 ─── */
 
-const STATUS_MAP: Record<Project['status'], { label: string; color: string; bar: string }> = {
-  planning: { label: '规划中', color: 'bg-orange-100 text-orange-700', bar: 'bg-orange-400' },
-  writing: { label: '创作中', color: 'bg-emerald-100 text-emerald-700', bar: 'bg-emerald-500' },
-  revising: { label: '修改中', color: 'bg-amber-100 text-amber-700', bar: 'bg-amber-500' },
-  completed: { label: '已完成', color: 'bg-violet-100 text-violet-700', bar: 'bg-violet-500' },
+const STATUS_MAP: Record<Project['status'], { label: string; color: string }> = {
+  planning: { label: '规划中', color: 'bg-surface-hover text-content-secondary' },
+  writing: { label: '创作中', color: 'bg-emerald-50 text-emerald-600' },
+  revising: { label: '修改中', color: 'bg-amber-50 text-amber-600' },
+  completed: { label: '已完成', color: 'bg-violet-50 text-violet-600' },
 }
 
 const COVER_STYLES = [
-  {
-    wrap: 'from-[#ff845c] via-[#ff6a45] to-[#ffb066]',
-    glow: 'shadow-[0_22px_45px_-28px_rgba(255,106,69,0.75)]',
-  },
-  {
-    wrap: 'from-[#ffb36a] via-[#ff9350] to-[#ffd98c]',
-    glow: 'shadow-[0_22px_45px_-28px_rgba(255,147,80,0.65)]',
-  },
-  {
-    wrap: 'from-[#f08a5d] via-[#f45d48] to-[#ffcf92]',
-    glow: 'shadow-[0_22px_45px_-28px_rgba(240,93,72,0.7)]',
-  },
-  {
-    wrap: 'from-[#ff8761] via-[#ff7250] to-[#ffd2a8]',
-    glow: 'shadow-[0_22px_45px_-28px_rgba(255,114,80,0.72)]',
-  },
+  'from-[#007aff] to-[#63b3ff]',
+  'from-[#3a95ff] to-[#8ec3ff]',
+  'from-[#0a5fd6] to-[#3a95ff]',
+  'from-[#4f8cff] to-[#a7cdff]',
 ] as const
 
 /* ─── 工具函数 ─── */
@@ -134,21 +125,21 @@ function getCoverLetter(title: string) {
 
 function SkeletonCards() {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       {Array.from({ length: 8 }).map((_, i) => (
-        <div key={i} className="fanqie-soft-card overflow-hidden p-4">
-          <div className="mb-4 h-32 rounded-[24px] bg-gradient-to-br from-brand/20 via-orange-100 to-gold/20 animate-pulse" />
-          <div className="space-y-3">
-            <div className="h-5 bg-orange-100 rounded animate-pulse w-3/4" />
-            <div className="space-y-1.5">
-              <div className="h-3.5 bg-orange-50 rounded animate-pulse" />
-              <div className="h-3.5 bg-orange-50 rounded animate-pulse w-2/3" />
-            </div>
-            <div className="h-5 bg-orange-50 rounded-full animate-pulse w-16" />
-            <div className="flex justify-between pt-2">
-              <div className="h-3 bg-orange-50 rounded animate-pulse w-20" />
-              <div className="h-3 bg-orange-50 rounded animate-pulse w-24" />
-            </div>
+        <div key={i} className="hh-panel p-5">
+          <div className="flex items-start justify-between">
+            <div className="h-12 w-12 animate-pulse bg-brand/10" />
+            <div className="h-5 w-14 animate-pulse bg-brand/5" />
+          </div>
+          <div className="mt-4 h-5 w-3/4 animate-pulse bg-brand/10" />
+          <div className="mt-3 space-y-2">
+            <div className="h-3.5 animate-pulse bg-brand/5" />
+            <div className="h-3.5 w-2/3 animate-pulse bg-brand/5" />
+          </div>
+          <div className="mt-5 flex justify-between border-t border-surface-border/80 pt-3.5">
+            <div className="h-3 w-16 animate-pulse bg-brand/5" />
+            <div className="h-3 w-20 animate-pulse bg-brand/5" />
           </div>
         </div>
       ))}
@@ -156,34 +147,70 @@ function SkeletonCards() {
   )
 }
 
-/* ─── 空状态 ─── */
+/* ─── 空状态：两种创建方式各出现一次 ─── */
+
+function ModeCard({
+  icon: Icon,
+  title,
+  description,
+  primary,
+  onClick,
+}: {
+  icon: LucideIcon
+  title: string
+  description: string
+  primary?: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="hh-subpanel group flex items-start gap-4 p-5 text-left transition-all hover:-translate-y-0.5 hover:border-brand/40 hover:bg-white hover:shadow-card"
+    >
+      <span
+        className={cn(
+          'flex h-11 w-11 shrink-0 items-center justify-center transition-colors',
+          primary ? 'bg-brand text-white shadow-[0_12px_28px_-12px_rgba(0,122,255,0.55)]' : 'bg-brand/10 text-brand',
+        )}
+      >
+        <Icon className="h-5 w-5" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2 text-[15px] font-semibold text-content">
+          {title}
+          <ArrowRight className="h-4 w-4 text-content-tertiary transition-all group-hover:translate-x-0.5 group-hover:text-brand" />
+        </span>
+        <span className="mt-1 block text-[13px] leading-6 text-content-secondary">{description}</span>
+      </span>
+    </button>
+  )
+}
 
 function EmptyState({ onCreate, onInspiration }: { onCreate: () => void; onInspiration: () => void }) {
   return (
-    <div className="fanqie-soft-card flex flex-col items-center justify-center px-6 py-20 text-center">
-      <div className="mb-6 flex h-24 w-24 items-center justify-center rounded-[30px] bg-gradient-to-br from-brand/15 via-orange-100 to-gold/20 text-brand shadow-card">
-        <BookOpen className="h-11 w-11" />
-      </div>
-      <div className="fanqie-chip mb-4 border-brand/10 bg-brand/5 text-brand">你的书架还是空的</div>
-      <h3 className="mb-2 text-[28px] font-semibold text-content">创建第一个小说项目</h3>
-      <p className="mb-8 max-w-[480px] text-sm leading-7 text-content-secondary">从一个灵感或完整项目开始，逐步沉淀设定、角色与章节内容，建立属于你的创作宇宙。</p>
-      <div className="flex flex-wrap items-center justify-center gap-3">
-        <button
-          onClick={onInspiration}
-          className="fanqie-primary-btn px-5"
-        >
-          <Sparkles className="w-4 h-4" />
-          灵感创作
-        </button>
-        <button
+    <section className="hh-panel flex flex-col items-center px-6 py-14 text-center md:py-16">
+      <BrandLogo size="lg" />
+      <h2 className="mt-6 text-2xl font-semibold tracking-tight text-content">创建第一个小说项目</h2>
+      <p className="mt-2 max-w-[440px] text-sm leading-6 text-content-secondary">
+        选择一种方式开始，AI 都会为你生成世界观、角色与故事大纲。
+      </p>
+      <div className="mt-8 grid w-full max-w-[720px] gap-4 md:grid-cols-2">
+        <ModeCard
+          icon={Plus}
+          title="快速开始"
+          description="已经有书名和故事想法？填好基本信息，一次生成完整设定。"
+          primary
           onClick={onCreate}
-          className="fanqie-secondary-btn px-5"
-        >
-          <Plus className="w-4 h-4" />
-          快速新建
-        </button>
+        />
+        <ModeCard
+          icon={Sparkles}
+          title="灵感模式"
+          description="只有一句灵感？AI 逐步引导你确定书名、简介、主题与类型。"
+          onClick={onInspiration}
+        />
       </div>
-    </div>
+      <p className="mt-6 text-xs text-content-tertiary">已有导出的项目文件？可从右上角「更多」导入。</p>
+    </section>
   )
 }
 
@@ -205,95 +232,80 @@ function ProjectCard({
   const coverLetter = getCoverLetter(project.title)
 
   return (
-    <div
+    <article
       role="button"
       tabIndex={0}
       onClick={onClick}
       onKeyDown={(e) => e.key === 'Enter' && onClick()}
-      className="fanqie-soft-card group cursor-pointer overflow-hidden transition-all hover:-translate-y-1 hover:shadow-md"
+      className="hh-panel group flex cursor-pointer flex-col p-5 transition-all hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand/20"
     >
-      <div className={`relative overflow-hidden rounded-[26px] bg-gradient-to-br ${cover.wrap} ${cover.glow}`}>
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.24),transparent_26%)]" />
-        <div className="relative flex min-h-[152px] flex-col justify-between p-5 text-white">
-          <div className="flex items-start justify-between gap-3">
-            <span className="inline-flex items-center rounded-pill bg-white/15 px-3 py-1 text-xs font-medium backdrop-blur-sm">
-              {status.label}
-            </span>
+      <div className="pb-5">
+        <div className="flex items-start justify-between gap-3">
+          <div
+            className={`flex h-12 w-12 shrink-0 items-center justify-center bg-gradient-to-br ${cover} text-lg font-semibold text-white shadow-[0_12px_28px_-12px_rgba(0,122,255,0.55)]`}
+          >
+            {coverLetter}
+          </div>
+          <div className="flex items-center gap-1">
+            <span className={`px-2 py-1 text-[11px] font-medium ${status.color}`}>{status.label}</span>
             <button
               onClick={(e) => {
                 e.stopPropagation()
                 onDelete()
               }}
-              className="opacity-0 group-hover:opacity-100 flex h-9 w-9 items-center justify-center rounded-full bg-white/18 text-white backdrop-blur-sm transition-all hover:bg-white/28"
+              className="hh-icon-btn-plain h-8 w-8 opacity-0 transition-opacity hover:text-red-500 focus-visible:opacity-100 group-hover:opacity-100"
               title="删除项目"
+              aria-label="删除项目"
             >
               <Trash2 className="h-4 w-4" />
             </button>
           </div>
-          <div>
-            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-[18px] bg-white/14 text-2xl font-semibold backdrop-blur-sm">
-              {coverLetter}
-            </div>
-            <h3 className="line-clamp-2 text-lg font-semibold leading-snug text-white">{displayTitle}</h3>
-            <p className="mt-1 text-xs text-white/80">最近更新 · {formatDate(project.updated_at)}</p>
-          </div>
         </div>
-      </div>
 
-      <div className="flex flex-col gap-3 p-4">
-        <p className="line-clamp-2 min-h-[2.75rem] text-sm leading-6 text-content-secondary">
-          {project.description || '还没有添加项目简介，点击进入后继续补充你的世界观、剧情和角色设定。'}
+        <h3 className="mt-4 line-clamp-1 text-[17px] font-semibold tracking-tight text-content">{displayTitle}</h3>
+        <p className="mt-1.5 line-clamp-2 min-h-[2.75rem] text-[13px] leading-[1.375rem] text-content-secondary">
+          {project.description || '还没有添加简介，进入项目后可以继续补充世界观、剧情与角色设定。'}
         </p>
 
         {tags.length > 0 && (
-          <div className="flex flex-wrap gap-2">
+          <div className="mt-3 flex flex-wrap gap-1.5">
             {tags.map((g) => (
-              <span
-                key={g}
-                className="rounded-pill bg-[#fff1e8] px-2.5 py-1 text-xs font-medium text-[#a9572f]"
-              >
+              <span key={g} className="hh-tag">
                 {g.trim()}
               </span>
             ))}
           </div>
         )}
-
-        <div className="grid grid-cols-2 gap-2">
-          <div className="rounded-[18px] bg-white/80 px-3 py-3">
-            <p className="text-[11px] uppercase tracking-[0.16em] text-content-tertiary">累计字数</p>
-            <p className="mt-1 flex items-center gap-1 text-sm font-semibold text-content">
-              <FileText className="h-4 w-4 text-brand" />
-              {formatWords(project.current_words)} 字
-            </p>
-          </div>
-          <div className="rounded-[18px] bg-white/80 px-3 py-3">
-            <p className="text-[11px] uppercase tracking-[0.16em] text-content-tertiary">项目状态</p>
-            <p className={`mt-1 inline-flex rounded-pill px-2.5 py-1 text-xs font-medium ${status.color}`}>
-              {status.label}
-            </p>
-          </div>
-        </div>
-
-        <div className="border-t border-surface-border-light pt-3 text-xs text-content-tertiary">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="flex items-center gap-1">
-              <Clock className="h-3.5 w-3.5" />
-              {formatDate(project.updated_at)}
-            </span>
-            <span>点击进入项目</span>
-          </div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-[#f9ebe2]">
-            <div className={`h-full rounded-full ${status.bar}`} style={{ width: project.status === 'completed' ? '100%' : project.status === 'writing' ? '72%' : project.status === 'revising' ? '84%' : '38%' }} />
-          </div>
-        </div>
       </div>
+
+      <div className="mt-auto flex items-center justify-between border-t border-surface-border/80 pt-3.5 text-xs text-content-tertiary">
+        <span className="inline-flex items-center gap-1.5">
+          <FileText className="h-3.5 w-3.5" />
+          {formatWords(project.current_words)} 字
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <Clock className="h-3.5 w-3.5" />
+          {formatDate(project.updated_at)}
+        </span>
+      </div>
+    </article>
+  )
+}
+
+/* ─── 统计 ─── */
+
+function StatItem({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="px-5 py-4 md:px-6">
+      <p className="text-xs text-content-tertiary">{label}</p>
+      <p className="mt-1 text-2xl font-semibold tracking-tight text-content tabular-nums">{value}</p>
     </div>
   )
 }
 
-/* ─── 下拉菜单 ─── */
+/* ─── 更多菜单 ─── */
 
-function DropdownMenu({
+function MoreMenu({
   onImport,
   onExport,
   onExportTxt,
@@ -313,44 +325,29 @@ function DropdownMenu({
     return () => document.removeEventListener('mousedown', handleClick)
   }, [])
 
+  const run = (fn: () => void) => () => {
+    fn()
+    setOpen(false)
+  }
+
   return (
     <div ref={ref} className="relative">
-      <button
-        onClick={() => setOpen(!open)}
-        className="fanqie-secondary-btn px-3 py-2"
-        title="更多操作"
-      >
-        <MoreHorizontal className="w-5 h-5" />
+      <button onClick={() => setOpen(!open)} className="hh-icon-btn h-11 w-11" title="更多操作" aria-label="更多操作">
+        <MoreHorizontal className="h-5 w-5" />
       </button>
       {open && (
-        <div className="absolute right-0 mt-2 z-20 w-44 rounded-[22px] border border-white/80 bg-white/95 p-2 shadow-lg backdrop-blur-sm animate-scale-in">
-          <button
-            onClick={() => { onImport(); setOpen(false) }}
-            className="flex w-full items-center gap-2 rounded-[16px] px-3 py-2.5 text-sm text-content hover:bg-surface-hover"
-          >
-            <Upload className="w-4 h-4" />
+        <div className="hh-menu absolute right-0 mt-2 w-44">
+          <button onClick={run(onImport)} className="hh-menu-item">
+            <Upload className="h-4 w-4 text-content-secondary" />
             导入项目
           </button>
-          <button
-            onClick={() => { onExport(); setOpen(false) }}
-            className="flex w-full items-center gap-2 rounded-[16px] px-3 py-2.5 text-sm text-content hover:bg-surface-hover"
-          >
-            <Download className="w-4 h-4" />
+          <button onClick={run(onExport)} className="hh-menu-item">
+            <Download className="h-4 w-4 text-content-secondary" />
             导出项目
           </button>
-          <button
-            onClick={() => { onExportTxt(); setOpen(false) }}
-            className="flex w-full items-center gap-2 rounded-[16px] px-3 py-2.5 text-sm text-content hover:bg-surface-hover"
-          >
-            <Download className="w-4 h-4" />
+          <button onClick={run(onExportTxt)} className="hh-menu-item">
+            <FileText className="h-4 w-4 text-content-secondary" />
             导出 TXT
-          </button>
-          <button
-            onClick={() => { setOpen(false); window.location.href = '/settings' }}
-            className="flex w-full items-center gap-2 rounded-[16px] px-3 py-2.5 text-sm text-content hover:bg-surface-hover"
-          >
-            <Settings className="w-4 h-4" />
-            系统设置
           </button>
         </div>
       )}
@@ -369,37 +366,51 @@ function DeleteDialog({
   onConfirm: () => void
   onCancel: () => void
 }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onCancel}>
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-sm rounded-modal border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.96)_0%,rgba(255,247,240,0.98)_100%)] p-6 shadow-xl animate-scale-in"
-      >
-        <div className="fanqie-chip mb-4 border-red-100 bg-red-50 text-red-500">危险操作</div>
-        <h3 className="mb-2 text-xl font-semibold text-content">确认删除</h3>
-        <p className="mb-6 text-sm leading-7 text-content-secondary">
-          确定要删除项目「{project.title}」吗？此操作不可撤销，项目下的所有数据将被永久删除。
-        </p>
-        <div className="flex justify-end gap-3">
-          <button
-            onClick={onCancel}
-            className="fanqie-secondary-btn"
-          >
+  return createPortal(
+    <div className="hh-modal-mask" onClick={onCancel}>
+      <div className="hh-modal max-w-[420px]" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+        <div className="hh-modal-head">
+          <div>
+            <p className="hh-eyebrow text-red-500">危险操作</p>
+            <h3 className="mt-2 text-xl font-semibold tracking-tight text-content">删除项目</h3>
+          </div>
+          <button onClick={onCancel} className="hh-icon-btn-plain -mr-2 -mt-1" aria-label="关闭">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="hh-modal-body">
+          <p className="text-sm leading-7 text-content-secondary">
+            确定要删除「<span className="font-medium text-content">{getDisplayTitle(project.title)}</span>」吗？
+            项目下的世界观、角色、大纲与章节都会被永久删除，此操作不可撤销。
+          </p>
+        </div>
+        <div className="hh-modal-foot">
+          <button onClick={onCancel} className="hh-btn-ghost">
             取消
           </button>
-          <button
-            onClick={onConfirm}
-            className="inline-flex items-center justify-center rounded-btn bg-red-500 px-4 py-2 text-sm font-medium text-white hover:bg-red-600"
-          >
-            删除
+          <button onClick={onConfirm} className="hh-btn-danger">
+            <Trash2 className="h-4 w-4" />
+            确认删除
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
 /* ─── 导入验证弹窗 ─── */
+
+const IMPORT_STAT_LABELS: Record<string, string> = {
+  characters: '角色',
+  chapters: '章节',
+  outlines: '大纲',
+  plot_cards: '剧情卡片',
+  plot_lines: '剧情线',
+  chapter_outlines: '章纲',
+  writing_styles: '写作风格',
+  world_rules: '世界规则',
+}
 
 function ImportDialog({
   onClose,
@@ -459,142 +470,119 @@ function ImportDialog({
     }
   }
 
-  const STAT_LABELS: Record<string, string> = {
-    characters: '角色',
-    chapters: '章节',
-    outlines: '大纲',
-    plot_cards: '剧情卡片',
-    plot_lines: '剧情线',
-    chapter_outlines: '章纲',
-    writing_styles: '写作风格',
-    world_rules: '世界规则',
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-modal border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.97)_0%,rgba(255,247,240,0.98)_100%)] p-6 shadow-xl animate-scale-in"
-      >
-        <div className="flex items-center justify-between mb-4">
+  return createPortal(
+    <div className="hh-modal-mask" onClick={onClose}>
+      <div className="hh-modal max-w-[480px]" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+        <div className="hh-modal-head">
           <div>
-            <div className="fanqie-chip mb-2 border-brand/10 bg-brand/5 text-brand">导入验证</div>
-            <h3 className="text-lg font-semibold text-content">导入项目</h3>
+            <p className="hh-eyebrow">导入</p>
+            <h3 className="mt-2 text-xl font-semibold tracking-tight text-content">导入项目</h3>
+            <p className="mt-1 text-sm text-content-secondary">选择之前导出的 JSON 文件，验证通过后即可导入。</p>
           </div>
-          <button onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-full hover:bg-surface-hover text-content-tertiary transition-colors">
-            <X className="w-4 h-4" />
+          <button onClick={onClose} className="hh-icon-btn-plain -mr-2 -mt-1" aria-label="关闭">
+            <X className="h-4 w-4" />
           </button>
         </div>
 
-        {/* 文件选择 */}
-        <div className="mb-4">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".json"
-            className="hidden"
-            onChange={handleFileSelect}
-          />
+        <div className="hh-modal-body space-y-4">
+          <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={handleFileSelect} />
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="w-full rounded-[22px] border-2 border-dashed border-surface-border bg-white/75 p-6 text-center hover:border-brand hover:bg-brand-50/30 transition-colors"
+            className="flex w-full flex-col items-center gap-2 border border-dashed border-brand/30 bg-white/50 px-6 py-8 text-center transition-colors hover:border-brand hover:bg-brand/5"
           >
-            <Upload className="w-8 h-8 mx-auto mb-2 text-content-tertiary" />
-            <p className="text-sm text-content-secondary">
-              {file ? file.name : '点击选择 JSON 文件'}
-            </p>
-            {file && (
-              <p className="text-xs text-content-tertiary mt-1">
-                {(file.size / 1024).toFixed(1)} KB
-              </p>
-            )}
+            <span className="flex h-11 w-11 items-center justify-center bg-brand/10 text-brand">
+              <Upload className="h-5 w-5" />
+            </span>
+            <span className="text-sm font-medium text-content">{file ? file.name : '点击选择 JSON 文件'}</span>
+            <span className="text-xs text-content-tertiary">
+              {file ? `${(file.size / 1024).toFixed(1)} KB` : '支持由本系统导出的项目文件'}
+            </span>
           </button>
-        </div>
 
-        {/* 验证中 */}
-        {validating && (
-          <div className="flex items-center gap-2 text-sm text-content-secondary py-3">
-            <Loader2 className="w-4 h-4 animate-spin" />
-            正在验证文件...
-          </div>
-        )}
-
-        {/* 验证结果 */}
-        {validation && !validating && (
-          <div className="mb-4 space-y-3">
-            {/* 状态标识 */}
-            <div className={`flex items-center gap-2 text-sm font-medium ${validation.valid ? 'text-green-600' : 'text-red-600'}`}>
-              {validation.valid ? (
-                <><CheckCircle2 className="w-4 h-4" />验证通过</>
-              ) : (
-                <><AlertTriangle className="w-4 h-4" />验证失败</>
-              )}
+          {validating && (
+            <div className="flex items-center gap-2 text-sm text-content-secondary">
+              <Loader2 className="h-4 w-4 animate-spin text-brand" />
+              正在验证文件...
             </div>
+          )}
 
-            {/* 项目信息 */}
-            {validation.project_name && (
-              <div className="rounded-[18px] bg-surface p-3">
-                <p className="text-sm font-medium text-content">{validation.project_name}</p>
-                {validation.version && (
-                  <p className="text-xs text-content-tertiary mt-0.5">版本: {validation.version}</p>
+          {validation && !validating && (
+            <div className="space-y-3">
+              <div
+                className={cn(
+                  'flex items-center gap-2 text-sm font-medium',
+                  validation.valid ? 'text-emerald-600' : 'text-red-600',
+                )}
+              >
+                {validation.valid ? (
+                  <>
+                    <CheckCircle2 className="h-4 w-4" />
+                    验证通过
+                  </>
+                ) : (
+                  <>
+                    <AlertTriangle className="h-4 w-4" />
+                    验证失败
+                  </>
                 )}
               </div>
-            )}
 
-            {/* 数据统计 */}
-            {Object.keys(validation.statistics).length > 0 && (
-              <div className="rounded-[18px] bg-surface p-3">
-                <p className="text-xs text-content-secondary mb-2">数据统计</p>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                  {Object.entries(validation.statistics).map(([key, value]) => (
-                    <div key={key} className="flex justify-between text-xs">
-                      <span className="text-content-secondary">{STAT_LABELS[key] || key}</span>
-                      <span className="text-content font-medium">{value}</span>
-                    </div>
+              {validation.project_name && (
+                <div className="hh-subpanel px-4 py-3">
+                  <p className="text-sm font-medium text-content">{validation.project_name}</p>
+                  {validation.version && <p className="mt-0.5 text-xs text-content-tertiary">版本 {validation.version}</p>}
+                </div>
+              )}
+
+              {Object.keys(validation.statistics).length > 0 && (
+                <div className="hh-subpanel px-4 py-3">
+                  <p className="mb-2 text-xs text-content-tertiary">数据统计</p>
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
+                    {Object.entries(validation.statistics).map(([key, value]) => (
+                      <div key={key} className="flex justify-between text-xs">
+                        <span className="text-content-secondary">{IMPORT_STAT_LABELS[key] || key}</span>
+                        <span className="font-medium text-content tabular-nums">{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {validation.errors.length > 0 && (
+                <div className="space-y-1 border border-red-200 bg-red-50/80 px-4 py-3">
+                  {validation.errors.map((err, i) => (
+                    <p key={i} className="text-xs text-red-600">
+                      • {err}
+                    </p>
                   ))}
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* 错误信息 */}
-            {validation.errors.length > 0 && (
-              <div className="rounded-[18px] bg-red-50 p-3 space-y-1">
-                {validation.errors.map((err, i) => (
-                  <p key={i} className="text-xs text-red-600">• {err}</p>
-                ))}
-              </div>
-            )}
+              {validation.warnings.length > 0 && (
+                <div className="space-y-1 border border-amber-200 bg-amber-50/80 px-4 py-3">
+                  {validation.warnings.map((warn, i) => (
+                    <p key={i} className="text-xs text-amber-700">
+                      • {warn}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
-            {/* 警告信息 */}
-            {validation.warnings.length > 0 && (
-              <div className="rounded-[18px] bg-yellow-50 p-3 space-y-1">
-                {validation.warnings.map((warn, i) => (
-                  <p key={i} className="text-xs text-yellow-700">• {warn}</p>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* 操作按钮 */}
-        <div className="flex justify-end gap-3">
-          <button
-            onClick={onClose}
-            className="fanqie-secondary-btn"
-          >
+        <div className="hh-modal-foot">
+          <button onClick={onClose} className="hh-btn-ghost">
             取消
           </button>
-          <button
-            onClick={handleImport}
-            disabled={!validation?.valid || importing}
-            className="fanqie-primary-btn disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {importing && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+          <button onClick={handleImport} disabled={!validation?.valid || importing} className="hh-btn-primary">
+            {importing && <Loader2 className="h-4 w-4 animate-spin" />}
             导入
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -613,13 +601,13 @@ export default function ProjectList() {
   const [pendingPackTaskId, setPendingPackTaskId] = useState<string | null>(null)
   const inspirationOpen = searchParams.get('panel') === 'inspiration'
 
-  const openInspirationDrawer = () => {
+  const openInspiration = () => {
     const next = new URLSearchParams(searchParams)
     next.set('panel', 'inspiration')
     setSearchParams(next)
   }
 
-  const closeInspirationDrawer = () => {
+  const closeInspiration = () => {
     const next = new URLSearchParams(searchParams)
     next.delete('panel')
     setSearchParams(next, { replace: true })
@@ -684,7 +672,7 @@ export default function ProjectList() {
     projectId: string,
     options?: { nextRoute?: 'bridge_planning' | 'chapter_outlines' }
   ) => {
-    closeInspirationDrawer()
+    closeInspiration()
     if (options?.nextRoute === 'bridge_planning') {
       navigate(`/project/${projectId}/plot-bridges`)
     } else {
@@ -746,73 +734,52 @@ export default function ProjectList() {
 
   // 加载中
   const showSkeleton = loading && !projectsInitialized
+  const hasProjects = projects.length > 0
+  // 空状态里已有两张「创建方式」卡片，避免顶部再出现一组相同按钮
+  const showHeaderCreateActions = showSkeleton || hasProjects
 
   return (
-    <div className="animate-fade-in space-y-5">
-      <section className="mu-page-header">
-        <div className="mu-page-header__row">
-          <div className="min-w-0">
-            <div className="mu-page-header__eyebrow">
-              <Sparkles className="h-3 w-3" />
-              作品中心
-            </div>
-            <h1 className="mu-page-header__title">让项目、灵感与进度井然有序</h1>
-            <p className="mu-page-header__subtitle">在同一处查看作品状态与最近更新，快速回到正在推进的项目。</p>
-          </div>
-
-          <div className="mu-page-header__actions">
-            <button onClick={openInspirationDrawer} className="mu-page-header__btn">
-              <Sparkles className="h-4 w-4" />
-              灵感创作
-            </button>
-            <button onClick={handleCreate} className="mu-page-header__btn-primary">
-              <Plus className="h-4 w-4" />
-              快速新建
-            </button>
-            <DropdownMenu onImport={handleImport} onExport={handleExport} onExportTxt={handleExportTxt} />
-          </div>
+    <div className="animate-fade-in space-y-6">
+      <section className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-[28px] font-semibold tracking-tight text-content md:text-[32px]">我的项目</h1>
+          <p className="mt-2 max-w-[560px] text-sm leading-6 text-content-secondary">
+            在这里管理全部小说项目，随时回到最近推进的作品。
+          </p>
         </div>
 
-        <div className="mu-page-header__stats">
-          <span className="mu-page-header__stat">
-            <FolderOpen className="h-3.5 w-3.5 text-brand" />
-            项目总数
-            <span className="mu-page-header__stat-value">{stats.total}</span>
-          </span>
-          <span className="mu-page-header__stat-divider" />
-          <span className="mu-page-header__stat">
-            <Pen className="h-3.5 w-3.5 text-emerald-500" />
-            创作中
-            <span className="mu-page-header__stat-value">{stats.writing}</span>
-          </span>
-          <span className="mu-page-header__stat-divider" />
-          <span className="mu-page-header__stat">
-            <CheckCircle className="h-3.5 w-3.5 text-violet-500" />
-            已完成
-            <span className="mu-page-header__stat-value">{stats.completed}</span>
-          </span>
-          <span className="mu-page-header__stat-divider" />
-          <span className="mu-page-header__stat">
-            <FileText className="h-3.5 w-3.5 text-amber-500" />
-            总字数
-            <span className="mu-page-header__stat-value">{formatWords(stats.totalWords)}</span>
-          </span>
+        <div className="flex shrink-0 items-center gap-2.5">
+          {showHeaderCreateActions && (
+            <>
+              <button onClick={openInspiration} className="hh-btn-secondary">
+                <Sparkles className="h-4 w-4 text-brand" />
+                灵感模式
+              </button>
+              <button onClick={handleCreate} className="hh-btn-primary">
+                <Plus className="h-4 w-4" />
+                快速开始
+              </button>
+            </>
+          )}
+          <MoreMenu onImport={handleImport} onExport={handleExport} onExportTxt={handleExportTxt} />
         </div>
       </section>
 
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold text-content">项目书架</h2>
-          <p className="mt-1 text-sm text-content-secondary">点击任意卡片即可继续创作，快速回到最近更新的作品。</p>
-        </div>
-      </div>
+      {hasProjects && (
+        <section className="hh-panel grid grid-cols-2 divide-surface-border/80 md:grid-cols-4 md:divide-x">
+          <StatItem label="项目总数" value={stats.total} />
+          <StatItem label="创作中" value={stats.writing} />
+          <StatItem label="已完成" value={stats.completed} />
+          <StatItem label="累计字数" value={formatWords(stats.totalWords)} />
+        </section>
+      )}
 
       {showSkeleton ? (
         <SkeletonCards />
-      ) : projects.length === 0 ? (
-        <EmptyState onCreate={handleCreate} onInspiration={openInspirationDrawer} />
+      ) : !hasProjects ? (
+        <EmptyState onCreate={handleCreate} onInspiration={openInspiration} />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {projects.map((project) => (
             <ProjectCard
               key={project.id}
@@ -824,9 +791,9 @@ export default function ProjectList() {
         </div>
       )}
 
-      <InspirationDrawer
+      <InspirationModal
         open={inspirationOpen}
-        onClose={closeInspirationDrawer}
+        onClose={closeInspiration}
         onEnterProject={handleEnterInspiredProject}
         onProjectCreated={handleInspirationProjectCreated}
       />
@@ -863,7 +830,7 @@ export default function ProjectList() {
   )
 }
 
-/* ─── 向导创建弹窗 ─── */
+/* ─── 快速开始向导弹窗 ─── */
 
 type WizardPhase = 'form' | 'generating' | 'done'
 type GenStep = 'pending' | 'processing' | 'completed' | 'error'
@@ -878,8 +845,8 @@ interface WizardForm {
   chapter_count: number
   character_count: number
   requirements: string
-  /** F3/F5：是否启用 step 3.5 桥段规划阶段（默认 true） */
-  enable_bridge_planning: boolean
+  /** 向导步骤 4：支线数量（主线固定 1 条并覆盖全书章节数） */
+  sub_line_count: number
 }
 
 const DEFAULT_WIZARD_FORM: WizardForm = {
@@ -892,11 +859,59 @@ const DEFAULT_WIZARD_FORM: WizardForm = {
   chapter_count: 30,
   character_count: 5,
   requirements: '',
-  enable_bridge_planning: true,
+  sub_line_count: 2,
 }
 
 const GENRE_OPTIONS = ['玄幻', '奇幻', '武侠', '仙侠', '都市', '现实', '历史', '军事', '游戏', '体育', '科幻', '悬疑', '灵异', '二次元', '言情', '现言', '古言']
 const PERSPECTIVE_OPTIONS = ['第一人称', '第三人称', '全知视角']
+
+function ToggleRow({
+  checked,
+  onChange,
+  title,
+  description,
+}: {
+  checked: boolean
+  onChange: (v: boolean) => void
+  title: string
+  description: ReactNode
+}) {
+  return (
+    <label className="hh-subpanel flex cursor-pointer items-start gap-3 px-4 py-3">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="mt-1 h-4 w-4" />
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium text-content">{title}</span>
+        <span className="mt-0.5 block text-xs leading-5 text-content-secondary">{description}</span>
+      </span>
+    </label>
+  )
+}
+
+function StepRow({ status, title, description }: { status: GenStep; title: string; description: string }) {
+  const icon =
+    status === 'completed' ? (
+      <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+    ) : status === 'processing' ? (
+      <Loader2 className="h-5 w-5 animate-spin text-brand" />
+    ) : status === 'error' ? (
+      <AlertTriangle className="h-5 w-5 text-red-500" />
+    ) : (
+      <span className="block h-5 w-5 border-2 border-surface-border" />
+    )
+
+  return (
+    <li className={cn('flex items-center gap-3.5 px-4 py-3.5', status === 'pending' && 'opacity-60')}>
+      {icon}
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium text-content">{title}</p>
+        <p className="text-xs text-content-tertiary">{description}</p>
+      </div>
+      <span className="text-xs text-content-tertiary">
+        {status === 'completed' ? '已完成' : status === 'processing' ? '生成中' : status === 'error' ? '失败' : '等待中'}
+      </span>
+    </li>
+  )
+}
 
 function WizardModal({
   onClose,
@@ -915,16 +930,36 @@ function WizardModal({
   const [phase, setPhase] = useState<WizardPhase>('form')
   const [progress, setProgress] = useState(0)
   const [progressMsg, setProgressMsg] = useState('')
-  const [steps, setSteps] = useState<{ world: GenStep; chars: GenStep; outline: GenStep }>({ world: 'pending', chars: 'pending', outline: 'pending' })
+  const [steps, setSteps] = useState<{ world: GenStep; chars: GenStep; outline: GenStep; lines: GenStep }>({ world: 'pending', chars: 'pending', outline: 'pending', lines: 'pending' })
   const [projectId, setProjectId] = useState('')
   const [error, setError] = useState('')
   const [minimized, setMinimized] = useState(false)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
   const [selectedPlugins, setSelectedPlugins] = useState<string[]>([])
   const [enableMcp, setEnableMcp] = useState(false)
   // V3.2-B：拆书参考包选择状态（项目创建后后端会自动挂载）
   const [refPack, setRefPack] = useState<ReferencePackSelectorValue>(DEFAULT_REF_PACK_VALUE)
-  // F5：outline 完成后后端回传的下一步路由（bridge_planning 或 chapter_outlines）
-  const [nextRoute, setNextRoute] = useState<'bridge_planning' | 'chapter_outlines' | null>(null)
+
+  // 分步确认：每阶段生成完暂停，用户确认后再继续（贴合人类"逐层沉淀再展开"的创作节奏）
+  const [stepConfirm, setStepConfirm] = useState(true)
+  const [awaitingStep, setAwaitingStep] = useState<null | 'chars' | 'outline' | 'lines'>(null)
+  const [worldPreview, setWorldPreview] = useState<{ time_period?: string; location?: string; atmosphere?: string; rules?: string } | null>(null)
+  const [charsPreview, setCharsPreview] = useState<string[]>([])
+  const [linesPreview, setLinesPreview] = useState('')
+  const continueGateRef = useRef<(() => void) | null>(null)
+
+  /** 暂停生成流水线，等待用户点击「继续」 */
+  const waitForConfirm = (step: 'chars' | 'outline' | 'lines', progressVal: number, msg: string) =>
+    new Promise<void>((resolve) => {
+      setAwaitingStep(step)
+      setProgress(progressVal)
+      setProgressMsg(msg)
+      continueGateRef.current = () => {
+        setAwaitingStep(null)
+        continueGateRef.current = null
+        resolve()
+      }
+    })
 
   // V3.2-A：从拆书页跳转过来时，根据 task_id 拉取对应的参考包并预填 refPack
   useEffect(() => {
@@ -949,6 +984,7 @@ function WizardModal({
           dimensions: [],
           strength: 'medium',
         })
+        setAdvancedOpen(true)
         toast.success(`已预选拆书参考包：${matched.source_book_title}`)
       })
       .catch(() => {
@@ -1024,10 +1060,12 @@ function WizardModal({
           signal: controller.signal,
           onProgress: (msg, prog) => {
             setProgressMsg(msg)
-            setProgress(Math.floor(prog / 3))
+            setProgress(Math.floor(prog / 4))
           },
           onResult: (result) => {
             setProjectId(result.project_id)
+            const r = result as { time_period?: string; location?: string; atmosphere?: string; rules?: string }
+            setWorldPreview({ time_period: r.time_period, location: r.location, atmosphere: r.atmosphere, rules: r.rules })
             setSteps(s => ({ ...s, world: 'completed' }))
           },
           onError: (err) => {
@@ -1041,10 +1079,16 @@ function WizardModal({
       if (!worldResult?.project_id) throw new Error('项目创建失败')
       const pid = worldResult.project_id
 
+      // 分步确认：世界观完成后暂停，可先去项目里查看/修改再继续
+      if (stepConfirm) {
+        await waitForConfirm('chars', 25, '世界观已生成，请确认后继续')
+      }
+      if (controller.signal.aborted) return
+
       // Step 2: 角色
       setSteps(s => ({ ...s, chars: 'processing' }))
       setProgressMsg('正在生成角色...')
-      setProgress(33)
+      setProgress(25)
 
       await wizardStreamApi.generateCharactersStream(
         {
@@ -1062,9 +1106,13 @@ function WizardModal({
           signal: controller.signal,
           onProgress: (msg, prog) => {
             setProgressMsg(msg)
-            setProgress(33 + Math.floor(prog / 3))
+            setProgress(25 + Math.floor(prog / 4))
           },
-          onResult: () => setSteps(s => ({ ...s, chars: 'completed' })),
+          onResult: (result) => {
+            const chars = (result as { characters?: Array<{ name?: string }> }).characters || []
+            setCharsPreview(chars.slice(0, 6).map(c => String(c.name || '')).filter(Boolean))
+            setSteps(s => ({ ...s, chars: 'completed' }))
+          },
           onError: (err) => {
             setSteps(s => ({ ...s, chars: 'error' }))
             throw new Error(err)
@@ -1074,20 +1122,16 @@ function WizardModal({
 
       if (controller.signal.aborted) return
 
-      // Step 2.5: 把 enable_bridge_planning 同步到项目（仅当用户取消默认勾选时）
-      // 默认 true 时 DB 已是 true，无需多余请求
-      if (!form.enable_bridge_planning) {
-        try {
-          await projectApi.updateProject(pid, { enable_bridge_planning: false })
-        } catch (e) {
-          console.warn('[wizard] 同步 enable_bridge_planning=false 失败：', e)
-        }
+      // 分步确认：角色完成后暂停
+      if (stepConfirm) {
+        await waitForConfirm('outline', 50, '角色已生成，请确认后继续')
       }
+      if (controller.signal.aborted) return
 
       // Step 3: 大纲
       setSteps(s => ({ ...s, outline: 'processing' }))
       setProgressMsg('正在生成故事大纲...')
-      setProgress(66)
+      setProgress(50)
 
       await wizardStreamApi.generateCompleteOutlineStream(
         {
@@ -1105,19 +1149,53 @@ function WizardModal({
           signal: controller.signal,
           onProgress: (msg, prog) => {
             setProgressMsg(msg)
-            setProgress(66 + Math.floor(prog / 3))
+            setProgress(50 + Math.floor(prog / 4))
           },
-          onResult: (result) => {
-            // T2.1：捕获后端建议的下一步路由
-            const route = (result as { next_wizard_route?: 'bridge_planning' | 'chapter_outlines' })
-              .next_wizard_route
-            if (route === 'bridge_planning' || route === 'chapter_outlines') {
-              setNextRoute(route)
-            }
+          onResult: () => {
             setSteps(s => ({ ...s, outline: 'completed' }))
           },
           onError: (err) => {
             setSteps(s => ({ ...s, outline: 'error' }))
+            throw new Error(err)
+          },
+        }
+      )
+
+      if (controller.signal.aborted) return
+      if (stepConfirm) {
+        await waitForConfirm('lines', 75, '故事大纲已生成，请确认后继续生成剧情线')
+      }
+      if (controller.signal.aborted) return
+
+      // Step 4: 剧情线（主线 ×1 + 支线 ×N，主线预计章节数 = 项目章节数）
+      setSteps(s => ({ ...s, lines: 'processing' }))
+      setProgressMsg('正在生成剧情线...')
+      setProgress(75)
+
+      await wizardStreamApi.generatePlotLinesStream(
+        {
+          project_id: pid,
+          chapter_count: form.chapter_count,
+          sub_line_count: form.sub_line_count,
+          requirements: form.requirements.trim() || undefined,
+          enable_mcp: enableMcp,
+          selected_plugins: selectedPlugins,
+          ...r8Payload(),
+        },
+        {
+          signal: controller.signal,
+          onProgress: (msg, prog) => {
+            setProgressMsg(msg)
+            setProgress(75 + Math.floor(prog / 4))
+          },
+          onResult: (result) => {
+            setLinesPreview(
+              `主线《${result.main_line.title}》${result.main_line.beat_count} 个节点 → ${result.plan_preview.total_bridges} 个桥段 / ${result.plan_preview.total_chapters} 章`
+            )
+            setSteps(s => ({ ...s, lines: 'completed' }))
+          },
+          onError: (err) => {
+            setSteps(s => ({ ...s, lines: 'error' }))
             throw new Error(err)
           },
         }
@@ -1137,15 +1215,11 @@ function WizardModal({
     }
   }
 
-  const stepIcon = (s: GenStep) => {
-    if (s === 'completed') return <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-    if (s === 'processing') return <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />
-    if (s === 'error') return <AlertTriangle className="w-4 h-4 text-red-500" />
-    return <div className="w-4 h-4 rounded-full border-2 border-gray-300" />
-  }
-
   const handleStop = () => {
     abortRef.current?.abort()
+    // 若正处于分步确认暂停中，释放闸门让流水线感知 abort 并退出
+    continueGateRef.current?.()
+    setAwaitingStep(null)
     setError('已手动停止生成')
     setProgressMsg('已停止')
     // 如果已经创建了项目，可以进入项目查看已生成的部分
@@ -1154,127 +1228,143 @@ function WizardModal({
     }
   }
 
+  const handleDirectCreate = async () => {
+    if (!form.title.trim()) return
+    try {
+      const created = await projectApi.createProject({
+        title: form.title.trim(),
+        description: form.description.trim() || undefined,
+        theme: form.theme.trim() || undefined,
+        genre: form.genre || undefined,
+        target_words: form.target_words || undefined,
+        narrative_perspective: form.narrative_perspective || undefined,
+        chapter_count: form.chapter_count || undefined,
+        character_count: form.character_count || undefined,
+      })
+      toast.success('项目已创建')
+      onSuccess(created.id)
+    } catch { /* api 拦截器已 toast */ }
+  }
+
+  const enterProject = () => onSuccess(projectId, { nextRoute: 'bridge_planning' })
+  const enterLabel = '进入桥段规划'
+  const isSuccess = phase === 'done' && !error
+  const canClose = phase === 'form' || phase === 'done' || Boolean(error)
+
+  const advancedSummary = [
+    `${form.sub_line_count} 条支线`,
+    stepConfirm ? '分步确认' : '连续生成',
+    refPack.enabled ? '拆书参考已启用' : '未用拆书参考',
+    enableMcp ? 'MCP 已启用' : '未用 MCP',
+  ].join(' · ')
+
   // 最小化视图
   if (minimized) {
-    return (
-      <div className="fixed bottom-4 right-4 z-50 w-72 overflow-hidden rounded-[24px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.96)_0%,rgba(255,247,240,0.98)_100%)] shadow-xl animate-fade-in">
-        <div className="px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-2 min-w-0">
-            {phase === 'generating' && <Loader2 className="w-4 h-4 text-brand animate-spin shrink-0" />}
-            {phase === 'done' && <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />}
-            <span className="text-sm font-medium text-content truncate">
-              {phase === 'done' ? '创建完成' : form.title || '生成中...'}
+    return createPortal(
+      <div className="hh-glass fixed bottom-5 right-5 z-50 w-80 overflow-hidden animate-fade-in">
+        <div className="flex items-center justify-between gap-3 px-4 py-3">
+          <div className="flex min-w-0 items-center gap-2.5">
+            {phase === 'generating' && !awaitingStep && <Loader2 className="h-4 w-4 shrink-0 animate-spin text-brand" />}
+            {phase === 'generating' && awaitingStep && <CheckCircle2 className="h-4 w-4 shrink-0 text-amber-500" />}
+            {phase === 'done' && <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />}
+            <span className="truncate text-sm font-medium text-content">
+              {phase === 'done' ? '创建完成' : awaitingStep ? '等待确认 · 展开继续' : form.title || '生成中...'}
             </span>
           </div>
-          <div className="flex items-center gap-1 shrink-0">
-            <button onClick={() => setMinimized(false)} className="p-1 text-content-tertiary hover:text-content transition-colors" title="展开">
-              <Maximize2 className="w-3.5 h-3.5" />
+          <div className="flex shrink-0 items-center gap-0.5">
+            <button onClick={() => setMinimized(false)} className="hh-icon-btn-plain h-8 w-8" title="展开" aria-label="展开">
+              <Maximize2 className="h-3.5 w-3.5" />
             </button>
             {phase === 'generating' && !error && (
-              <button onClick={handleStop} className="p-1 text-content-tertiary hover:text-red-500 transition-colors" title="停止">
-                <StopCircle className="w-3.5 h-3.5" />
+              <button onClick={handleStop} className="hh-icon-btn-plain h-8 w-8 hover:text-red-500" title="停止" aria-label="停止">
+                <StopCircle className="h-3.5 w-3.5" />
               </button>
             )}
           </div>
         </div>
-        {/* 进度条 */}
-        <div className="bg-gray-100 h-1">
-          <div className="bg-brand h-1 transition-all duration-500" style={{ width: `${Math.min(progress, 100)}%` }} />
+        <div className="hh-progress h-1">
+          <div className="hh-progress-bar" style={{ width: `${Math.min(progress, 100)}%` }} />
         </div>
         {phase === 'done' && projectId && (
-          <div className="px-4 py-2 border-t border-surface-border">
-            <button
-              onClick={() =>
-                onSuccess(projectId, nextRoute ? { nextRoute } : undefined)
-              }
-              className="w-full text-xs bg-brand text-white rounded-btn py-1.5 hover:bg-brand-600 transition-colors"
-            >
-              {nextRoute === 'bridge_planning' ? '进入桥段规划 →' : '进入项目 →'}
+          <div className="p-3">
+            <button onClick={enterProject} className="hh-btn-primary hh-btn-sm w-full">
+              {enterLabel}
+              <ArrowRight className="h-3.5 w-3.5" />
             </button>
           </div>
         )}
-      </div>
+      </div>,
+      document.body,
     )
   }
 
-  return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-[32px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.96)_0%,rgba(255,247,240,0.98)_100%)] shadow-xl">
-        {/* 标题栏 */}
-        <div className="border-b border-surface-border px-6 py-5">
-          <div className="mb-2 inline-flex items-center gap-2 rounded-pill bg-brand/10 px-3 py-1 text-xs font-medium text-brand">
-            <Sparkles className="h-3.5 w-3.5" />
-            创作向导
-          </div>
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-lg font-bold text-content">
-              {phase === 'form' ? '向导创建项目' : phase === 'generating' ? '正在生成...' : '创建完成'}
+  return createPortal(
+    <div className="hh-modal-mask">
+      <div className="hh-modal max-w-[640px]" role="dialog" aria-modal="true">
+        <div className="hh-modal-head">
+          <div className="min-w-0">
+            <p className="hh-eyebrow">快速开始</p>
+            <h2 className="mt-2 text-xl font-semibold tracking-tight text-content">
+              {phase === 'form' ? '新建小说项目' : isSuccess ? '项目创建完成' : error ? '生成已停止' : '正在生成设定'}
             </h2>
-          <div className="flex items-center gap-1">
-            {/* 缩小按钮（生成中/完成时可用） */}
-            {phase !== 'form' && (
-              <button onClick={() => setMinimized(true)} className="p-1.5 text-content-tertiary hover:text-content transition-colors" title="缩小到角落">
-                <Minimize2 className="w-4 h-4" />
-              </button>
-            )}
-            {/* 停止按钮（生成中且无错误时显示） */}
-            {phase === 'generating' && !error && (
-              <button onClick={handleStop} className="p-1.5 text-content-tertiary hover:text-red-500 transition-colors" title="停止生成">
-                <StopCircle className="w-4 h-4" />
-              </button>
-            )}
-            {/* 关闭按钮（表单阶段 / 有错误时 / 完成时） */}
-            {(phase === 'form' || phase === 'done' || error) && (
-              <button onClick={onClose} className="p-1.5 text-content-tertiary hover:text-content transition-colors" title="关闭">
-                <X className="w-4 h-4" />
-              </button>
-            )}
+            <p className="mt-1 text-sm text-content-secondary">
+              {phase === 'form'
+                ? '填好书名与简介，AI 将依次生成世界观、角色、故事大纲与剧情线。'
+                : isSuccess
+                  ? '设定与剧情线已就位，下一步进入桥段规划，为整本书搭好章节骨架。'
+                  : `《${form.title}》`}
+            </p>
           </div>
-          </div>
+          {canClose && (
+            <button onClick={onClose} className="hh-icon-btn-plain -mr-2 -mt-1" title="关闭" aria-label="关闭">
+              <X className="h-4 w-4" />
+            </button>
+          )}
         </div>
 
-        <div className="px-6 py-4 space-y-4">
+        <div className="hh-modal-body">
           {phase === 'form' && (
-            <>
-              {/* 书名 */}
+            <div className="space-y-5">
               <div>
-                <label className="block text-sm font-medium text-content mb-1">书名 <span className="text-red-500">*</span></label>
+                <label className="hh-label">
+                  书名 <span className="text-red-500">*</span>
+                </label>
                 <input
                   value={form.title}
                   onChange={e => updateField('title', e.target.value)}
-                  placeholder="输入小说书名"
-                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none"
+                  placeholder="给你的小说起个名字"
+                  className="hh-field"
+                  autoFocus
                 />
               </div>
 
-              {/* 简介 */}
               <div>
-                <label className="block text-sm font-medium text-content mb-1">简介 <span className="text-red-500">*</span></label>
+                <label className="hh-label">
+                  简介 <span className="text-red-500">*</span>
+                </label>
                 <textarea
                   value={form.description}
                   onChange={e => updateField('description', e.target.value)}
-                  placeholder="简要描述小说的核心故事..."
+                  placeholder="用几句话描述核心故事：主角是谁、遇到什么、想要什么……"
                   rows={3}
-                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none resize-none"
+                  className="hh-textarea"
                 />
               </div>
 
-              {/* 主题 */}
               <div>
-                <label className="block text-sm font-medium text-content mb-1">主题</label>
+                <label className="hh-label">主题</label>
                 <input
                   value={form.theme}
                   onChange={e => updateField('theme', e.target.value)}
-                  placeholder="如：成长、复仇、爱情..."
-                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none"
+                  placeholder="如：成长、复仇、救赎（可选）"
+                  className="hh-field"
                 />
               </div>
 
-              {/* 类型（多选） */}
               <div>
-                <label className="block text-sm font-medium text-content mb-1">
+                <label className="hh-label">
                   类型
-                  <span className="ml-1.5 text-xs font-normal text-content-secondary">（可多选，组合融合）</span>
+                  <span className="ml-1.5 text-xs font-normal text-content-tertiary">可多选，组合融合</span>
                 </label>
                 <div className="flex flex-wrap gap-1.5">
                   {GENRE_OPTIONS.map(g => {
@@ -1284,247 +1374,262 @@ function WizardModal({
                         key={g}
                         type="button"
                         onClick={() => toggleGenre(g)}
-                        className={`text-xs rounded-full px-2.5 py-1 border transition-colors ${
-                          selected
-                            ? 'bg-brand text-white border-brand'
-                            : 'bg-white text-content-secondary border-surface-border hover:border-brand'
-                        }`}
+                        className={cn('hh-chip', selected && 'hh-chip--active')}
                       >
                         {g}
                       </button>
                     )
                   })}
                 </div>
-                {form.genre && (
-                  <div className="mt-1.5 text-xs text-content-secondary">
-                    已选：<span className="text-content font-medium">{form.genre}</span>
-                  </div>
-                )}
               </div>
 
-              {/* 视角 */}
               <div>
-                <label className="block text-sm font-medium text-content mb-1">叙事视角</label>
-                <div className="flex gap-2">
-                  {PERSPECTIVE_OPTIONS.map(p => (
-                    <button
-                      key={p}
-                      type="button"
-                      onClick={() => updateField('narrative_perspective', p)}
-                      className={`text-xs rounded-btn px-3 py-1.5 border transition-colors ${
-                        form.narrative_perspective === p
-                          ? 'bg-brand text-white border-brand'
-                          : 'bg-white text-content-secondary border-surface-border hover:border-brand'
-                      }`}
-                    >
-                      {p}
-                    </button>
-                  ))}
+                <label className="hh-label">叙事视角</label>
+                <div className="inline-flex border border-surface-border bg-white/60 p-1">
+                  {PERSPECTIVE_OPTIONS.map(p => {
+                    const selected = form.narrative_perspective === p
+                    return (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => updateField('narrative_perspective', p)}
+                        className={cn(
+                          'px-3.5 py-1.5 text-xs font-medium transition-colors',
+                          selected ? 'bg-brand text-white shadow-[0_8px_20px_-12px_rgba(0,122,255,0.6)]' : 'text-content-secondary hover:text-content',
+                        )}
+                      >
+                        {p}
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
 
-              {/* 高级选项 */}
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-xs text-content-secondary mb-1">目标字数</label>
+                  <label className="hh-label">目标字数</label>
                   <input
                     type="number"
                     value={form.target_words}
                     onChange={e => updateField('target_words', Number(e.target.value))}
-                    className="w-full border border-surface-border rounded-btn px-2 py-1.5 text-xs focus:border-brand outline-none"
+                    className="hh-field"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-content-secondary mb-1">章节数</label>
+                  <label className="hh-label">章节数</label>
                   <input
                     type="number"
                     value={form.chapter_count}
                     onChange={e => updateField('chapter_count', Number(e.target.value))}
-                    className="w-full border border-surface-border rounded-btn px-2 py-1.5 text-xs focus:border-brand outline-none"
+                    className="hh-field"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-content-secondary mb-1">角色数</label>
+                  <label className="hh-label">角色数</label>
                   <input
                     type="number"
                     value={form.character_count}
                     onChange={e => updateField('character_count', Number(e.target.value))}
-                    className="w-full border border-surface-border rounded-btn px-2 py-1.5 text-xs focus:border-brand outline-none"
+                    className="hh-field"
                   />
                 </div>
               </div>
 
-              {/* 额外要求 */}
               <div>
-                <label className="block text-sm font-medium text-content mb-1">额外要求</label>
+                <label className="hh-label">额外要求</label>
                 <textarea
                   value={form.requirements}
                   onChange={e => updateField('requirements', e.target.value)}
-                  placeholder="对角色、世界观、大纲的特殊要求（可选）..."
+                  placeholder="对角色、世界观、大纲的特殊要求（可选）"
                   rows={2}
-                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none resize-none"
+                  className="hh-textarea"
                 />
               </div>
 
-              {/* V3.2-B：拆书参考包选择器（项目创建前选包，创建后自动挂载） */}
-              <ReferencePackSelector
-                value={refPack}
-                onChange={setRefPack}
-                disabledTitle="拆书参考包"
-                hint="项目创建后会自动挂载到项目"
-              />
+              <div className="border-t border-surface-border/80 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setAdvancedOpen(v => !v)}
+                  className="flex w-full items-center justify-between gap-3 text-left"
+                >
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-content">高级选项</span>
+                    <span className="mt-0.5 block truncate text-xs text-content-tertiary">{advancedSummary}</span>
+                  </span>
+                  {advancedOpen ? (
+                    <ChevronUp className="h-4 w-4 shrink-0 text-content-tertiary" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4 shrink-0 text-content-tertiary" />
+                  )}
+                </button>
 
-              {/* MCP 插件 */}
-              <MCPSelector
-                value={{ enable: enableMcp, selected: selectedPlugins }}
-                onChange={({ enable, selected }) => {
-                  setEnableMcp(enable)
-                  setSelectedPlugins(selected)
-                }}
-              />
+                {advancedOpen && (
+                  <div className="mt-4 space-y-3">
+                    {/* V3.2-B：拆书参考包选择器（项目创建前选包，创建后自动挂载） */}
+                    <ReferencePackSelector
+                      value={refPack}
+                      onChange={setRefPack}
+                      disabledTitle="拆书参考包"
+                      hint="项目创建后会自动挂载到项目"
+                    />
 
-              {/* F3/F5：桥段规划开关（默认启用） */}
-              <div className="rounded-btn border border-surface-border bg-white/60 px-3 py-2.5">
-                <label className="flex items-start gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={form.enable_bridge_planning}
-                    onChange={e => updateField('enable_bridge_planning', e.target.checked)}
-                    className="mt-0.5 h-4 w-4 rounded border-surface-border text-brand focus:ring-brand"
-                  />
-                  <div className="flex-1">
-                    <div className="text-sm font-medium text-content">启用桥段规划阶段（推荐）</div>
-                    <div className="mt-0.5 text-xs text-content-secondary">
-                      大纲完成后先进入「桥段规划页」让 AI 设计 25 个桥段（C1 代入 → C2 拉扯 → C3 兑现 → C4 善后），
-                      你可手工微调再一键展开为完整章纲。<strong>关闭后直接进项目页传统创作。</strong>
+                    {/* MCP 插件 */}
+                    <MCPSelector
+                      value={{ enable: enableMcp, selected: selectedPlugins }}
+                      onChange={({ enable, selected }) => {
+                        setEnableMcp(enable)
+                        setSelectedPlugins(selected)
+                      }}
+                    />
+
+                    {/* 向导步骤 4：支线数量（主线固定 1 条，覆盖全书章节数） */}
+                    <div>
+                      <label className="hh-label">支线数量</label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={4}
+                        value={form.sub_line_count}
+                        onChange={e => updateField('sub_line_count', Math.max(0, Math.min(4, Number(e.target.value) || 0)))}
+                        className="hh-field"
+                      />
+                      <p className="mt-1 text-xs text-content-tertiary">
+                        主线固定 1 条并覆盖全书 {form.chapter_count} 章；支线按进度比例挂到桥段。大纲完成后自动生成剧情线，再进入桥段规划。
+                      </p>
                     </div>
+
+                    {/* 分步确认开关：世界观/角色各生成完暂停确认 */}
+                    <ToggleRow
+                      checked={stepConfirm}
+                      onChange={setStepConfirm}
+                      title="分步确认（推荐）"
+                      description="世界观、角色、大纲各生成完先暂停，确认满意（可去项目页修改）再继续下一步；关闭后四步连跑不打断。"
+                    />
                   </div>
-                </label>
+                )}
               </div>
-            </>
+            </div>
           )}
 
-          {/* 生成进度 */}
           {(phase === 'generating' || phase === 'done') && (
-            <div className="space-y-4">
-              <div className="space-y-2.5">
-                <div className="flex items-center gap-2.5 text-sm">
-                  {stepIcon(steps.world)}
-                  <span className="text-content">世界观构建</span>
+            <div className="space-y-5">
+              {isSuccess && (
+                <div className="flex flex-col items-center py-2 text-center">
+                  <span className="flex h-14 w-14 items-center justify-center bg-emerald-50 text-emerald-500">
+                    <CheckCircle2 className="h-7 w-7" />
+                  </span>
+                  <p className="mt-4 text-lg font-semibold text-content">《{form.title}》已创建</p>
                 </div>
-                <div className="flex items-center gap-2.5 text-sm">
-                  {stepIcon(steps.chars)}
-                  <span className="text-content">角色生成</span>
-                </div>
-                <div className="flex items-center gap-2.5 text-sm">
-                  {stepIcon(steps.outline)}
-                  <span className="text-content">故事大纲</span>
-                </div>
-              </div>
+              )}
 
-              <div>
-                <div className="flex justify-between text-xs text-content-secondary mb-1">
-                  <span>{progressMsg}</span>
-                  <span>{Math.round(progress)}%</span>
+              <ol className="hh-subpanel divide-y divide-surface-border/80">
+                <StepRow status={steps.world} title="世界观构建" description="时代、地点、氛围与核心规则" />
+                <StepRow status={steps.chars} title="角色生成" description={`${form.character_count} 位主要角色及关系`} />
+                <StepRow status={steps.outline} title="故事大纲" description={`${form.chapter_count} 章整体结构`} />
+                <StepRow status={steps.lines} title="剧情线" description={`1 条主线 + ${form.sub_line_count} 条支线，含节点`} />
+              </ol>
+              {isSuccess && linesPreview && (
+                <p className="text-xs leading-6 text-content-secondary">{linesPreview}</p>
+              )}
+
+              {!isSuccess && (
+                <div>
+                  <div className="flex items-center justify-between text-xs text-content-secondary">
+                    <span className="truncate">{progressMsg}</span>
+                    <span className="ml-3 shrink-0 tabular-nums">{Math.round(progress)}%</span>
+                  </div>
+                  <div className="hh-progress mt-2">
+                    <div className="hh-progress-bar" style={{ width: `${Math.min(progress, 100)}%` }} />
+                  </div>
                 </div>
-                <div className="bg-gray-100 rounded-full h-2">
-                  <div
-                    className="bg-brand rounded-full h-2 transition-all duration-500"
-                    style={{ width: `${Math.min(progress, 100)}%` }}
-                  />
+              )}
+
+              {/* 分步确认：阶段完成后的暂停确认卡 */}
+              {awaitingStep && !error && phase === 'generating' && (
+                <div className="space-y-3 border border-brand/25 bg-brand/5 p-4">
+                  <p className="text-sm font-medium text-content">
+                    {awaitingStep === 'chars' ? '世界观已生成，确认后继续生成角色' : awaitingStep === 'outline' ? '角色已生成，确认后继续生成故事大纲' : '故事大纲已生成，确认后继续生成剧情线'}
+                  </p>
+                  {awaitingStep === 'chars' && worldPreview && (
+                    <dl className="grid gap-x-4 gap-y-1 text-xs leading-6 text-content-secondary sm:grid-cols-[auto_1fr]">
+                      <dt className="text-content-tertiary">时代</dt>
+                      <dd>{worldPreview.time_period || '—'}</dd>
+                      <dt className="text-content-tertiary">地点</dt>
+                      <dd>{worldPreview.location || '—'}</dd>
+                      <dt className="text-content-tertiary">氛围</dt>
+                      <dd>{worldPreview.atmosphere || '—'}</dd>
+                      {worldPreview.rules && (
+                        <>
+                          <dt className="text-content-tertiary">规则</dt>
+                          <dd className="line-clamp-3">{worldPreview.rules}</dd>
+                        </>
+                      )}
+                    </dl>
+                  )}
+                  {awaitingStep === 'outline' && charsPreview.length > 0 && (
+                    <p className="text-xs leading-6 text-content-secondary">已生成角色：{charsPreview.join('、')}</p>
+                  )}
+                  <p className="text-[11px] leading-5 text-content-tertiary">
+                    不满意？可先「缩小到后台」，去项目页修改{awaitingStep === 'chars' ? '世界观设定' : awaitingStep === 'outline' ? '角色设定' : '故事大纲'}后再回来继续，后续步骤会基于最新数据生成。
+                  </p>
+                  <button onClick={() => continueGateRef.current?.()} className="hh-btn-primary hh-btn-sm">
+                    <Sparkles className="h-3.5 w-3.5" />
+                    继续生成{awaitingStep === 'chars' ? '角色' : awaitingStep === 'outline' ? '故事大纲' : '剧情线'}
+                  </button>
                 </div>
-              </div>
+              )}
 
               {error && (
-                <div className="text-sm text-red-600 bg-red-50 rounded-btn px-3 py-2">
-                  {error}
+                <div className="flex items-start gap-2 border border-red-200 bg-red-50/80 px-4 py-3 text-sm text-red-600">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>{error}</span>
                 </div>
               )}
             </div>
           )}
         </div>
 
-        {/* 底部按钮 */}
-        <div className="px-6 py-4 border-t border-surface-border flex justify-end gap-2">
+        <div className="hh-modal-foot">
           {phase === 'form' && (
             <>
-              <button
-                onClick={onClose}
-                className="px-4 py-2 text-sm rounded-btn border border-surface-border text-content-secondary hover:bg-surface-hover transition-colors"
-              >
+              <button onClick={onClose} className="hh-btn-ghost">
                 取消
               </button>
-              <button
-                onClick={async () => {
-                  if (!form.title.trim()) return
-                  try {
-                    const created = await projectApi.createProject({
-                      title: form.title.trim(),
-                      description: form.description.trim() || undefined,
-                      theme: form.theme.trim() || undefined,
-                      genre: form.genre || undefined,
-                      target_words: form.target_words || undefined,
-                      narrative_perspective: form.narrative_perspective || undefined,
-                      chapter_count: form.chapter_count || undefined,
-                      character_count: form.character_count || undefined,
-                    })
-                    toast.success('项目已创建')
-                    onSuccess(created.id)
-                  } catch { /* api 拦截器已 toast */ }
-                }}
-                disabled={!form.title.trim()}
-                className="px-4 py-2 text-sm rounded-btn border border-surface-border text-content hover:bg-surface-hover transition-colors disabled:opacity-50"
-              >
+              <button onClick={handleDirectCreate} disabled={!form.title.trim()} className="hh-btn-secondary" title="只创建项目，不生成任何内容">
                 直接创建
               </button>
-              <button
-                onClick={handleStart}
-                disabled={!canSubmit}
-                className="inline-flex items-center gap-1.5 bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50"
-              >
-                <Sparkles className="w-4 h-4" />
+              <button onClick={handleStart} disabled={!canSubmit} className="hh-btn-primary">
+                <Wand2 className="h-4 w-4" />
                 AI 生成
               </button>
             </>
           )}
           {phase === 'generating' && !error && (
-            <div className="flex items-center gap-3 w-full justify-between">
-              <button
-                onClick={() => setMinimized(true)}
-                className="inline-flex items-center gap-1.5 text-xs text-content-secondary hover:text-content transition-colors"
-              >
-                <Minimize2 className="w-3.5 h-3.5" />
+            <>
+              <button onClick={() => setMinimized(true)} className="hh-btn-ghost mr-auto">
+                <Minimize2 className="h-4 w-4" />
                 缩小到后台
               </button>
-              <button
-                onClick={handleStop}
-                className="inline-flex items-center gap-1.5 text-xs text-red-500 hover:text-red-600 transition-colors"
-              >
-                <StopCircle className="w-3.5 h-3.5" />
+              <button onClick={handleStop} className="hh-btn-ghost text-red-500 hover:bg-red-50 hover:text-red-600">
+                <StopCircle className="h-4 w-4" />
                 停止生成
               </button>
-            </div>
+            </>
           )}
           {(phase === 'done' || (phase === 'generating' && error)) && projectId && (
-            <button
-              onClick={() =>
-                onSuccess(projectId, nextRoute ? { nextRoute } : undefined)
-              }
-              className="bg-brand hover:bg-brand-600 text-white rounded-btn px-5 py-2 text-sm font-medium transition-colors"
-            >
-              {nextRoute === 'bridge_planning' ? '进入桥段规划 →' : '进入项目 →'}
+            <button onClick={enterProject} className="hh-btn-primary">
+              {enterLabel}
+              <ArrowRight className="h-4 w-4" />
             </button>
           )}
           {error && !projectId && (
-            <button
-              onClick={onClose}
-              className="px-4 py-2 text-sm rounded-btn border border-surface-border text-content-secondary hover:bg-surface-hover transition-colors"
-            >
+            <button onClick={onClose} className="hh-btn-secondary">
               关闭
             </button>
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Plus, Sparkles, Pencil, Trash2, X, Loader2, Building, Users, UserPlus, UserMinus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -13,27 +14,6 @@ import {
 } from '@/components/ReferencePackSelector';
 import type { Character } from '@/types';
 import { ROLE_OPTIONS, getRoleDisplayName, normalizeRoleType } from '@/utils/characterRole';
-
-const ROLE_COLORS: Record<string, string> = {
-  主角: 'bg-brand/10 text-brand-600',
-  配角: 'bg-blue-50 text-blue-600',
-  反派: 'bg-red-50 text-red-700',
-  导师: 'bg-purple-50 text-purple-600',
-  盟友: 'bg-emerald-50 text-emerald-600',
-  路人: 'bg-gray-100 text-gray-500',
-  组织: 'bg-amber-50 text-amber-700',
-};
-
-const AVATAR_COLORS = [
-  'bg-brand-500', 'bg-blue-500', 'bg-emerald-500', 'bg-purple-500',
-  'bg-orange-500', 'bg-pink-500', 'bg-teal-500', 'bg-indigo-500',
-];
-
-function getAvatarColor(name: string) {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
-}
 
 interface FormData {
   name: string;
@@ -123,6 +103,7 @@ export default function Characters() {
       setAddMemberId('');
       setAddMemberPos('成员');
       await loadOrgMembers(editingId!);
+      await refreshCharacters(); // 卡片的成员名按成员关系派生，需同步刷新
     } catch {
       toast.error('添加成员失败');
     }
@@ -133,6 +114,7 @@ export default function Characters() {
       await organizationApi.removeMember(memberId);
       toast.success('成员已移除');
       if (editingId) await loadOrgMembers(editingId);
+      await refreshCharacters();
     } catch {
       toast.error('移除失败');
     }
@@ -263,186 +245,163 @@ export default function Characters() {
     }
   };
 
+  const EmptyIcon = filter === 'organization' ? Building : Users;
+  const emptyTitle = filter === 'organization' ? '还没有组织' : filter === 'character' ? '还没有人物' : '还没有角色与组织';
+  const emptyHint =
+    filter === 'organization'
+      ? '点击右上角「添加组织」手动创建，或用「AI 生成组织」让 AI 根据世界观设计一个势力。'
+      : '点击右上角「添加角色」手动创建，或用「AI 生成角色」让 AI 根据项目设定生成人物。';
+
   return (
     <div className="animate-fade-in space-y-6">
-      {/* 头部 */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-content">角色与组织</h1>
-          <p className="text-sm text-content-secondary mt-1">
-            {charCount} 个人物 · {orgCount} 个组织
+      <section className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-[28px] font-semibold tracking-tight text-content md:text-[32px]">角色与组织</h1>
+          <p className="mt-2 max-w-[560px] text-sm leading-6 text-content-secondary">
+            管理故事中的人物与势力，这些设定会作为 AI 续写时的上下文。共 {charCount} 个人物 · {orgCount} 个组织。
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowGenModal(true)}
-            disabled={generating}
-            className="inline-flex items-center gap-1.5 border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm transition-colors disabled:opacity-50"
-          >
-            {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-            AI 生成
-          </button>
-          <button
-            onClick={openAdd}
-            className="inline-flex items-center gap-1.5 bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            添加角色
-          </button>
-          <button
-            onClick={() => setShowGenOrgModal(true)}
-            disabled={generatingOrg}
-            className="inline-flex items-center gap-1.5 border border-amber-300 text-amber-700 hover:bg-amber-50 rounded-btn px-4 py-2 text-sm transition-colors disabled:opacity-50"
-          >
-            {generatingOrg ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+        <div className="flex shrink-0 flex-wrap items-center gap-2.5">
+          <button onClick={() => setShowGenOrgModal(true)} disabled={generatingOrg} className="hh-btn-ghost">
+            {generatingOrg ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
             AI 生成组织
           </button>
-          <button
-            onClick={openAddOrg}
-            className="inline-flex items-center gap-1.5 border border-amber-300 text-amber-700 hover:bg-amber-50 rounded-btn px-4 py-2 text-sm transition-colors"
-          >
-            <Building className="w-4 h-4" />
+          <button onClick={openAddOrg} className="hh-btn-ghost">
+            <Building className="h-4 w-4" />
             添加组织
           </button>
+          <button onClick={() => setShowGenModal(true)} disabled={generating} className="hh-btn-secondary">
+            {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-brand" />}
+            AI 生成角色
+          </button>
+          <button onClick={openAdd} className="hh-btn-primary">
+            <Plus className="h-4 w-4" />
+            添加角色
+          </button>
         </div>
-      </div>
+      </section>
 
-      {/* 筛选 Tab */}
-      <div className="flex items-center gap-1 border-b border-surface-border">
+      <div className="inline-flex border border-surface-border bg-white/60 p-1">
         {([
           { key: 'all', label: '全部', count: characters.length, icon: null },
           { key: 'character', label: '人物', count: charCount, icon: Users },
           { key: 'organization', label: '组织', count: orgCount, icon: Building },
-        ] as const).map(tab => (
-          <button
-            key={tab.key}
-            onClick={() => setFilter(tab.key)}
-            className={cn(
-              'inline-flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors',
-              filter === tab.key
-                ? 'border-brand text-brand'
-                : 'border-transparent text-content-secondary hover:text-content'
-            )}
-          >
-            {tab.icon && <tab.icon className="w-4 h-4" />}
-            {tab.label}
-            <span className={cn(
-              'text-xs rounded-full px-1.5 py-0.5',
-              filter === tab.key ? 'bg-brand/10 text-brand' : 'bg-surface text-content-tertiary'
-            )}>{tab.count}</span>
-          </button>
-        ))}
-      </div>
-
-      {/* 卡片网格 */}
-      {filteredCharacters.length > 0 ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredCharacters.map((c) => (
-            <div
-              key={c.id}
+        ] as const).map(tab => {
+          const selected = filter === tab.key;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => setFilter(tab.key)}
               className={cn(
-                "bg-white border rounded-card p-4 hover:shadow-card transition-shadow",
-                c.is_organization ? "border-l-4 border-l-amber-400 border-surface-border" : "border-surface-border"
+                'inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium transition-colors',
+                selected ? 'bg-brand text-white' : 'text-content-secondary hover:text-content'
               )}
             >
-              {(() => {
-                const roleLabel = getRoleDisplayName(c.role_type, c.is_organization ? '组织' : '路人');
-                return (
-              <div className="flex items-start gap-3">
-                {/* 头像 */}
-                <div
-                  className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm ${getAvatarColor(c.name)}`}
-                >
-                  {c.name.charAt(0)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-content text-sm truncate">{c.name}</span>
-                    {c.role_type && (
-                      <span
-                        className={`flex-shrink-0 text-xs px-2 py-0.5 rounded-full ${ROLE_COLORS[roleLabel] || ROLE_COLORS['路人']}`}
-                      >
-                        {roleLabel}
-                      </span>
+              {tab.icon && <tab.icon className="h-3.5 w-3.5" />}
+              {tab.label}
+              <span className={cn('tabular-nums', selected ? 'text-white/75' : 'text-content-tertiary')}>{tab.count}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {filteredCharacters.length > 0 ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {filteredCharacters.map((c) => {
+            const roleLabel = getRoleDisplayName(c.role_type, c.is_organization ? '组织' : '路人');
+            return (
+              <article key={c.id} className="hh-panel flex flex-col p-5">
+                <div className="flex flex-1 items-start gap-3.5">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center bg-brand/10 text-base font-semibold text-brand">
+                    {c.is_organization ? <Building className="h-5 w-5" /> : c.name.charAt(0)}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="min-w-0 max-w-full truncate text-[15px] font-semibold text-content">{c.name}</h3>
+                      {c.role_type && (
+                        <span
+                          className={cn(
+                            'shrink-0 px-2 py-0.5 text-[11px] font-medium',
+                            roleLabel === '主角' ? 'bg-brand/10 text-brand' : 'bg-surface-hover text-content-secondary'
+                          )}
+                        >
+                          {roleLabel}
+                        </span>
+                      )}
+                    </div>
+                    {c.is_organization ? (
+                      <div className="mt-1 space-y-1">
+                        {c.organization_type && <p className="text-xs text-content-tertiary">{c.organization_type}</p>}
+                        <p className="line-clamp-2 text-[13px] leading-[1.375rem] text-content-secondary">
+                          {c.organization_purpose || c.background || '暂无描述'}
+                        </p>
+                        {c.member_names && c.member_names.length > 0 && (
+                          <p className="text-[11px] text-content-tertiary">成员: {c.member_names.slice(0, 5).join('、')}{c.member_names.length > 5 ? ` 等${c.member_names.length}人` : ''}</p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="mt-1 line-clamp-2 text-[13px] leading-[1.375rem] text-content-secondary">
+                        {c.personality || c.background || '暂无简介'}
+                      </p>
                     )}
                   </div>
-                  {c.is_organization ? (
-                    <div className="mt-1 space-y-0.5">
-                      {c.organization_type && <p className="text-xs text-amber-600">{c.organization_type}</p>}
-                      <p className="text-xs text-content-secondary line-clamp-2">
-                        {c.organization_purpose || c.background || '暂无描述'}
-                      </p>
-                      {c.organization_members && (() => {
-                        try {
-                          const members = JSON.parse(c.organization_members);
-                          if (Array.isArray(members) && members.length > 0) {
-                            return <p className="text-[11px] text-content-tertiary">成员: {members.slice(0, 5).join('、')}{members.length > 5 ? ` 等${members.length}人` : ''}</p>
-                          }
-                        } catch { /* ignore */ }
-                        return null;
-                      })()}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-content-secondary mt-1 line-clamp-2">
-                      {c.personality || c.background || '暂无简介'}
-                    </p>
-                  )}
                 </div>
-              </div>
-                )
-              })()}
-              {/* 操作 */}
-              <div className="flex items-center justify-end gap-1 mt-3 pt-3 border-t border-surface-border-light">
-                <button
-                  onClick={() => openEdit(c)}
-                  className="inline-flex items-center gap-1 text-xs text-content-secondary hover:text-brand px-2 py-1 rounded transition-colors"
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                  编辑
-                </button>
-                <button
-                  onClick={() => handleDelete(c.id, c.name, c.is_organization)}
-                  className="inline-flex items-center gap-1 text-xs text-content-secondary hover:text-red-600 px-2 py-1 rounded transition-colors"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  删除
-                </button>
-              </div>
-            </div>
-          ))}
+                <div className="mt-4 flex items-center justify-end gap-1 border-t border-surface-border/80 pt-3">
+                  <button onClick={() => openEdit(c)} className="hh-btn-ghost hh-btn-sm">
+                    <Pencil className="h-3.5 w-3.5" />
+                    编辑
+                  </button>
+                  <button
+                    onClick={() => handleDelete(c.id, c.name, c.is_organization)}
+                    className="hh-btn-ghost hh-btn-sm hover:bg-red-50 hover:text-red-600"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    删除
+                  </button>
+                </div>
+              </article>
+            );
+          })}
         </div>
       ) : (
-        <div className="text-center py-16 text-content-secondary text-sm">
-          还没有角色，点击"添加角色"或"AI 生成"开始创建
-        </div>
+        <section className="hh-panel flex flex-col items-center px-6 py-14 text-center">
+          <span className="flex h-14 w-14 items-center justify-center bg-brand/10 text-brand">
+            <EmptyIcon className="h-7 w-7" />
+          </span>
+          <h2 className="mt-5 text-xl font-semibold tracking-tight text-content">{emptyTitle}</h2>
+          <p className="mt-2 max-w-md text-sm leading-6 text-content-secondary">{emptyHint}</p>
+        </section>
       )}
 
-      {/* AI 生成角色弹窗 */}
-      {showGenModal && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-8 sm:py-12">
-          <div className="relative my-auto bg-white shadow-xl w-full max-w-xl mx-4 animate-scale-in max-h-[calc(100vh-4rem)] flex flex-col">
-            <div className="flex items-center justify-between px-6 pt-5 pb-3 flex-shrink-0 border-b border-surface-border">
-              <h2 className="text-lg font-bold text-content">AI 生成角色</h2>
-              <button onClick={() => setShowGenModal(false)} className="text-content-tertiary hover:text-content">
-                <X className="w-5 h-5" />
+      {showGenModal && createPortal(
+        <div className="hh-modal-mask">
+          <div className="hh-modal max-w-[560px]" role="dialog" aria-modal="true">
+            <div className="hh-modal-head">
+              <div className="min-w-0">
+                <p className="hh-eyebrow">AI 生成</p>
+                <h2 className="mt-2 text-xl font-semibold tracking-tight text-content">AI 生成角色</h2>
+                <p className="mt-1 text-sm leading-6 text-content-secondary">留空的项会由 AI 根据世界观与已有角色自动补全。</p>
+              </div>
+              <button onClick={() => setShowGenModal(false)} className="hh-icon-btn-plain -mr-2 -mt-1" aria-label="关闭">
+                <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
+            <div className="hh-modal-body space-y-4">
               <div>
-                <label className="block text-sm font-medium text-content mb-1">角色名称（可选）</label>
+                <label className="hh-label">角色名称（可选）</label>
                 <input
                   value={genForm.name}
                   onChange={e => setGenForm(p => ({ ...p, name: e.target.value }))}
                   placeholder="留空由 AI 自动取名"
-                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none"
+                  className="hh-field"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-content mb-1">角色定位</label>
+                <label className="hh-label">角色定位</label>
                 <select
                   value={genForm.role_type}
                   onChange={e => setGenForm(p => ({ ...p, role_type: e.target.value }))}
-                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none"
+                  className="hh-field"
                 >
                   <option value="protagonist">主角</option>
                   <option value="supporting">配角</option>
@@ -450,23 +409,23 @@ export default function Characters() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-content mb-1">背景设定（可选）</label>
+                <label className="hh-label">背景设定（可选）</label>
                 <textarea
                   value={genForm.background}
                   onChange={e => setGenForm(p => ({ ...p, background: e.target.value }))}
                   placeholder="对角色背景的描述或要求..."
                   rows={2}
-                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none resize-none"
+                  className="hh-textarea"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-content mb-1">额外要求（可选）</label>
+                <label className="hh-label">额外要求（可选）</label>
                 <textarea
                   value={genForm.requirements}
                   onChange={e => setGenForm(p => ({ ...p, requirements: e.target.value }))}
                   placeholder="如：需要有修仙背景、性格冷酷..."
                   rows={2}
-                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none resize-none"
+                  className="hh-textarea"
                 />
               </div>
               <MCPSelector
@@ -486,182 +445,179 @@ export default function Characters() {
                 />
               )}
             </div>
-            <div className="flex justify-end gap-2 px-6 py-3 border-t border-surface-border bg-white flex-shrink-0">
-              <button
-                onClick={() => setShowGenModal(false)}
-                className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm transition-colors"
-              >
+            <div className="hh-modal-foot">
+              <button onClick={() => setShowGenModal(false)} className="hh-btn-ghost">
                 取消
               </button>
-              <button
-                onClick={handleGenerate}
-                disabled={generating}
-                className="inline-flex items-center gap-1.5 bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm transition-colors disabled:opacity-50"
-              >
-                {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              <button onClick={handleGenerate} disabled={generating} className="hh-btn-primary">
+                {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
                 {generating ? '生成中...' : '开始生成'}
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
-      {/* AI 生成组织弹窗 */}
-      {showGenOrgModal && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-8 sm:py-12">
-          <div className="relative my-auto bg-white shadow-xl w-full max-w-lg mx-4 animate-scale-in max-h-[calc(100vh-4rem)] flex flex-col">
-            <div className="flex items-center justify-between px-6 pt-5 pb-3 flex-shrink-0 border-b border-surface-border">
-              <h2 className="text-lg font-bold text-content">AI 生成组织</h2>
-              <button onClick={() => setShowGenOrgModal(false)} className="text-content-tertiary hover:text-content">
-                <X className="w-5 h-5" />
+      {showGenOrgModal && createPortal(
+        <div className="hh-modal-mask">
+          <div className="hh-modal max-w-[520px]" role="dialog" aria-modal="true">
+            <div className="hh-modal-head">
+              <div className="min-w-0">
+                <p className="hh-eyebrow">AI 生成</p>
+                <h2 className="mt-2 text-xl font-semibold tracking-tight text-content">AI 生成组织</h2>
+                <p className="mt-1 text-sm leading-6 text-content-secondary">描述你想要的势力，AI 会结合世界观生成组织的类型、宗旨与背景。</p>
+              </div>
+              <button onClick={() => setShowGenOrgModal(false)} className="hh-icon-btn-plain -mr-2 -mt-1" aria-label="关闭">
+                <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="px-6 py-5 space-y-4 overflow-y-auto flex-1">
+            <div className="hh-modal-body space-y-4">
               <div>
-                <label className="block text-sm font-medium text-content mb-1">组织名称（可选）</label>
+                <label className="hh-label">组织名称（可选）</label>
                 <input
                   value={genOrgForm.name}
                   onChange={e => setGenOrgForm(p => ({ ...p, name: e.target.value }))}
                   placeholder="留空由 AI 自动命名"
-                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none"
+                  className="hh-field"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-content mb-1">组织要求描述</label>
+                <label className="hh-label">组织要求描述</label>
                 <textarea
                   value={genOrgForm.requirements}
                   onChange={e => setGenOrgForm(p => ({ ...p, requirements: e.target.value }))}
                   placeholder="如：一个修仙宗门、纪律森严、位于北方雪山..."
                   rows={4}
-                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none resize-none"
+                  className="hh-textarea"
                 />
               </div>
             </div>
-            <div className="flex justify-end gap-2 px-6 py-3 border-t border-surface-border bg-white flex-shrink-0">
-              <button
-                onClick={() => setShowGenOrgModal(false)}
-                className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm transition-colors"
-              >
+            <div className="hh-modal-foot">
+              <button onClick={() => setShowGenOrgModal(false)} className="hh-btn-ghost">
                 取消
               </button>
-              <button
-                onClick={handleGenerateOrg}
-                disabled={generatingOrg}
-                className="inline-flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-btn px-4 py-2 text-sm transition-colors disabled:opacity-50"
-              >
-                {generatingOrg ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              <button onClick={handleGenerateOrg} disabled={generatingOrg} className="hh-btn-primary">
+                {generatingOrg ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
                 {generatingOrg ? '生成中...' : '开始生成'}
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
-      {/* 手动添加/编辑弹窗 */}
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-8 sm:py-12">
-          <div className="relative my-auto bg-white shadow-xl w-full max-w-2xl mx-4 animate-scale-in max-h-[calc(100vh-4rem)] flex flex-col">
-            <div className="flex items-center justify-between px-6 pt-5 pb-3 flex-shrink-0">
-              <h2 className="text-lg font-bold text-content">
-                {editingId ? (form.is_organization ? '编辑组织' : '编辑角色') : '添加角色'}
-              </h2>
-              <button onClick={() => setShowModal(false)} className="text-content-tertiary hover:text-content">
-                <X className="w-5 h-5" />
+      {showModal && createPortal(
+        <div className="hh-modal-mask">
+          <div className="hh-modal max-w-[640px]" role="dialog" aria-modal="true">
+            <div className="hh-modal-head">
+              <div className="min-w-0">
+                <p className="hh-eyebrow">{form.is_organization ? '组织' : '角色'}</p>
+                <h2 className="mt-2 text-xl font-semibold tracking-tight text-content">
+                  {editingId ? (form.is_organization ? '编辑组织' : '编辑角色') : form.is_organization ? '添加组织' : '添加角色'}
+                </h2>
+                <p className="mt-1 text-sm leading-6 text-content-secondary">
+                  {form.is_organization
+                    ? '记录组织的类型、宗旨、风格与背景，保存后可在这里维护在籍成员。'
+                    : '记录角色的定位、性格与背景故事，AI 生成章节时会参考这些设定。'}
+                </p>
+              </div>
+              <button onClick={() => setShowModal(false)} className="hh-icon-btn-plain -mr-2 -mt-1" aria-label="关闭">
+                <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="px-6 pb-6 space-y-4 overflow-y-auto flex-1">
+            <div className="hh-modal-body space-y-4">
               <div>
-                <label className="block text-sm font-medium text-content mb-1">名称</label>
+                <label className="hh-label">名称</label>
                 <input
                   value={form.name}
                   onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
                   placeholder={form.is_organization ? '组织名称' : '角色名字'}
-                  className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none"
+                  className="hh-field"
                 />
               </div>
 
               {form.is_organization ? (
                 <>
                   <div>
-                    <label className="block text-sm font-medium text-content mb-1">组织类型</label>
+                    <label className="hh-label">组织类型</label>
                     <input
                       value={form.organization_type}
                       onChange={(e) => setForm((p) => ({ ...p, organization_type: e.target.value }))}
                       placeholder="如：宗门、家族、商会、势力"
-                      className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none"
+                      className="hh-field"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-content mb-1">组织宗旨</label>
+                    <label className="hh-label">组织宗旨</label>
                     <textarea
                       value={form.organization_purpose}
                       onChange={(e) => setForm((p) => ({ ...p, organization_purpose: e.target.value }))}
                       placeholder="组织的宗旨或核心目标…"
                       rows={2}
-                      className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none resize-none"
+                      className="hh-textarea"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-content mb-1">组织风格/氛围</label>
+                    <label className="hh-label">组织风格/氛围</label>
                     <textarea
                       value={form.personality}
                       onChange={(e) => setForm((p) => ({ ...p, personality: e.target.value }))}
                       placeholder="如：纪律严明、唯利是图…"
                       rows={2}
-                      className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none resize-none"
+                      className="hh-textarea"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-content mb-1">背景描述</label>
+                    <label className="hh-label">背景描述</label>
                     <textarea
                       value={form.background}
                       onChange={(e) => setForm((p) => ({ ...p, background: e.target.value }))}
                       placeholder="组织的历史、势力范围等…"
                       rows={3}
-                      className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none resize-none"
+                      className="hh-textarea"
                     />
                   </div>
 
-                  {/* 成员管理区 */}
                   {editingId && (
-                    <div className="border border-surface-border rounded-[14px] p-3 space-y-3">
+                    <div className="hh-subpanel space-y-3 p-4">
                       <div className="flex items-center gap-2">
-                        <Users className="w-4 h-4 text-content-secondary" />
+                        <Users className="h-4 w-4 text-content-secondary" />
                         <span className="text-sm font-medium text-content">组织成员</span>
-                        <span className="text-xs text-content-tertiary">({orgMembers.length}人)</span>
+                        <span className="text-xs text-content-tertiary tabular-nums">({orgMembers.length}人)</span>
                       </div>
 
                       {orgMembers.length > 0 ? (
-                        <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                        <ul className="max-h-40 divide-y divide-surface-border/80 overflow-y-auto border border-surface-border/80 bg-white/70">
                           {orgMembers.map((m) => (
-                            <div key={String(m.id)} className="flex items-center justify-between gap-2 bg-surface/50 rounded-btn px-2.5 py-1.5">
-                              <div className="flex-1 min-w-0">
+                            <li key={String(m.id)} className="flex items-center justify-between gap-2 px-3 py-2">
+                              <div className="min-w-0 flex-1">
                                 <span className="text-xs font-medium text-content">{String(m.character_name || '未知')}</span>
-                                <span className="text-[11px] text-content-tertiary ml-1.5">{String(m.position || '成员')}</span>
-                                {Boolean(m.status) && m.status !== 'active' && <span className="text-[10px] text-red-500 ml-1">({String(m.status)})</span>}
+                                <span className="ml-1.5 text-[11px] text-content-tertiary">{String(m.position || '成员')}</span>
+                                {Boolean(m.status) && m.status !== 'active' && <span className="ml-1 text-[10px] text-red-500">({String(m.status)})</span>}
                               </div>
                               <button
                                 onClick={() => handleRemoveMember(String(m.id))}
-                                className="text-content-tertiary hover:text-red-500 transition-colors p-0.5"
+                                className="hh-icon-btn-plain h-7 w-7 hover:text-red-500"
                                 title="移除成员"
+                                aria-label="移除成员"
                               >
-                                <UserMinus className="w-3.5 h-3.5" />
+                                <UserMinus className="h-3.5 w-3.5" />
                               </button>
-                            </div>
+                            </li>
                           ))}
-                        </div>
+                        </ul>
                       ) : (
-                        <p className="text-xs text-content-tertiary text-center py-2">暂无成员</p>
+                        <p className="py-2 text-center text-xs text-content-tertiary">暂无成员</p>
                       )}
 
-                      {/* 添加成员 */}
                       <div className="flex items-end gap-2">
-                        <div className="flex-1">
-                          <label className="block text-[11px] text-content-tertiary mb-0.5">选择角色</label>
+                        <div className="min-w-0 flex-1">
+                          <label className="hh-label">选择角色</label>
                           <select
                             value={addMemberId}
                             onChange={(e) => setAddMemberId(e.target.value)}
-                            className="w-full border border-surface-border rounded-btn px-2 py-1.5 text-xs focus:border-brand outline-none bg-white"
+                            className="hh-field"
                           >
                             <option value="">选择角色加入…</option>
                             {characters
@@ -670,21 +626,17 @@ export default function Characters() {
                             }
                           </select>
                         </div>
-                        <div className="w-24">
-                          <label className="block text-[11px] text-content-tertiary mb-0.5">职位</label>
+                        <div className="w-28 shrink-0">
+                          <label className="hh-label">职位</label>
                           <input
                             value={addMemberPos}
                             onChange={(e) => setAddMemberPos(e.target.value)}
                             placeholder="成员"
-                            className="w-full border border-surface-border rounded-btn px-2 py-1.5 text-xs focus:border-brand outline-none"
+                            className="hh-field"
                           />
                         </div>
-                        <button
-                          onClick={handleAddMember}
-                          disabled={!addMemberId}
-                          className="inline-flex items-center gap-1 border border-emerald-300 text-emerald-700 hover:bg-emerald-50 rounded-btn px-2 py-1.5 text-xs transition-colors disabled:opacity-40"
-                        >
-                          <UserPlus className="w-3.5 h-3.5" />
+                        <button onClick={handleAddMember} disabled={!addMemberId} className="hh-btn-secondary shrink-0">
+                          <UserPlus className="h-4 w-4" />
                           添加
                         </button>
                       </div>
@@ -694,11 +646,11 @@ export default function Characters() {
               ) : (
                 <>
                   <div>
-                    <label className="block text-sm font-medium text-content mb-1">角色类型</label>
+                    <label className="hh-label">角色类型</label>
                     <select
                       value={form.role_type}
                       onChange={(e) => setForm((p) => ({ ...p, role_type: e.target.value }))}
-                      className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none"
+                      className="hh-field"
                     >
                       {ROLE_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>{option.label}</option>
@@ -706,59 +658,53 @@ export default function Characters() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-content mb-1">性格特点</label>
+                    <label className="hh-label">性格特点</label>
                     <textarea
                       value={form.personality}
                       onChange={(e) => setForm((p) => ({ ...p, personality: e.target.value }))}
                       placeholder="描述角色的性格特点…"
                       rows={3}
-                      className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none resize-none"
+                      className="hh-textarea"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-content mb-1">背景故事</label>
+                    <label className="hh-label">背景故事</label>
                     <textarea
                       value={form.background}
                       onChange={(e) => setForm((p) => ({ ...p, background: e.target.value }))}
                       placeholder="描述角色的背景故事…"
                       rows={3}
-                      className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none resize-none"
+                      className="hh-textarea"
                     />
                   </div>
                 </>
               )}
 
-              <div className="rounded-[14px] border border-brand/20 bg-brand/5 p-3">
-                <label className="block text-sm font-medium text-brand-600 mb-1">
+              <div className="border border-brand/25 bg-brand/5 p-4">
+                <label className="hh-label">
                   {editingId ? '修改原因' : '添加原因'}
-                  <span className="text-xs font-normal text-content-tertiary ml-1">（AI 生成时会参考此信息）</span>
+                  <span className="ml-1.5 text-xs font-normal text-content-tertiary">AI 生成时会参考此信息</span>
                 </label>
                 <input
                   value={form.reason}
                   onChange={(e) => setForm((p) => ({ ...p, reason: e.target.value }))}
                   placeholder={editingId ? '如：修正角色设定、补充信息…' : '如：剧情需要新增此角色…'}
-                  className="w-full border border-brand/20 rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none bg-white"
+                  className="hh-field"
                 />
               </div>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  onClick={() => setShowModal(false)}
-                  className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm transition-colors"
-                >
-                  取消
-                </button>
-                <button
-                  onClick={handleSubmit}
-                  disabled={submitting || !form.name.trim()}
-                  className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm transition-colors disabled:opacity-50"
-                >
-                  {submitting ? '保存中…' : '保存'}
-                </button>
-              </div>
+            </div>
+            <div className="hh-modal-foot">
+              <button onClick={() => setShowModal(false)} className="hh-btn-ghost">
+                取消
+              </button>
+              <button onClick={handleSubmit} disabled={submitting || !form.name.trim()} className="hh-btn-primary">
+                {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+                {submitting ? '保存中…' : '保存'}
+              </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

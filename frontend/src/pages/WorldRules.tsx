@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Plus, Pencil, Trash2, Shield, Map, Sword, Loader2 } from 'lucide-react'
+import { Plus, Pencil, Trash2, Shield, Map, Sword, Loader2, ScrollText } from 'lucide-react'
 import { toast } from 'sonner'
+import { cn } from '@/lib/utils'
 import { useStore } from '@/store/index'
 import { worldRulesApi } from '@/services/api'
 import { Modal } from '@/components/ui/Modal'
@@ -96,103 +97,151 @@ export default function WorldRules() {
 
   const filtered = activeCategory === 'all' ? rules : rules.filter(r => r.category === activeCategory)
   const getCategoryLabel = (cat: Category) => CATEGORIES.find(c => c.value === cat)?.label || cat
+  const getCategoryIcon = (cat: Category) => CATEGORIES.find(c => c.value === cat)?.icon || ScrollText
 
   return (
-    <div className="space-y-6">
-      {/* 头部 */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-content">世界规则</h1>
-        <button onClick={openCreate} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5">
-          <Plus className="w-4 h-4" />
-          添加规则
-        </button>
-      </div>
-
-      {/* 分类筛选 */}
-      <div className="flex gap-2 flex-wrap">
-        <button
-          onClick={() => setActiveCategory('all')}
-          className={`rounded-btn px-3 py-1.5 text-sm transition-colors ${activeCategory === 'all' ? 'bg-brand text-white' : 'border border-surface-border text-content-secondary hover:bg-surface-hover'}`}
-        >
-          全部
-        </button>
-        {CATEGORIES.map(cat => (
-          <button
-            key={cat.value}
-            onClick={() => setActiveCategory(cat.value)}
-            className={`rounded-btn px-3 py-1.5 text-sm transition-colors inline-flex items-center gap-1.5 ${activeCategory === cat.value ? 'bg-brand text-white' : 'border border-surface-border text-content-secondary hover:bg-surface-hover'}`}
-          >
-            <cat.icon className="w-3.5 h-3.5" />
-            {cat.label}
+    <div className="animate-fade-in space-y-6">
+      <section className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-[28px] font-semibold tracking-tight text-content md:text-[32px]">世界规则</h1>
+          <p className="mt-2 max-w-[560px] text-sm leading-6 text-content-secondary">
+            把修炼境界、装备模板与地图位置整理成规则条目，AI 写作时会据此保持设定一致。
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2.5">
+          <button onClick={openCreate} className="hh-btn-primary">
+            <Plus className="h-4 w-4" />
+            添加规则
           </button>
-        ))}
+        </div>
+      </section>
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => setActiveCategory('all')}
+            className={cn('hh-chip', activeCategory === 'all' && 'hh-chip--active')}
+          >
+            全部
+          </button>
+          {CATEGORIES.map(cat => (
+            <button
+              key={cat.value}
+              onClick={() => setActiveCategory(cat.value)}
+              className={cn('hh-chip', activeCategory === cat.value && 'hh-chip--active')}
+            >
+              <cat.icon className="h-3.5 w-3.5" />
+              {cat.label}
+            </button>
+          ))}
+        </div>
+        {!loading && <span className="text-xs text-content-tertiary tabular-nums">{filtered.length} 条</span>}
       </div>
 
-      {/* 列表 */}
       {loading ? (
-        <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-content-secondary" /></div>
+        <section className="hh-panel flex items-center justify-center py-14">
+          <Loader2 className="h-6 w-6 animate-spin text-brand" />
+        </section>
       ) : filtered.length === 0 ? (
-        <div className="text-center py-12 text-content-secondary text-sm">暂无规则，点击上方按钮添加</div>
+        <section className="hh-panel flex flex-col items-center px-6 py-14 text-center">
+          <span className="flex h-14 w-14 items-center justify-center bg-brand/10 text-brand">
+            <ScrollText className="h-7 w-7" />
+          </span>
+          <h2 className="mt-5 text-xl font-semibold tracking-tight text-content">
+            {activeCategory === 'all' ? '还没有世界规则' : `暂无「${getCategoryLabel(activeCategory)}」规则`}
+          </h2>
+          <p className="mt-2 max-w-md text-sm leading-6 text-content-secondary">
+            点击右上角「添加规则」录入设定，也可以切换上方分类查看其他规则。
+          </p>
+        </section>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map(rule => (
-            <div key={rule.id} className="bg-white border border-surface-border rounded-card p-4 space-y-2">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <span className="text-xs text-content-secondary bg-surface-hover rounded px-1.5 py-0.5">{getCategoryLabel(rule.category)}</span>
-                  <h3 className="text-sm font-semibold text-content mt-1">{rule.name}</h3>
+          {filtered.map(rule => {
+            const Icon = getCategoryIcon(rule.category)
+            return (
+              <article key={rule.id} className="hh-panel flex flex-col p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center bg-brand/10 text-brand">
+                      <Icon className="h-5 w-5" />
+                    </span>
+                    <div className="min-w-0">
+                      <h3 className="truncate text-[15px] font-semibold text-content">{rule.name}</h3>
+                      <span className="mt-1 inline-block bg-surface-hover px-2 py-0.5 text-[11px] font-medium text-content-secondary">
+                        {getCategoryLabel(rule.category)}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    <button onClick={() => openEdit(rule)} className="hh-icon-btn-plain h-8 w-8" title="编辑" aria-label="编辑">
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                    <button onClick={() => handleDelete(rule)} className="hh-icon-btn-plain h-8 w-8 hover:text-red-500" title="删除" aria-label="删除">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
-                <div className="flex gap-1 shrink-0">
-                  <button onClick={() => openEdit(rule)} className="p-1.5 rounded hover:bg-surface-hover text-content-secondary transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
-                  <button onClick={() => handleDelete(rule)} className="p-1.5 rounded hover:bg-red-50 text-content-secondary hover:text-red-500 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
-                </div>
-              </div>
-              {rule.summary && <p className="text-xs text-content-secondary line-clamp-2">{rule.summary}</p>}
-              {rule.details && <p className="text-xs text-content-secondary/70 line-clamp-3">{rule.details}</p>}
-            </div>
-          ))}
+                {(rule.summary || rule.details) && (
+                  <div className="mt-4 space-y-3">
+                    {rule.summary && <p className="line-clamp-2 text-[13px] leading-6 text-content-secondary">{rule.summary}</p>}
+                    {rule.details && (
+                      <div className="hh-subpanel px-3.5 py-3">
+                        <p className="line-clamp-3 text-xs leading-5 text-content-tertiary">{rule.details}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </article>
+            )
+          })}
         </div>
       )}
 
-      {/* 弹窗 */}
       {showModal && (
         <Modal
           title={editingRule ? '编辑规则' : '添加规则'}
           onClose={() => setShowModal(false)}
-          size="xl"
+          size="lg"
+          closeOnMaskClick={false}
           footer={(
             <>
-              <button onClick={() => setShowModal(false)} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-4 py-2 text-sm">取消</button>
-              <button onClick={handleSubmit} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors">确定</button>
+              <button onClick={() => setShowModal(false)} className="hh-btn-ghost">取消</button>
+              <button onClick={handleSubmit} className="hh-btn-primary">{editingRule ? '保存修改' : '创建规则'}</button>
             </>
           )}
         >
-          <div className="space-y-3">
+          <div className="space-y-5">
             <div>
-              <label className="block text-sm text-content-secondary mb-1">分类</label>
+              <label className="hh-label">分类</label>
               <select
                 value={form.category}
                 onChange={e => setForm(f => ({ ...f, category: e.target.value as Category }))}
-                className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors"
+                className="hh-field"
               >
                 {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
               </select>
             </div>
-            <div>
-              <label className="block text-sm text-content-secondary mb-1">标识 (key)</label>
-              <input value={form.key} onChange={e => setForm(f => ({ ...f, key: e.target.value }))} placeholder="如 qi_refining" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+            <div className="grid gap-5 sm:grid-cols-2">
+              <div>
+                <label className="hh-label">
+                  标识 (key) <span className="text-red-500">*</span>
+                </label>
+                <input value={form.key} onChange={e => setForm(f => ({ ...f, key: e.target.value }))} placeholder="如 qi_refining" className="hh-field" />
+              </div>
+              <div>
+                <label className="hh-label">
+                  名称 <span className="text-red-500">*</span>
+                </label>
+                <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="如 炼气期" className="hh-field" />
+              </div>
             </div>
             <div>
-              <label className="block text-sm text-content-secondary mb-1">名称</label>
-              <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="如 炼气期" className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
+              <label className="hh-label">摘要</label>
+              <input value={form.summary || ''} onChange={e => setForm(f => ({ ...f, summary: e.target.value }))} placeholder="一句话概括这条规则" className="hh-field" />
             </div>
             <div>
-              <label className="block text-sm text-content-secondary mb-1">摘要</label>
-              <input value={form.summary || ''} onChange={e => setForm(f => ({ ...f, summary: e.target.value }))} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors" />
-            </div>
-            <div>
-              <label className="block text-sm text-content-secondary mb-1">详情</label>
-              <textarea value={form.details || ''} onChange={e => setForm(f => ({ ...f, details: e.target.value }))} rows={3} className="w-full border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors resize-none" />
+              <label className="hh-label">详情</label>
+              <textarea value={form.details || ''} onChange={e => setForm(f => ({ ...f, details: e.target.value }))} rows={4} placeholder="补充具体内容、限制与代价…" className="hh-textarea" />
             </div>
           </div>
         </Modal>

@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
   Brain, Search, Loader2, Trash2, BookOpen, Eye,
-  BarChart3, AlertTriangle, Filter, RefreshCw,
+  BarChart3, Filter, RefreshCw,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -39,36 +39,60 @@ export default function MemoriesPage() {
   const projectId = currentProject?.id
   const [activeTab, setActiveTab] = useState<TabKey>('memories')
 
-  if (!projectId) return <div className="text-center py-12 text-content-secondary text-sm">请先选择项目</div>
+  if (!projectId) return <div className="py-12 text-center text-sm text-content-secondary">请先选择项目</div>
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-2 mb-2">
-        <Brain className="w-5 h-5 text-brand" />
-        <h1 className="text-lg font-bold text-content">记忆系统</h1>
-      </div>
-
-      <div className="flex border-b border-surface-border mb-6">
-        {TABS.map(tab => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={cn(
-              'px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors inline-flex items-center gap-1.5',
-              activeTab === tab.key
-                ? 'border-brand text-brand'
-                : 'border-transparent text-content-secondary hover:text-content'
-            )}
-          >
-            <tab.icon className="w-4 h-4" />
-            {tab.label}
-          </button>
-        ))}
-      </div>
+    <div className="animate-fade-in space-y-6">
+      <section className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-[28px] font-semibold tracking-tight text-content md:text-[32px]">记忆系统</h1>
+          <p className="mt-2 max-w-[560px] text-sm leading-6 text-content-secondary">
+            章节分析后自动沉淀的钩子、伏笔、情节点与角色状态，供后续生成时检索引用。
+          </p>
+        </div>
+        <div className="inline-flex shrink-0 border border-surface-border bg-white/60 p-1">
+          {TABS.map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={cn(
+                'inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium transition-colors',
+                activeTab === tab.key
+                  ? 'bg-brand text-white shadow-[0_8px_20px_-12px_rgba(0,122,255,0.6)]'
+                  : 'text-content-secondary hover:text-content'
+              )}
+            >
+              <tab.icon className="h-3.5 w-3.5" />
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </section>
 
       {activeTab === 'memories' && <MemoriesTab projectId={projectId} chapters={chapters} />}
       {activeTab === 'foreshadows' && <ForeshadowsTab projectId={projectId} chapters={chapters} />}
       {activeTab === 'stats' && <StatsTab projectId={projectId} />}
+    </div>
+  )
+}
+
+function EmptyPanel({ icon: Icon, title, description }: { icon: React.ElementType; title: string; description?: string }) {
+  return (
+    <section className="hh-panel flex flex-col items-center px-6 py-14 text-center">
+      <span className="flex h-14 w-14 items-center justify-center bg-brand/10 text-brand">
+        <Icon className="h-7 w-7" />
+      </span>
+      <h2 className="mt-5 text-xl font-semibold tracking-tight text-content">{title}</h2>
+      {description && <p className="mt-2 max-w-md text-sm leading-6 text-content-secondary">{description}</p>}
+    </section>
+  )
+}
+
+function LoadingPanel() {
+  return (
+    <div className="hh-panel flex items-center justify-center gap-2 py-16 text-sm text-content-secondary">
+      <Loader2 className="h-5 w-5 animate-spin text-brand" />
+      加载中…
     </div>
   )
 }
@@ -125,69 +149,57 @@ function MemoriesTab({ projectId, chapters }: { projectId: string; chapters: Arr
     }
   }
 
-  const typeColor = (t: string) => {
-    const map: Record<string, string> = {
-      hook: 'bg-red-100 text-red-700',
-      foreshadow: 'bg-purple-100 text-purple-700',
-      plot_point: 'bg-blue-100 text-blue-700',
-      character_state: 'bg-green-100 text-green-700',
-      scene: 'bg-yellow-100 text-yellow-700',
-      emotion: 'bg-pink-100 text-pink-700',
-    }
-    return map[t as string] || 'bg-gray-100 text-gray-700'
-  }
-
   return (
     <div className="space-y-4">
       {/* 搜索与筛选 */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex-1 min-w-[200px] flex gap-2">
+        <div className="flex min-w-[240px] flex-1 gap-2">
           <input
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSearch()}
-            placeholder="语义搜索记忆..."
-            className="flex-1 border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none transition-colors"
+            placeholder="语义搜索记忆…"
+            className="hh-field flex-1"
           />
-          <button onClick={handleSearch} disabled={searching} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-3 py-2 text-sm transition-colors inline-flex items-center gap-1.5 disabled:opacity-50">
-            {searching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+          <button onClick={handleSearch} disabled={searching} className="hh-btn-secondary shrink-0">
+            {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
             搜索
           </button>
         </div>
-        <div className="flex items-center gap-1.5">
-          <Filter className="w-4 h-4 text-content-secondary" />
-          <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} className="border border-surface-border rounded-btn px-2 py-2 text-sm bg-white focus:border-brand outline-none">
-            {MEMORY_TYPES.map(t => <option key={t} value={t}>{t === '全部' ? '全部类型' : t}</option>)}
+        <div className="flex items-center gap-2">
+          <Filter className="h-4 w-4 text-content-tertiary" />
+          <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} className="hh-field w-auto pr-8">
+            {MEMORY_TYPES.map(t => <option key={t} value={t}>{t === '全部' ? '全部类型' : (MEMORY_TYPE_LABELS[t] ?? t)}</option>)}
           </select>
         </div>
-        <button onClick={loadMemories} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-3 py-2 text-sm transition-colors inline-flex items-center gap-1.5">
-          <RefreshCw className="w-4 h-4" />
-          刷新
+        <button onClick={loadMemories} className="hh-icon-btn h-11 w-11" title="刷新" aria-label="刷新">
+          <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
         </button>
+        <span className="ml-auto text-xs text-content-tertiary tabular-nums">共 {total} 条记忆</span>
       </div>
 
-      <p className="text-xs text-content-secondary">共 {total} 条记忆</p>
-
       {loading ? (
-        <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-content-secondary" /></div>
+        <LoadingPanel />
       ) : memories.length === 0 ? (
-        <div className="text-center py-12 text-content-secondary text-sm">暂无记忆数据，请先在章节管理中生成章节并分析</div>
+        <EmptyPanel icon={Brain} title="暂无记忆数据" description="先在「章节管理」中生成章节并执行分析，记忆会自动沉淀到这里。" />
       ) : (
-        <div className="space-y-3">
+        <section className="hh-panel divide-y divide-surface-border/80 overflow-hidden">
           {memories.map((mem, i) => (
-            <div key={(mem.id as string) || i} className="bg-white border border-surface-border rounded-card p-4">
+            <div key={(mem.id as string) || i} className="px-5 py-4 transition-colors hover:bg-brand/[0.04]">
               <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {Boolean(mem.memory_type) && <span className={cn('text-xs rounded px-1.5 py-0.5', typeColor(String(mem.memory_type)))}>{String(mem.memory_type)}</span>}
-                    {Boolean(mem.title) && <h3 className="text-sm font-semibold text-content truncate">{String(mem.title)}</h3>}
-                    {mem.importance_score != null && <span className="text-xs text-content-secondary">重要度: {String(mem.importance_score)}</span>}
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {Boolean(mem.memory_type) && (
+                      <span className="hh-tag px-1.5 py-0.5 text-[11px]">{MEMORY_TYPE_LABELS[String(mem.memory_type)] ?? String(mem.memory_type)}</span>
+                    )}
+                    {Boolean(mem.title) && <h3 className="truncate text-sm font-semibold text-content">{String(mem.title)}</h3>}
+                    {mem.importance_score != null && <span className="text-xs text-content-tertiary tabular-nums">重要度 {String(mem.importance_score)}</span>}
                   </div>
-                  {Boolean(mem.content) && <p className="text-xs text-content-secondary mt-1.5 line-clamp-3 whitespace-pre-wrap">{String(mem.content)}</p>}
-                  <div className="flex items-center gap-3 mt-2 text-xs text-content-secondary">
-                    {mem.story_timeline != null && <span>时间线: 第{String(mem.story_timeline)}章</span>}
+                  {Boolean(mem.content) && <p className="mt-1.5 line-clamp-3 whitespace-pre-wrap text-[13px] leading-6 text-content-secondary">{String(mem.content)}</p>}
+                  <div className="mt-2 flex items-center gap-3 text-xs text-content-tertiary">
+                    {mem.story_timeline != null && <span>时间线：第 {String(mem.story_timeline)} 章</span>}
                     {Boolean(mem.chapter_id) && (
-                      <span>章节: {chapters.find(c => c.id === mem.chapter_id)?.title || String(mem.chapter_id).slice(0, 8)}</span>
+                      <span>章节：{chapters.find(c => c.id === mem.chapter_id)?.title || String(mem.chapter_id).slice(0, 8)}</span>
                     )}
                   </div>
                 </div>
@@ -195,15 +207,16 @@ function MemoriesTab({ projectId, chapters }: { projectId: string; chapters: Arr
                   <button
                     onClick={() => handleDeleteChapterMemories(mem.chapter_id as string)}
                     title="删除该章节所有记忆"
-                    className="p-1.5 rounded hover:bg-red-50 text-content-secondary hover:text-red-500 transition-colors shrink-0"
+                    aria-label="删除该章节所有记忆"
+                    className="hh-icon-btn-plain h-8 w-8 shrink-0 hover:text-red-500"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    <Trash2 className="h-4 w-4" />
                   </button>
                 )}
               </div>
             </div>
           ))}
-        </div>
+        </section>
       )}
     </div>
   )
@@ -235,44 +248,44 @@ function ForeshadowsTab({ projectId, chapters }: { projectId: string; chapters: 
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <label className="text-sm text-content-secondary">当前章节:</label>
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="text-sm text-content-secondary">截至章节</label>
         <input
           type="number"
           min={1}
           value={currentChapter}
           onChange={e => setCurrentChapter(Number(e.target.value))}
-          className="w-24 border border-surface-border rounded-btn px-3 py-2 text-sm focus:border-brand focus:ring-2 focus:ring-brand/20 outline-none"
+          className="hh-field w-28"
         />
-        <button onClick={loadForeshadows} className="border border-surface-border text-content-secondary hover:bg-surface-hover rounded-btn px-3 py-2 text-sm transition-colors inline-flex items-center gap-1.5">
-          <RefreshCw className="w-4 h-4" />
+        <button onClick={loadForeshadows} className="hh-btn-secondary">
+          <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
           查询
         </button>
+        <span className="ml-auto text-xs text-content-tertiary tabular-nums">{foreshadows.length} 条未解决伏笔</span>
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-content-secondary" /></div>
+        <LoadingPanel />
       ) : foreshadows.length === 0 ? (
-        <div className="text-center py-12 text-content-secondary text-sm">
-          <AlertTriangle className="w-8 h-8 mx-auto mb-2 text-content-tertiary" />
-          截至第 {currentChapter} 章，暂无未解决伏笔
-        </div>
+        <EmptyPanel icon={Eye} title={`截至第 ${currentChapter} 章，暂无未解决伏笔`} />
       ) : (
-        <div className="space-y-3">
+        <section className="hh-panel divide-y divide-surface-border/80 overflow-hidden">
           {foreshadows.map((f, i) => (
-            <div key={i} className="bg-white border border-purple-200 rounded-card p-4">
-              <div className="flex items-center gap-2 mb-1">
-                <Eye className="w-4 h-4 text-purple-500" />
+            <div key={i} className="flex items-start gap-3 px-5 py-4 transition-colors hover:bg-brand/[0.04]">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center bg-brand/10 text-brand">
+                <Eye className="h-4 w-4" />
+              </span>
+              <div className="min-w-0 flex-1">
                 {Boolean(f.title) && <h3 className="text-sm font-semibold text-content">{String(f.title)}</h3>}
-              </div>
-              {Boolean(f.content) && <p className="text-xs text-content-secondary mt-1 whitespace-pre-wrap">{String(f.content)}</p>}
-              <div className="flex items-center gap-3 mt-2 text-xs text-content-secondary">
-                {f.story_timeline != null && <span>埋设于: 第{String(f.story_timeline)}章</span>}
-                {f.importance_score != null && <span>重要度: {String(f.importance_score)}</span>}
+                {Boolean(f.content) && <p className="mt-1 whitespace-pre-wrap text-[13px] leading-6 text-content-secondary">{String(f.content)}</p>}
+                <div className="mt-2 flex items-center gap-3 text-xs text-content-tertiary">
+                  {f.story_timeline != null && <span>埋设于第 {String(f.story_timeline)} 章</span>}
+                  {f.importance_score != null && <span className="tabular-nums">重要度 {String(f.importance_score)}</span>}
+                </div>
               </div>
             </div>
           ))}
-        </div>
+        </section>
       )}
     </div>
   )
@@ -292,60 +305,58 @@ function StatsTab({ projectId }: { projectId: string }) {
       .finally(() => setLoading(false))
   }, [projectId])
 
-  if (loading) return <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-content-secondary" /></div>
-  if (!stats) return <div className="text-center py-12 text-content-secondary text-sm">暂无统计数据</div>
+  if (loading) return <LoadingPanel />
+  if (!stats) return <EmptyPanel icon={BarChart3} title="暂无统计数据" />
 
   const entries = Object.entries(stats)
   const scalarEntries = getScalarEntries(stats)
   const groupedEntries = getGroupedEntries(stats)
 
   if (typeof stats.error === 'string') {
-    return <div className="text-center py-12 text-content-secondary text-sm">{stats.error}</div>
+    return <EmptyPanel icon={BarChart3} title="暂无统计数据" description={stats.error} />
   }
 
   return (
     <div className="space-y-4">
-      <h2 className="text-base font-semibold text-content">记忆统计</h2>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {scalarEntries.map(([key, value]) => (
-          <div key={key} className="border border-surface-border rounded-card p-5 text-center bg-white">
-            <div className="text-3xl font-bold text-brand">{value}</div>
-            <div className="text-sm mt-1 text-content-secondary">{STAT_LABELS[key] ?? key}</div>
-          </div>
-        ))}
-      </div>
+      {scalarEntries.length > 0 && (
+        <section className={cn('hh-panel grid grid-cols-2 divide-surface-border/80 md:divide-x', scalarEntries.length >= 4 ? 'md:grid-cols-4' : 'md:grid-cols-3')}>
+          {scalarEntries.map(([key, value]) => (
+            <div key={key} className="px-5 py-4 md:px-6">
+              <p className="text-xs text-content-tertiary">{STAT_LABELS[key] ?? key}</p>
+              <p className="mt-1 text-2xl font-semibold tracking-tight text-content tabular-nums">{value}</p>
+            </div>
+          ))}
+        </section>
+      )}
       {groupedEntries.length > 0 && (
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           {groupedEntries.map(([key, value]) => {
             const items = formatCountMap(key, value)
             return (
-              <div key={key} className="border border-surface-border rounded-card p-5 bg-white">
-                <div className="flex items-center justify-between gap-3 mb-3">
-                  <h3 className="text-sm font-semibold text-content">{STAT_LABELS[key] ?? key}</h3>
-                  <span className="text-xs text-content-secondary">{items.length} 项</span>
+              <section key={key} className="hh-panel p-6">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <h3 className="text-lg font-semibold tracking-tight text-content">{STAT_LABELS[key] ?? key}</h3>
+                  <span className="text-xs text-content-tertiary tabular-nums">{items.length} 项</span>
                 </div>
                 {items.length === 0 ? (
-                  <div className="text-sm text-content-secondary">暂无数据</div>
+                  <p className="text-sm text-content-tertiary">暂无数据</p>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="divide-y divide-surface-border/80">
                     {items.map(([label, count]) => (
-                      <div key={label} className="flex items-center justify-between gap-4 text-sm">
-                        <span className="text-content-secondary truncate">{label}</span>
-                        <span className="font-semibold text-content shrink-0">{count}</span>
+                      <div key={label} className="flex items-center justify-between gap-4 py-2 text-sm">
+                        <span className="truncate text-content-secondary">{label}</span>
+                        <span className="shrink-0 font-semibold text-content tabular-nums">{count}</span>
                       </div>
                     ))}
                   </div>
                 )}
-              </div>
+              </section>
             )
           })}
         </div>
       )}
       {entries.length === 0 && (
-        <div className="text-center py-8 text-content-secondary text-sm">
-          <BookOpen className="w-8 h-8 mx-auto mb-2 text-content-tertiary" />
-          暂无统计数据，请先分析章节以生成记忆
-        </div>
+        <EmptyPanel icon={BookOpen} title="暂无统计数据" description="先分析章节以生成记忆，统计会自动汇总到这里。" />
       )}
     </div>
   )

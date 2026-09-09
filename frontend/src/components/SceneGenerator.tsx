@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { X, Loader2, Play, CheckCircle2, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -99,28 +100,30 @@ export function SceneGenerator({ chapterOutlineId, chapterTitle, projectId, onCl
   }
 
   const statusIcon = (card: PlotCardItem) => {
-    if (generatingId === card.id) return <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
-    if (generatedContent[card.id]) return <CheckCircle2 className="w-4 h-4 text-green-500" />
-    return <FileText className="w-4 h-4 text-content-tertiary" />
+    if (generatingId === card.id) return <Loader2 className="h-4 w-4 shrink-0 animate-spin text-brand" />
+    if (generatedContent[card.id]) return <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
+    return <FileText className="h-4 w-4 shrink-0 text-content-tertiary" />
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
-      <div className="bg-white rounded-modal shadow-xl w-full max-w-2xl mx-4 max-h-[85vh] flex flex-col animate-scale-in" onClick={e => e.stopPropagation()}>
-        {/* 标题 */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-surface-border shrink-0">
-          <div>
-            <h3 className="text-base font-bold text-content">场景生成</h3>
-            <p className="text-xs text-content-secondary mt-0.5">{chapterTitle} — 按剧情卡片分段生成</p>
+  return createPortal(
+    <div className="hh-modal-mask">
+      <div className="hh-modal max-w-[720px]" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true">
+        <div className="hh-modal-head">
+          <div className="min-w-0">
+            <p className="hh-eyebrow">AI 生成</p>
+            <h2 className="mt-2 text-xl font-semibold tracking-tight text-content">场景生成</h2>
+            <p className="mt-1 text-sm leading-6 text-content-secondary">
+              {chapterTitle} — 按剧情卡片分段生成，每张卡片可单独生成或重写。
+            </p>
           </div>
-          <button onClick={onClose} className="p-1 rounded-btn text-content-secondary hover:bg-surface-hover transition-colors">
-            <X className="w-4 h-4" />
+          <button onClick={onClose} className="hh-icon-btn-plain -mr-2 -mt-1" aria-label="关闭">
+            <X className="h-4 w-4" />
           </button>
         </div>
 
-        {/* R8 拆书参考包选择（项目内弹框级别，所有场景卡片共享配置） */}
-        {projectId && (
-          <div className="px-6 py-2 border-b border-surface-border shrink-0">
+        <div className="hh-modal-body space-y-4">
+          {/* R8 拆书参考包选择（项目内弹框级别，所有场景卡片共享配置） */}
+          {projectId && (
             <ReferencePackSelector
               projectId={projectId}
               value={refPack}
@@ -128,75 +131,74 @@ export function SceneGenerator({ chapterOutlineId, chapterTitle, projectId, onCl
               hint="本弹框内生成的所有场景共用该参考配置"
               disabledTitle="使用拆书参考包作为对标"
             />
-          </div>
-        )}
+          )}
 
-        {/* 内容 */}
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
           {loading ? (
-            <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-content-secondary" /></div>
+            <div className="flex justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-brand" />
+            </div>
           ) : plotCards.length === 0 ? (
-            <div className="text-center py-12 text-content-secondary text-sm">
-              该章纲没有关联剧情卡片，请先在故事大纲页关联剧情卡片后再使用场景生成
+            <div className="hh-subpanel flex flex-col items-center px-6 py-12 text-center">
+              <span className="flex h-14 w-14 items-center justify-center bg-brand/10 text-brand">
+                <FileText className="h-7 w-7" />
+              </span>
+              <h3 className="mt-5 text-base font-semibold tracking-tight text-content">还没有关联剧情卡片</h3>
+              <p className="mt-2 max-w-md text-sm leading-6 text-content-secondary">
+                该章纲没有关联剧情卡片，请先在故事大纲页关联剧情卡片后再使用场景生成
+              </p>
             </div>
           ) : (
-            plotCards.map(card => (
-              <div key={card.id} className="border border-surface-border rounded-card p-4 space-y-2">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 flex-1 min-w-0">
-                    {statusIcon(card)}
-                    <h4 className="text-sm font-semibold text-content truncate">{card.title}</h4>
-                    <span className="text-xs text-content-secondary shrink-0">#{card.generation_order + 1}</span>
+            <div className="space-y-3">
+              {plotCards.map(card => (
+                <article key={card.id} className="hh-subpanel space-y-2 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      {statusIcon(card)}
+                      <h4 className="truncate text-sm font-semibold text-content">{card.title}</h4>
+                      <span className="shrink-0 text-xs text-content-tertiary tabular-nums">#{card.generation_order + 1}</span>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-3">
+                      <span className="text-xs text-content-tertiary tabular-nums">
+                        {generatedContent[card.id] ? `${generatedContent[card.id].length} 字` : `目标 ${card.word_count_target} 字`}
+                      </span>
+                      <button
+                        onClick={() => handleGenerateScene(card)}
+                        disabled={!!generatingId}
+                        className={cn('hh-btn-sm', generatedContent[card.id] ? 'hh-btn-secondary' : 'hh-btn-primary')}
+                      >
+                        {generatingId === card.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Play className="h-3.5 w-3.5" />
+                        )}
+                        {generatedContent[card.id] ? '重新生成' : '生成'}
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-xs text-content-secondary">
-                      {generatedContent[card.id] ? `${generatedContent[card.id].length} 字` : `目标 ${card.word_count_target} 字`}
-                    </span>
-                    <button
-                      onClick={() => handleGenerateScene(card)}
-                      disabled={!!generatingId}
-                      className={cn(
-                        'inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded-btn transition-colors disabled:opacity-50',
-                        generatedContent[card.id]
-                          ? 'border border-surface-border text-content-secondary hover:bg-surface-hover'
-                          : 'bg-brand text-white hover:bg-brand-600'
-                      )}
-                    >
-                      {generatingId === card.id ? (
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <Play className="w-3 h-3" />
-                      )}
-                      {generatedContent[card.id] ? '重新生成' : '生成'}
-                    </button>
-                  </div>
-                </div>
-                {card.content && <p className="text-xs text-content-secondary line-clamp-2">{card.content}</p>}
-                {generatedContent[card.id] && (
-                  <div className="bg-surface rounded-lg p-3 max-h-40 overflow-y-auto text-sm text-content whitespace-pre-wrap">
-                    {generatedContent[card.id]}
-                  </div>
-                )}
-              </div>
-            ))
+                  {card.content && <p className="line-clamp-2 text-xs leading-5 text-content-secondary">{card.content}</p>}
+                  {generatedContent[card.id] && (
+                    <div className="max-h-40 overflow-y-auto whitespace-pre-wrap bg-surface-hover p-3 text-sm leading-6 text-content">
+                      {generatedContent[card.id]}
+                    </div>
+                  )}
+                </article>
+              ))}
+            </div>
           )}
         </div>
 
-        {/* 底部 */}
-        <div className="flex justify-end gap-3 px-6 py-4 border-t border-surface-border shrink-0">
-          <button onClick={onClose} className="px-4 py-2 text-sm rounded-btn text-content-secondary hover:bg-surface-hover transition-colors">
+        <div className="hh-modal-foot">
+          <button onClick={onClose} className="hh-btn-ghost">
             关闭
           </button>
           {Object.keys(generatedContent).length > 0 && onComplete && (
-            <button
-              onClick={() => { onComplete(); onClose() }}
-              className="px-4 py-2 text-sm rounded-btn bg-brand text-white hover:bg-brand-600 transition-colors"
-            >
+            <button onClick={() => { onComplete(); onClose() }} className="hh-btn-primary">
               完成并刷新
             </button>
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

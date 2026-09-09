@@ -229,16 +229,16 @@ export function ReferencePackSelector({
   // 关闭态：只显示开关行
   if (!value.enabled) {
     return (
-      <div className="flex items-center justify-between rounded-btn border border-dashed border-surface-border bg-surface px-3 py-2 text-sm">
-        <div className="flex items-center gap-2 text-content-secondary">
-          <Sparkles className="h-3.5 w-3.5 text-brand/60" />
-          <span>{disabledTitle}</span>
-          {hint && <span className="text-[11px] text-content-tertiary">— {hint}</span>}
+      <div className="hh-subpanel flex items-center justify-between gap-3 px-4 py-3 text-sm">
+        <div className="flex min-w-0 items-center gap-2">
+          <Sparkles className="h-4 w-4 shrink-0 text-content-secondary" />
+          <span className="font-medium text-content">{disabledTitle}</span>
+          {hint && <span className="truncate text-[11px] text-content-tertiary">— {hint}</span>}
         </div>
         <button
           type="button"
           onClick={() => onChange({ ...value, enabled: true })}
-          className="rounded-pill border border-brand/40 bg-brand/5 px-3 py-1 text-xs font-medium text-brand hover:bg-brand/10"
+          className="hh-chip shrink-0 text-brand"
         >
           启用
         </button>
@@ -249,8 +249,8 @@ export function ReferencePackSelector({
   // 启用但加载中
   if (loading) {
     return (
-      <div className="flex items-center gap-2 rounded-btn border border-brand/20 bg-brand/[0.04] px-3 py-2 text-sm text-content-secondary">
-        <Loader2 className="h-3.5 w-3.5 animate-spin text-brand/70" />
+      <div className="hh-subpanel flex items-center gap-2 px-4 py-3 text-sm text-content-secondary">
+        <Loader2 className="h-4 w-4 animate-spin text-brand" />
         加载项目挂载的参考包…
       </div>
     );
@@ -259,10 +259,10 @@ export function ReferencePackSelector({
   // 启用但项目未挂载任何 pack / 用户账号下未拆任何书
   if (usablePacks.length === 0) {
     return (
-      <div className="space-y-2 rounded-btn border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm">
+      <div className="space-y-2 border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-amber-700">
-            <Library className="h-3.5 w-3.5" />
+            <Library className="h-4 w-4" />
             <span>
               {projectId ? '项目未挂载任何就绪的参考包' : '你还没有任何拆书参考包'}
             </span>
@@ -270,7 +270,7 @@ export function ReferencePackSelector({
           <button
             type="button"
             onClick={() => onChange({ ...value, enabled: false })}
-            className="rounded-pill border border-surface-border bg-white px-3 py-1 text-xs text-content-secondary hover:bg-surface-hover"
+            className="hh-chip shrink-0"
           >
             关闭
           </button>
@@ -309,17 +309,17 @@ export function ReferencePackSelector({
   }
 
   return (
-    <div className="space-y-3 rounded-btn border border-brand/25 bg-gradient-to-r from-brand/[0.05] to-emerald-500/[0.03] px-3 py-3 text-sm">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-content">
-          <Sparkles className="h-3.5 w-3.5 text-brand" />
+    <div className="space-y-3 border border-brand/25 bg-brand/5 px-4 py-3 text-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2 text-content">
+          <Sparkles className="h-4 w-4 shrink-0 text-brand" />
           <span className="font-medium">{disabledTitle}</span>
-          {hint && <span className="text-[11px] text-content-tertiary">— {hint}</span>}
+          {hint && <span className="truncate text-[11px] text-content-tertiary">— {hint}</span>}
         </div>
         <button
           type="button"
           onClick={() => onChange({ ...DEFAULT_SELECTOR_VALUE })}
-          className="rounded-pill border border-surface-border bg-white px-3 py-1 text-xs text-content-secondary hover:bg-surface-hover"
+          className="hh-chip shrink-0"
         >
           关闭
         </button>
@@ -327,9 +327,9 @@ export function ReferencePackSelector({
 
       {/* 参考包多选（空 = 全部挂载的） */}
       <div>
-        <div className="mb-1 text-xs font-medium text-content-tertiary">
+        <div className="mb-1.5 text-xs font-medium text-content-secondary">
           参考包
-          <span className="ml-1 text-[11px] text-content-tertiary/70">
+          <span className="ml-1 text-[11px] font-normal text-content-tertiary">
             （不勾选则使用全部挂载的 {usablePacks.length} 本）
           </span>
         </div>
@@ -346,11 +346,7 @@ export function ReferencePackSelector({
                     : [...value.packIds, p.pack_id];
                   onChange({ ...value, packIds: next });
                 }}
-                className={`rounded-pill border px-3 py-1 text-xs transition-colors ${
-                  checked
-                    ? 'border-brand bg-brand text-white'
-                    : 'border-surface-border bg-white text-content-secondary hover:bg-surface-hover'
-                }`}
+                className={`hh-chip ${checked ? 'hh-chip--active' : ''}`}
                 title={p.pack_summary.status === 'partial' ? '部分维度未生成' : ''}
               >
                 {p.pack_summary.source_book_title || p.pack_id.slice(0, 8)}
@@ -373,9 +369,9 @@ export function ReferencePackSelector({
       <>
       {/* 维度多选（V3 兼容；V4 后端按场景+模型档位自动决策） */}
       <div>
-        <div className="mb-1 text-xs font-medium text-content-tertiary">
+        <div className="mb-1.5 text-xs font-medium text-content-secondary">
           参考维度
-          <span className="ml-1 text-[11px] text-content-tertiary/70">
+          <span className="ml-1 text-[11px] font-normal text-content-tertiary">
             （不勾选则使用挂载默认值；V4 装配会自适应覆盖）
           </span>
         </div>
@@ -394,13 +390,7 @@ export function ReferencePackSelector({
                     : [...value.dimensions, d];
                   onChange({ ...value, dimensions: next });
                 }}
-                className={`rounded-pill border px-3 py-1 text-xs transition-colors ${
-                  !enabledDim
-                    ? 'border-surface-border text-content-tertiary opacity-40 cursor-not-allowed'
-                    : checked
-                      ? 'border-brand bg-brand text-white'
-                      : 'border-surface-border bg-white text-content-secondary hover:bg-surface-hover'
-                }`}
+                className={`hh-chip ${checked ? 'hh-chip--active' : ''}`}
               >
                 {DIMENSION_LABELS[d]}
               </button>
@@ -411,18 +401,18 @@ export function ReferencePackSelector({
 
       {/* 强度（V3 兼容；V4 后端按场景+模型档位自动决策） */}
       <div>
-        <div className="mb-1 text-xs font-medium text-content-tertiary">参考强度</div>
-        <div className="flex items-center gap-3">
-          <div className="inline-flex overflow-hidden rounded-btn border border-surface-border">
+        <div className="mb-1.5 text-xs font-medium text-content-secondary">参考强度</div>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="inline-flex border border-surface-border bg-white/60 p-1">
             {(Object.keys(STRENGTH_LABELS) as ReferenceStrength[]).map((s) => (
               <button
                 key={s}
                 type="button"
                 onClick={() => onChange({ ...value, strength: s })}
-                className={`px-3 py-1 text-xs transition-colors ${
+                className={`px-3 py-1 text-xs font-medium transition-colors ${
                   value.strength === s
                     ? 'bg-brand text-white'
-                    : 'bg-white text-content-secondary hover:bg-surface-hover'
+                    : 'text-content-secondary hover:text-content'
                 }`}
               >
                 {STRENGTH_LABELS[s]}
@@ -449,16 +439,16 @@ function V4HintAndAdvancedToggle({
   onToggle: () => void;
 }) {
   return (
-    <div className="rounded border border-blue-100 bg-blue-50/60 px-3 py-2 text-[11px] text-blue-700">
+    <div className="border border-surface-border/80 bg-white/70 px-3 py-2 text-[11px] text-content-secondary">
       <div className="flex items-center justify-between gap-2">
         <span>
-          <strong className="font-semibold">V4 自动装配</strong>：系统会按章节场景
+          <strong className="font-semibold text-content">V4 自动装配</strong>：系统会按章节场景
           + 所选模型档位（S/M/L/XL）自动决定该用哪些维度、什么强度。无需手工选。
         </span>
         <button
           type="button"
           onClick={onToggle}
-          className="flex shrink-0 items-center gap-1 rounded border border-blue-200 bg-white px-2 py-0.5 text-[11px] text-blue-700 hover:bg-blue-50"
+          className="hh-chip shrink-0 px-2 py-0.5 text-[11px] font-normal"
         >
           {showAdvanced ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
           高级设置（V3 兼容）
