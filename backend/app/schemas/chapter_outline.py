@@ -1,5 +1,5 @@
 """章纲相关的 Pydantic 模型"""
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
@@ -61,27 +61,7 @@ class ChapterOutlineResponse(ChapterOutlineBase):
     plot_line_count: int = Field(0, description="关联的剧情线数量")
     plot_card_count: int = Field(0, description="关联的剧情卡片数量")
 
-    class Config:
-        from_attributes = True
-        extra = "allow"  # 允许额外字段
-
-
-class ChapterOutlineGenerateRequest(BaseModel):
-    """AI生成章纲请求模型"""
-    project_id: str = Field(..., description="项目ID")
-    plot_line_id: Optional[str] = Field(None, description="基于的剧情线ID")
-    prompt: Optional[str] = Field(None, description="生成提示词")
-    start_chapter: int = Field(1, description="起始章节号", ge=1)
-    chapter_count: int = Field(5, description="生成章节数", ge=1, le=20)
-    target_word_count: int = Field(3000, description="每章目标字数", ge=500, le=10000)
-    based_on_outline: bool = Field(True, description="是否基于现有大纲生成")
-    enable_mcp: bool = Field(False, description="是否启用MCP工具增强")
-    selected_plugins: Optional[List[str]] = Field(None, description="选择的MCP插件列表")
-    auto_generate_plot_cards: bool = Field(True, description="是否自动生成剧情卡片（章纲生成时同时生成关联的剧情卡片）")
-    # R8 拆书参考包显式参数（任一为空则走 injector 默认）
-    pack_ids: Optional[List[str]] = Field(None, description="显式选中的拆书参考包 ID 列表")
-    dimensions: Optional[List[str]] = Field(None, description="显式选中的参考维度")
-    strength: Optional[str] = Field(None, description="参考强度：light/medium/deep")
+    model_config = ConfigDict(from_attributes=True, extra="allow")  # 允许额外字段
 
 
 class ChapterOutlineReorderRequest(BaseModel):

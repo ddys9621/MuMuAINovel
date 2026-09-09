@@ -1,5 +1,5 @@
 """章纲 API 路由"""
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, func, distinct
 from typing import List, Optional
@@ -16,7 +16,7 @@ from app.models import (
 )
 from app.schemas.chapter_outline import (
     ChapterOutlineCreate, ChapterOutlineUpdate, ChapterOutlineResponse,
-    ChapterOutlineGenerateRequest, ChapterOutlineReorderRequest,
+    ChapterOutlineReorderRequest,
     ChapterOutlineListResponse, ChapterOutlineBatchCreateRequest
 )
 from app.schemas.link_schemas import (
@@ -26,8 +26,6 @@ from app.schemas.link_schemas import (
     LinkPlotLinesToChapterRequest, LinkPlotCardsToChapterRequest, UnlinkRequest,
     TimelineCoverageUpdate
 )
-from app.services.ai_service import AIService
-from app.api.settings import get_user_ai_service
 
 router = APIRouter(prefix="/chapter-outlines", tags=["章纲"])
 
@@ -476,100 +474,6 @@ async def batch_create_chapter_outlines(
             outline.characters_involved = []
     
     return created_outlines
-
-
-@router.post("/generate", response_model=List[ChapterOutlineResponse])
-async def generate_chapter_outlines(
-    generate_data: ChapterOutlineGenerateRequest,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    user_ai_service: AIService = Depends(get_user_ai_service)
-):
-    """AI生成章纲"""
-    
-    from app.services.plot_generation_service import PlotGenerationService
-    
-    # 记录MCP状态日志
-    mcp_status = "启用MCP" if generate_data.enable_mcp else "禁用MCP"
-    logger.info(f"🎯 [章纲生成] 项目 {generate_data.project_id}（{mcp_status}）")
-    logger.info(f"  - DEBUG: enable_mcp={generate_data.enable_mcp}, selected_plugins={generate_data.selected_plugins}")
-    if generate_data.enable_mcp and generate_data.selected_plugins:
-        logger.info(f"  - 选择的插件：{generate_data.selected_plugins}")
-    logger.info(f"  - 剧情线ID：{generate_data.plot_line_id or '无'}")
-    logger.info(f"  - 生成数量：{generate_data.chapter_count}章")
-    
-    try:
-        # 使用用户配置的 AI 服务创建生成服务实例
-        plot_generation_service = PlotGenerationService(user_ai_service)
-        
-        # 调用生成服务
-        outlines = await plot_generation_service.generate_chapter_outlines(
-            db=db,
-            project_id=generate_data.project_id,
-            plot_line_id=generate_data.plot_line_id,
-            start_chapter=generate_data.start_chapter,
-            chapter_count=generate_data.chapter_count,
-            target_word_count=generate_data.target_word_count,
-            custom_prompt=generate_data.prompt,
-            enable_mcp=generate_data.enable_mcp,
-            selected_plugins=generate_data.selected_plugins,
-            user_id=getattr(request.state, 'user_id', None),
-            # R8 拆书参考包显式参数透传
-            pack_ids=generate_data.pack_ids,
-            dimensions=generate_data.dimensions,
-            strength=generate_data.strength,
-        )
-        
-        for outline in outlines:
-            db.expunge(outline)
-            if outline.key_events:
-                try:
-                    outline.key_events = json.loads(outline.key_events)
-                except:
-                    outline.key_events = []
-            else:
-                outline.key_events = []
-                
-            if outline.characters_involved:
-                try:
-                    outline.characters_involved = json.loads(outline.characters_involved)
-                except:
-                    outline.characters_involved = []
-            else:
-                outline.characters_involved = []
-        
-        return outlines
-        
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        # 特殊处理 MCP 异常
-        from app.exceptions import MCPToolNotTriggeredError, MCPPlanningFailedError
-
-        if isinstance(e, MCPToolNotTriggeredError):
-            # 简化日志：底层已记录详细信息
-            logger.warning("⚠️ MCP 工具未触发，返回 400 错误")
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": "mcp_tool_not_triggered",
-                    "message": str(e),
-                    "suggestion": "请检查 MCP 插件选择，或禁用 MCP 后重试"
-                }
-            )
-        elif isinstance(e, MCPPlanningFailedError):
-            # 简化日志：底层已记录详细信息
-            logger.warning("⚠️ MCP 规划失败，返回 500 错误")
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "error": "mcp_planning_failed",
-                    "message": str(e),
-                    "suggestion": "MCP 规划阶段失败，请稍后重试或联系管理员"
-                }
-            )
-        else:
-            raise HTTPException(status_code=500, detail=f"生成失败: {str(e)}")
 
 
 @router.get("/project/{project_id}/statistics")
