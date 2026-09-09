@@ -2004,6 +2004,14 @@ async def cleanup_wizard_generator(
         )
         chapter_outlines = chapter_outlines_result.scalars().all()
         chapter_outlines_count = len(chapter_outlines)
+
+        # 统计桥段（剧情线的下游产物，重跑上游节点时必须一并删除）
+        from app.models.plot_bridge import PlotBridge
+        plot_bridges_result = await db.execute(
+            select(PlotBridge).where(PlotBridge.project_id == project_id)
+        )
+        plot_bridges = plot_bridges_result.scalars().all()
+        plot_bridges_count = len(plot_bridges)
         
         # 统计章节
         chapters_result = await db.execute(
@@ -2020,7 +2028,7 @@ async def cleanup_wizard_generator(
         memories_count = len(memories)
         
         yield await SSEResponse.send_progress(
-            f"找到 {characters_count} 个角色，{outlines_count} 个大纲，{plot_lines_count} 条剧情线，{plot_cards_count} 张剧情卡片，{chapter_outlines_count} 个章纲，{chapters_count} 个章节，{memories_count} 条记忆",
+            f"找到 {characters_count} 个角色，{outlines_count} 个大纲，{plot_lines_count} 条剧情线，{plot_bridges_count} 个桥段，{plot_cards_count} 张剧情卡片，{chapter_outlines_count} 个章纲，{chapters_count} 个章节，{memories_count} 条记忆",
             30
         )
         
@@ -2057,6 +2065,12 @@ async def cleanup_wizard_generator(
             yield await SSEResponse.send_progress("删除剧情卡片...", 70)
             for plot_card in plot_cards:
                 await db.delete(plot_card)
+
+        # 4.5 删除桥段（先于剧情线，避免 FK SET NULL 留下孤儿骨架）
+        if plot_bridges_count > 0:
+            yield await SSEResponse.send_progress("删除桥段骨架...", 72)
+            for plot_bridge in plot_bridges:
+                await db.delete(plot_bridge)
 
         # 5. 删除剧情线
         if plot_lines_count > 0:
@@ -2119,6 +2133,7 @@ async def cleanup_wizard_generator(
                 "characters": characters_count,
                 "outlines": outlines_count,
                 "plot_lines": plot_lines_count,
+                "plot_bridges": plot_bridges_count,
                 "plot_cards": plot_cards_count,
                 "chapter_outlines": chapter_outlines_count,
                 "chapters": chapters_count,
