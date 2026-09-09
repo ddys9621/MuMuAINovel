@@ -1,5 +1,9 @@
 """AI服务封装 - 统一的OpenAI和Claude接口"""
 import asyncio
+import contextlib
+import time
+from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import Optional, AsyncGenerator, AsyncIterator, List, Dict, Any, Awaitable, Callable
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
@@ -9,6 +13,83 @@ import httpx
 import json
 
 logger = get_logger(__name__)
+
+
+# ============================================================
+# 流式响应"零正文"与 finish_reason 透传
+# ----------------------------------------------------------------
+# 事故（2026-09，桥段填充）：推理模型 deepseek-v4-flash 经 OpenAI 兼容网关
+# 流式返回时，8000 max_tokens 全部被 reasoning_content 消耗，content 一个字
+# 没出、finish_reason=length。旧实现只打 WARNING 后正常结束流，
+# generate_text_stream_collect 返回 {"content": "", "finish_reason": "stream_complete"}，
+# 业务层最终报出误导性的"桥段数量不符：期望 [1, 2]，LLM 返回 []"；
+# 直接消费流的章节/场景生成则会把空正文当成功落库（status=completed）。
+# ----------------------------------------------------------------
+# 设计：
+# - 流结束时若一个正文 chunk 都没有 → 抛 AIEmptyResponseError（ValueError 子类，
+#   与非流式路径 "AI返回了空内容" 的 except ValueError 兼容），消息直接给出
+#   可操作的诊断（推理耗尽 max_tokens → 调大 Max Tokens / 换非推理模型）
+# - 有正文但被截断（length）不抛：直接消费流的调用方已把内容推给了前端；
+#   通过 ContextVar 把真实 finish_reason 交给 generate_text_stream_collect，
+#   由 JSON 类业务层自行判定"截断即失败"
+# - 用 ContextVar 而非实例属性：模块级单例 ai_service 会被多个请求并发共用；
+#   async generator 与调用方共享同一 context，流结束后调用方即可读取
+# ============================================================
+
+_last_stream_finish_reason: ContextVar[Optional[str]] = ContextVar(
+    "mumu_last_stream_finish_reason", default=None
+)
+
+# 推理过程观察钩子：_generate_openai_stream 每收到 reasoning delta 就回调累计字符数。
+# 只给 generate_text_stream_events 用（桥段填充 UX 的"思考中 N 字"），不传思考文本本身。
+_stream_reasoning_sink: ContextVar[Optional[Callable[[int], None]]] = ContextVar(
+    "mumu_stream_reasoning_sink", default=None
+)
+
+
+@dataclass
+class StreamEvent:
+    """generate_text_stream_events 的事件。kind: content / reasoning / heartbeat / done。"""
+    kind: str
+    text: str = ""
+    reasoning_chars: int = 0
+    elapsed: float = 0.0
+    finish_reason: Optional[str] = None
+
+
+class AIEmptyResponseError(ValueError):
+    """流式响应结束时没有任何正文（content）。
+
+    Attributes:
+        finish_reason: 上游给出的完成原因（openai: stop/length…；anthropic 已归一化 max_tokens→length）
+        reasoning_chars: 期间收到的思考过程字符数（reasoning_content / reasoning），0 表示未见到
+    """
+
+    def __init__(self, message: str, *, finish_reason: Optional[str], reasoning_chars: int = 0):
+        super().__init__(message)
+        self.finish_reason = finish_reason
+        self.reasoning_chars = reasoning_chars
+
+
+def _empty_stream_error(
+    *, model: str, max_tokens: int, finish_reason: Optional[str], reasoning_chars: int
+) -> AIEmptyResponseError:
+    """把"零正文"流的现场信息翻译成用户能直接采取行动的错误。"""
+    if finish_reason == "length":
+        if reasoning_chars:
+            message = (
+                f"模型 {model} 未输出任何正文：设置中的 Max Tokens（{max_tokens}）已被思考过程"
+                f"（约 {reasoning_chars} 字符）全部耗尽。请在「设置」中调大 Max Tokens，"
+                f"或改用非推理模型 / 关闭该模型的思考模式后重试"
+            )
+        else:
+            message = (
+                f"模型 {model} 未输出任何正文即达到 Max Tokens 上限（{max_tokens}）。"
+                f"请在「设置」中调大 Max Tokens，或检查该网关是否把推理内容放在了非标准字段"
+            )
+    else:
+        message = f"模型 {model} 返回了空内容（finish_reason: {finish_reason}），请检查 API 配置或稍后重试"
+    return AIEmptyResponseError(message, finish_reason=finish_reason, reasoning_chars=reasoning_chars)
 
 
 # ============================================================
@@ -174,6 +255,48 @@ async def _stream_with_retry(
     raise last_exc
 
 
+# ============================================================
+# Provider 归一化 / OpenAI 协议兼容工具
+# ============================================================
+
+# OpenAI 官方默认 Base URL（用户未填 base_url 时手写 HTTP 路径的兜底，
+# 否则会拼出 "None/chat/completions"）
+DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
+
+
+def _normalize_provider(provider: Optional[str]) -> Optional[str]:
+    """归一化提供商标识。
+
+    前端提供 openai / anthropic / custom 三个选项；"custom"（以及 azure 等
+    任何 OpenAI 兼容网关）统一按 OpenAI 协议处理——请求路径 /chat/completions、
+    Bearer 鉴权、SSE data: 行 + [DONE] 终止，与设置页"获取模型列表"的假设一致。
+    此前 custom 会导致用户 key/base_url 被丢弃、生成分发直接抛
+    "不支持的AI提供商: custom"，三个选项之一整体不可用。
+    """
+    if provider is None:
+        return None
+    p = provider.strip().lower()
+    if not p:
+        return None
+    if p in ("openai", "anthropic"):
+        return p
+    logger.info(f"[AIService] provider='{provider}' 按 OpenAI 兼容协议处理")
+    return "openai"
+
+
+def _is_max_tokens_unsupported_error(body_text: str) -> bool:
+    """判定 400 是否为官方新模型的 max_tokens 参数弃用错误。
+
+    OpenAI o 系 / 新一代模型已弃用 max_tokens，要求 max_completion_tokens，
+    典型报错：Unsupported parameter: 'max_tokens' is not supported with this
+    model. Use 'max_completion_tokens' instead.
+    """
+    b = (body_text or "").lower()
+    return "max_completion_tokens" in b and (
+        "unsupported" in b or "not supported" in b or "instead" in b
+    )
+
+
 class AIService:
     """AI服务统一接口 - 支持从用户设置或全局配置初始化"""
     
@@ -198,7 +321,14 @@ class AIService:
             default_max_tokens: 默认最大tokens，为None时使用全局配置
         """
         # 保存用户设置或使用全局配置
-        self.api_provider = api_provider or app_settings.default_ai_provider
+        # provider 先归一化（custom 等 OpenAI 兼容标识 → "openai"），
+        # 否则下方 `api_provider == "openai"` 判断会把用户 key/base_url 全部丢弃
+        api_provider = _normalize_provider(api_provider)
+        self.api_provider = (
+            api_provider
+            or _normalize_provider(app_settings.default_ai_provider)
+            or "openai"
+        )
         self.default_model = default_model or app_settings.default_model
         # 使用 is not None 判断，允许 temperature=0 的有效值
         self.default_temperature = default_temperature if default_temperature is not None else app_settings.default_temperature
@@ -237,7 +367,9 @@ class AIService:
                 self.openai_client = AsyncOpenAI(**client_kwargs)
                 self.openai_http_client = http_client
                 self.openai_api_key = openai_key
-                self.openai_base_url = base_url
+                # 手写 HTTP 路径的 base：未配置时兜底官方地址（否则拼出 "None/chat/completions"），
+                # 并去掉尾部斜杠避免 "…/v1//chat/completions"
+                self.openai_base_url = (base_url or DEFAULT_OPENAI_BASE_URL).rstrip("/")
                 logger.info("✅ OpenAI客户端初始化成功")
             except Exception as e:
                 logger.error(f"OpenAI客户端初始化失败: {e}")
@@ -301,7 +433,6 @@ class AIService:
         provider: Optional[str] = None,
         model: Optional[str] = None,
         temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
         system_prompt: Optional[str] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[str] = None,
@@ -309,13 +440,14 @@ class AIService:
     ) -> Dict[str, Any]:
         """
         生成文本（支持工具调用）
+
+        max_tokens 不作为参数暴露：统一取用户设置（self.default_max_tokens），调用方不得覆盖。
         
         Args:
             prompt: 用户提示词
             provider: AI提供商 (openai/anthropic)
             model: 模型名称
             temperature: 温度参数
-            max_tokens: 最大token数
             system_prompt: 系统提示词
             tools: 可用工具列表（MCP工具格式）
             tool_choice: 工具选择策略 (auto/required/none)
@@ -328,11 +460,12 @@ class AIService:
             - tool_calls: 工具调用列表（如果AI决定调用工具）
             - finish_reason: 完成原因
         """
-        provider = provider or self.api_provider
+        # 调用方可能显式传 "custom"（如设置页测试连接），此处同样归一化
+        provider = _normalize_provider(provider) or self.api_provider
         model = model or self.default_model
-        # 使用 is not None 判断，允许 temperature=0 和 max_tokens=0 的有效值
+        # 使用 is not None 判断，允许 temperature=0 的有效值
         temperature = temperature if temperature is not None else self.default_temperature
-        max_tokens = max_tokens if max_tokens is not None else self.default_max_tokens
+        max_tokens = self.default_max_tokens
 
         if provider == "openai":
             return await self._generate_openai_with_tools(
@@ -355,28 +488,29 @@ class AIService:
         provider: Optional[str] = None,
         model: Optional[str] = None,
         temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
         system_prompt: Optional[str] = None
     ) -> AsyncGenerator[str, None]:
         """
         流式生成文本
+
+        max_tokens 不作为参数暴露：统一取用户设置（self.default_max_tokens），调用方不得覆盖。
         
         Args:
             prompt: 用户提示词
             provider: AI提供商
             model: 模型名称
             temperature: 温度参数
-            max_tokens: 最大token数
             system_prompt: 系统提示词
             
         Yields:
             生成的文本片段
         """
-        provider = provider or self.api_provider
+        # 同 generate_text：显式传入的 "custom" 也按 OpenAI 兼容协议归一化
+        provider = _normalize_provider(provider) or self.api_provider
         model = model or self.default_model
-        # 使用 is not None 判断，允许 temperature=0 和 max_tokens=0 的有效值
+        # 使用 is not None 判断，允许 temperature=0 的有效值
         temperature = temperature if temperature is not None else self.default_temperature
-        max_tokens = max_tokens if max_tokens is not None else self.default_max_tokens
+        max_tokens = self.default_max_tokens
 
         if provider == "openai":
             async for chunk in self._generate_openai_stream(
@@ -397,7 +531,6 @@ class AIService:
         provider: Optional[str] = None,
         model: Optional[str] = None,
         temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
         system_prompt: Optional[str] = None,
         context: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -412,24 +545,29 @@ class AIService:
           （避免重复内容污染 JSON 解析）
 
         Args:
-            prompt / provider / model / temperature / max_tokens / system_prompt: 同 generate_text
+            prompt / provider / model / temperature / system_prompt: 同 generate_text
             context: 仅用于日志标记（不影响逻辑），便于排查跨调用方的流式累积日志
 
         Returns:
-            {"content": <累积后的完整文本>, "finish_reason": "stream_complete"}
+            {"content": <累积后的完整文本>, "finish_reason": <上游真实完成原因>}
+            finish_reason 取 OpenAI 语义（"stop" / "length" …，anthropic 的 max_tokens 已归一化为
+            "length"）；底层流未提供时退回 "stream_complete"。业务层对 JSON 输出应把
+            "length" 视为失败（内容被 max_tokens 截断，json_repair 补全括号也只是残缺数据）。
 
         Raises:
-            底层流式异常会原样抛出；调用方应像 `generate_text` 一样捕获并处理。
+            AIEmptyResponseError: 流结束却没有任何正文（典型：推理模型把 max_tokens 全耗在思考上）
+            其余底层流式异常原样抛出；调用方应像 `generate_text` 一样捕获并处理。
         """
         label = context or f"stream-collect-{model or self.default_model}"
         accumulated_chunks: list[str] = []
         chunk_count = 0
+        # 先清空，避免同一 context 内上一次调用的 finish_reason 残留到本次
+        _last_stream_finish_reason.set(None)
         async for chunk in self.generate_text_stream(
             prompt=prompt,
             provider=provider,
             model=model,
             temperature=temperature,
-            max_tokens=max_tokens,
             system_prompt=system_prompt,
         ):
             if chunk:
@@ -437,118 +575,89 @@ class AIService:
                 chunk_count += 1
 
         content = "".join(accumulated_chunks)
+        finish_reason = _last_stream_finish_reason.get() or "stream_complete"
         logger.info(
-            "✅ [%s] 流式累积完成: chunks=%d, content_len=%d",
-            label, chunk_count, len(content),
+            "✅ [%s] 流式累积完成: chunks=%d, content_len=%d, finish_reason=%s",
+            label, chunk_count, len(content), finish_reason,
         )
         return {
             "content": content,
-            "finish_reason": "stream_complete",
+            "finish_reason": finish_reason,
         }
 
-    async def _generate_openai(
+    async def generate_text_stream_events(
         self,
         prompt: str,
-        model: str,
-        temperature: float,
-        max_tokens: int,
-        system_prompt: Optional[str]
-    ) -> str:
-        """使用OpenAI生成文本"""
-        if not self.openai_http_client:
-            raise ValueError("OpenAI客户端未初始化，请检查API key配置")
-        
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-        
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        temperature: Optional[float] = None,
+        system_prompt: Optional[str] = None,
+        *,
+        heartbeat_interval: float = 1.0,
+        reasoning_min_interval: float = 0.5,
+    ) -> AsyncGenerator[StreamEvent, None]:
+        """把底层流拆成事件：content / reasoning（节流）/ heartbeat（静默超时）/ done。
+
+        设计：底层 generate_text_stream 在独立 Task 里跑，通过 Queue 交给消费方，
+        这样推理模型思考阶段（可能 60-100s 没有任何正文）消费方仍能按节奏拿到
+        reasoning 计数或 heartbeat，把"还活着"传给前端。
+        - reasoning 字符数来自 _stream_reasoning_sink（生产者任务内设置，同一 context）
+        - finish_reason 由生产者任务在流结束后读 _last_stream_finish_reason（子任务 context 独立，
+          不能在消费方读）
+        - 底层异常在消费方 re-raise；消费方提前退出 → 取消生产者
+        """
+        queue: asyncio.Queue = asyncio.Queue()
+        started = time.monotonic()
+        reasoning_total = 0
+        last_reasoning_emit = float("-inf")
+
+        def _sink(total: int) -> None:
+            nonlocal reasoning_total, last_reasoning_emit
+            reasoning_total = total
+            now = time.monotonic()
+            if now - last_reasoning_emit >= reasoning_min_interval:
+                last_reasoning_emit = now
+                queue.put_nowait(("reasoning", total))
+
+        async def _producer() -> None:
+            _stream_reasoning_sink.set(_sink)
+            _last_stream_finish_reason.set(None)
+            try:
+                async for chunk in self.generate_text_stream(
+                    prompt=prompt, provider=provider, model=model,
+                    temperature=temperature, system_prompt=system_prompt,
+                ):
+                    if chunk:
+                        queue.put_nowait(("content", chunk))
+                queue.put_nowait(("done", _last_stream_finish_reason.get() or "stream_complete"))
+            except asyncio.CancelledError:
+                raise
+            except BaseException as exc:  # noqa: BLE001 - 交给消费方 re-raise
+                queue.put_nowait(("error", exc))
+
+        task = asyncio.create_task(_producer())
         try:
-            logger.info(f"🔵 开始调用OpenAI API（直接HTTP请求）")
-            logger.info(f"  - 模型: {model}")
-            logger.info(f"  - 温度: {temperature}")
-            logger.info(f"  - 最大tokens: {max_tokens}")
-            logger.info(f"  - Prompt长度: {len(prompt)} 字符")
-            logger.info(f"  - 消息数量: {len(messages)}")
-            
-            url = f"{self.openai_base_url}/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {self.openai_api_key}",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "model": model,
-                "messages": messages,
-                "temperature": temperature,
-                "max_tokens": max_tokens
-            }
-            
-            logger.debug(f"  - 请求URL: {url}")
-            logger.debug(f"  - 请求头: Authorization=Bearer ***")
-
-            # T2.3: 用 retry helper 包裹 HTTP 请求，瞬时失败自动重试 3 次
-            async def _do_request():
-                resp = await self.openai_http_client.post(url, headers=headers, json=payload)
-                resp.raise_for_status()
-                return resp
-
-            response = await _call_with_retry(
-                _do_request, context=f"OpenAI-{model}",
-            )
-
-            data = response.json()
-
-            logger.info(f"✅ OpenAI API调用成功")
-            logger.info(f"  - 响应ID: {data.get('id', 'N/A')}")
-            logger.info(f"  - 选项数量: {len(data.get('choices', []))}")
-            logger.debug(f"  - 完整API响应: {data}")
-            
-            if not data.get('choices'):
-                logger.error("❌ OpenAI返回的choices为空")
-                raise ValueError("API返回的响应格式错误：choices字段为空")
-            
-            choice = data['choices'][0]
-            message = choice.get('message', {})
-            finish_reason = choice.get('finish_reason')
-            
-            # DeepSeek R1特殊处理：只使用content（最终答案），忽略reasoning_content（思考过程）
-            # reasoning_content是AI的思考过程，不是我们需要的JSON结果
-            content = message.get('content', '')
-            
-            # 检查是否因达到长度限制而截断
-            if finish_reason == 'length':
-                logger.warning(f"⚠️  响应因达到max_tokens限制而被截断")
-                logger.warning(f"  - 当前max_tokens: {max_tokens}")
-                logger.warning(f"  - 建议: 增加max_tokens参数（推荐2000+）")
-            
-            if content:
-                logger.info(f"  - 返回内容长度: {len(content)} 字符")
-                logger.info(f"  - 完成原因: {finish_reason}")
-                logger.info(f"  - 返回内容预览（前200字符）: {content[:200]}")
-                return content
-            else:
-                logger.error("❌ AI返回了空内容")
-                logger.error(f"  - 完整响应: {data}")
-                logger.error(f"  - 完成原因: {finish_reason}")
-                
-                # 提供更详细的错误信息
-                if finish_reason == 'length':
-                    raise ValueError(f"AI响应被截断且无有效内容。请增加max_tokens参数（当前: {max_tokens}，建议: 2000+）")
+            while True:
+                try:
+                    kind, payload = await asyncio.wait_for(queue.get(), timeout=heartbeat_interval)
+                except asyncio.TimeoutError:
+                    yield StreamEvent("heartbeat", reasoning_chars=reasoning_total, elapsed=time.monotonic() - started)
+                    continue
+                elapsed = time.monotonic() - started
+                if kind == "content":
+                    yield StreamEvent("content", text=payload, reasoning_chars=reasoning_total, elapsed=elapsed)
+                elif kind == "reasoning":
+                    yield StreamEvent("reasoning", reasoning_chars=payload, elapsed=elapsed)
+                elif kind == "done":
+                    yield StreamEvent("done", reasoning_chars=reasoning_total, elapsed=elapsed, finish_reason=payload)
+                    return
                 else:
-                    raise ValueError(f"AI返回了空内容（finish_reason: {finish_reason}），请检查API配置或稍后重试")
-            
-        except httpx.HTTPStatusError as e:
-            logger.error(f"❌ OpenAI API调用失败 (HTTP {e.response.status_code})")
-            logger.error(f"  - 错误信息: {e.response.text}")
-            logger.error(f"  - 模型: {model}")
-            raise Exception(f"API返回错误 ({e.response.status_code}): {e.response.text}")
-        except Exception as e:
-            logger.error(f"❌ OpenAI API调用失败")
-            logger.error(f"  - 错误类型: {type(e).__name__}")
-            logger.error(f"  - 错误信息: {str(e)}")
-            logger.error(f"  - 模型: {model}")
-            raise
-    
+                    raise payload
+        finally:
+            if not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
 
     async def _generate_openai_with_tools(
         self,
@@ -615,6 +724,17 @@ class AIService:
             # T2.3: 用 retry helper 包裹 HTTP 请求，瞬时失败自动重试 3 次
             async def _do_request():
                 resp = await self.openai_http_client.post(url, headers=headers, json=payload)
+                # 官方新模型弃用 max_tokens：400 时自动换 max_completion_tokens 重发一次
+                if (
+                    resp.status_code == 400
+                    and "max_tokens" in payload
+                    and _is_max_tokens_unsupported_error(resp.text)
+                ):
+                    payload["max_completion_tokens"] = payload.pop("max_tokens")
+                    logger.warning(
+                        f"⚠️ 模型 {model} 不支持 max_tokens，已自动换用 max_completion_tokens 重试"
+                    )
+                    resp = await self.openai_http_client.post(url, headers=headers, json=payload)
                 resp.raise_for_status()
                 return resp
 
@@ -776,16 +896,32 @@ class AIService:
             "stream": True
         }
 
+        max_tokens_swapped = False
+
         async def _stream_once() -> AsyncIterator[str]:
             """单次建流 + 转发 chunk 的内部生成器。每次 retry 都会重新调用。"""
+            nonlocal max_tokens_swapped
             async with self.openai_http_client.stream(
                 'POST', url, headers=headers, json=payload,
             ) as response:
+                if response.status_code == 400 and not max_tokens_swapped and "max_tokens" in payload:
+                    # 官方新模型弃用 max_tokens：读取错误体判定后换参重开一次流
+                    body = (await response.aread()).decode("utf-8", errors="replace")
+                    if _is_max_tokens_unsupported_error(body):
+                        max_tokens_swapped = True
+                        payload["max_completion_tokens"] = payload.pop("max_tokens")
+                        logger.warning(
+                            f"⚠️ 模型 {model} 不支持 max_tokens，已自动换用 max_completion_tokens 重开流"
+                        )
+                        async for chunk in _stream_once():
+                            yield chunk
+                        return
                 response.raise_for_status()
                 logger.info(f"✅ OpenAI流式API连接成功，开始接收数据...")
 
                 chunk_count = 0
                 has_content = False
+                reasoning_chars = 0
                 finish_reason = None
 
                 async for line in response.aiter_lines():
@@ -806,21 +942,35 @@ class AIService:
                     delta = choice.get('delta', {})
                     finish_reason = choice.get('finish_reason') or finish_reason
 
-                    # DeepSeek R1: 只取 content，忽略 reasoning_content
+                    # 推理模型：只取 content，思考过程不进正文（仅统计长度用于诊断 / UX 计数）。
+                    # DeepSeek/SiliconFlow/火山用 reasoning_content，OpenRouter 用 reasoning
+                    reasoning_delta = len(delta.get('reasoning_content') or '') + len(delta.get('reasoning') or '')
+                    if reasoning_delta:
+                        reasoning_chars += reasoning_delta
+                        sink = _stream_reasoning_sink.get()
+                        if sink is not None:
+                            sink(reasoning_chars)
                     content = delta.get('content', '')
                     if content:
                         chunk_count += 1
                         has_content = True
                         yield content
 
-                if finish_reason == 'length':
-                    logger.warning(f"⚠️  流式响应因达到max_tokens限制而被截断")
-                    logger.warning(f"  - 当前max_tokens: {max_tokens}")
-                    logger.warning(f"  - 建议: 增加max_tokens参数（推荐2000+）")
+                _last_stream_finish_reason.set(finish_reason)
 
                 if not has_content:
-                    logger.warning(f"⚠️  流式响应未返回任何内容")
-                    logger.warning(f"  - 完成原因: {finish_reason}")
+                    err = _empty_stream_error(
+                        model=model, max_tokens=max_tokens,
+                        finish_reason=finish_reason, reasoning_chars=reasoning_chars,
+                    )
+                    logger.error(f"❌ 流式响应未返回任何正文: {err}")
+                    raise err
+
+                if finish_reason == 'length':
+                    logger.warning(
+                        f"⚠️  流式输出达到 max_tokens 上限被截断（设置中的 Max Tokens = {max_tokens}），"
+                        f"如需更长输出请在设置中调大"
+                    )
 
                 logger.info(
                     f"✅ OpenAI流式生成完成，共接收 {chunk_count} 个chunk，完成原因: {finish_reason}"
@@ -849,31 +999,6 @@ class AIService:
             logger.error(f"  - 错误类型: {type(e).__name__}")
             raise
     
-    async def _generate_anthropic(
-        self,
-        prompt: str,
-        model: str,
-        temperature: float,
-        max_tokens: int,
-        system_prompt: Optional[str]
-    ) -> str:
-        """使用Anthropic生成文本"""
-        if not self.anthropic_client:
-            raise ValueError("Anthropic客户端未初始化，请检查API key配置")
-        
-        try:
-            response = await self.anthropic_client.messages.create(
-                model=model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                system=system_prompt or "",
-                messages=[{"role": "user", "content": prompt}]
-            )
-            return response.content[0].text
-        except Exception as e:
-            logger.error(f"Anthropic API调用失败: {str(e)}")
-            raise
-    
     async def _generate_anthropic_stream(
         self,
         prompt: str,
@@ -891,21 +1016,40 @@ class AIService:
         logger.info(f"  - Prompt长度: {len(prompt)} 字符")
         logger.info(f"  - 最大tokens: {max_tokens}")
 
+        stream_kwargs: Dict[str, Any] = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        # 官方语义：system 可省略；不要传空串占位
+        if system_prompt:
+            stream_kwargs["system"] = system_prompt
+
         async def _stream_once() -> AsyncIterator[str]:
             """单次建流 + 转发 chunk 的内部生成器。每次 retry 都会重新调用。"""
-            async with self.anthropic_client.messages.stream(
-                model=model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                system=system_prompt or "",
-                messages=[{"role": "user", "content": prompt}]
-            ) as stream:
+            async with self.anthropic_client.messages.stream(**stream_kwargs) as stream:
                 logger.info(f"✅ Anthropic流式API连接成功，开始接收数据...")
                 chunk_count = 0
                 async for text in stream.text_stream:
                     chunk_count += 1
                     yield text
-                logger.info(f"✅ Anthropic流式生成完成，共接收 {chunk_count} 个chunk")
+
+                # 归一化到 OpenAI 语义：max_tokens → length，其余（end_turn/stop_sequence…）原样
+                try:
+                    stop_reason = (await stream.get_final_message()).stop_reason
+                except Exception:  # 网关连 message_start 都没回时 SDK 断言失败：拿不到 stop_reason 不影响后续判定
+                    stop_reason = None
+                finish_reason = "length" if stop_reason == "max_tokens" else stop_reason
+                _last_stream_finish_reason.set(finish_reason)
+
+                if chunk_count == 0:
+                    err = _empty_stream_error(
+                        model=model, max_tokens=max_tokens, finish_reason=finish_reason, reasoning_chars=0,
+                    )
+                    logger.error(f"❌ Anthropic流式响应未返回任何正文: {err}")
+                    raise err
+                logger.info(f"✅ Anthropic流式生成完成，共接收 {chunk_count} 个chunk，完成原因: {finish_reason}")
 
         try:
             async for chunk in _stream_with_retry(
