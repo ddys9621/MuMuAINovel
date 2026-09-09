@@ -36,6 +36,12 @@ Strength = Literal["off", "light", "medium", "deep"]
 
 MODEL_TIERS: dict[str, ModelTier] = {
     # === XL 旗舰 ===
+    "deepseek-v4":            "XL",   # V4 Flash/Pro：上下文 1M（HF 模型卡），前缀覆盖 -flash / -pro
+    "deepseek-v3.2":          "XL",   # 128K；必须排在 L 段 "deepseek-v3" 之前，否则被前缀吞掉
+    "claude-sonnet-4":        "XL",   # 200K，前缀覆盖 4 / 4-5 / 4-6
+    "gpt-4.1":                "XL",   # 1M
+    "gpt-5":                  "XL",
+    "gemini-2.5":             "XL",   # 1M
     "claude-sonnet-4-5":      "XL",
     "claude-opus-4":          "XL",
     "claude-3-5-sonnet":      "XL",
@@ -82,23 +88,37 @@ MODEL_TIERS: dict[str, ModelTier] = {
 }
 
 
+def normalize_model_name(model_name: str) -> str:
+    """归一化模型名用于查表：小写 + 去掉 'vendor/' 路由前缀。
+
+    网关（SiliconFlow / OpenRouter / 火山）返回的模型名常带厂商前缀，如
+    'deepseek-ai/DeepSeek-V4-Flash'；直接前缀匹配会全部落到 _default（M 档），
+    旗舰模型只拿到 32K 档的槽位预算（2026-09 桥段评审问题 B）。
+    """
+    name = (model_name or "").strip().lower()
+    if "/" in name:
+        name = name.rsplit("/", 1)[-1]
+    return name
+
+
 def get_model_tier(model_name: str) -> ModelTier:
     """查表获取模型档位（零计算）。
 
     Args:
-        model_name: 模型名（如 'deepseek-v3'）
+        model_name: 模型名（如 'deepseek-v3'、'deepseek-ai/DeepSeek-V4-Flash'）
 
     Returns:
         S / M / L / XL 之一
     """
-    if not model_name:
+    name = normalize_model_name(model_name)
+    if not name:
         return MODEL_TIERS["_default"]
     # 先精确匹配
-    if model_name in MODEL_TIERS:
-        return MODEL_TIERS[model_name]
+    if name in MODEL_TIERS:
+        return MODEL_TIERS[name]
     # 再做前缀匹配（兼容带版本后缀的模型名，如 'deepseek-v3-0324'）
     for key, tier in MODEL_TIERS.items():
-        if key != "_default" and model_name.startswith(key):
+        if key != "_default" and name.startswith(key):
             return tier
     return MODEL_TIERS["_default"]
 

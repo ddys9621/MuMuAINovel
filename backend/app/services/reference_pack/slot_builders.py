@@ -96,7 +96,7 @@ async def build_project_skeleton(db: AsyncSession, ctx: Any) -> str:
         f"氛围：{project.world_atmosphere or '未设定'}",
     ]
     if project.world_rules:
-        lines.append(f"规则：{project.world_rules[:300]}")
+        lines.append(f"规则：{project.world_rules[:600]}")
     return "\n".join(lines)
 
 

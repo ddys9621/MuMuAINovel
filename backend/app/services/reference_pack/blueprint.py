@@ -67,7 +67,7 @@ STRENGTH_BUDGET: dict[Strength, int] = {
 BUSINESS_SLOT_TOKENS: dict[ModelTier, dict[str, int]] = {
     "S": {
         "system_role": 100, "system_base_style": 700,
-        "project_skeleton": 500, "chapter_outline": 400,
+        "project_skeleton": 600, "chapter_outline": 400,
         "bridge_position": 500,
         "plot_lines_with_beats": 1200,  # V4.1 方案 C：主线+节点+配额，S 档紧
         "history_full": 400, "history_normal": 200, "history_brief": 160,
@@ -76,7 +76,7 @@ BUSINESS_SLOT_TOKENS: dict[ModelTier, dict[str, int]] = {
     },
     "M": {
         "system_role": 100, "system_base_style": 700,
-        "project_skeleton": 600, "chapter_outline": 500,
+        "project_skeleton": 1200, "chapter_outline": 500,
         "bridge_position": 600,
         "plot_lines_with_beats": 1800,  # V4.1 方案 C：M 档允许多节点展开
         "history_full": 400, "history_normal": 400, "history_brief": 240,
@@ -85,7 +85,7 @@ BUSINESS_SLOT_TOKENS: dict[ModelTier, dict[str, int]] = {
     },
     "L": {
         "system_role": 100, "system_base_style": 700,
-        "project_skeleton": 800, "chapter_outline": 500,
+        "project_skeleton": 1500, "chapter_outline": 500,
         "bridge_position": 600,
         "plot_lines_with_beats": 2500,  # V4.1 方案 C：L 档可装完整其他主个节点描述
         "history_full": 400, "history_normal": 400, "history_brief": 560,
@@ -94,7 +94,7 @@ BUSINESS_SLOT_TOKENS: dict[ModelTier, dict[str, int]] = {
     },
     "XL": {
         "system_role": 100, "system_base_style": 700,
-        "project_skeleton": 1000, "chapter_outline": 500,
+        "project_skeleton": 2000, "chapter_outline": 500,
         "bridge_position": 600,
         "plot_lines_with_beats": 3500,  # V4.1 方案 C：XL 档全量装入节点描述 + 附加上下文
         "history_full": 800, "history_normal": 1000, "history_brief": 800,

@@ -30,10 +30,40 @@ from app.services.reference_pack.blueprint import (
 )
 from app.services.reference_pack.policy_tables import (
     get_model_tier,
+    normalize_model_name,
 )
 from app.services.reference_pack.slot_builders import SLOT_BUILDERS
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# 中文字符 → token 估算比（按模型族）
+# ----------------------------------------------------------------
+# 各家 tokenizer 对中文效率差异很大：DeepSeek/Qwen ≈ 0.6-0.75 token/字，
+# GPT-4o(o200k) ≈ 1，Claude ≈ 1.3-1.5。统一按 1.5 估算会让国产模型的槽位
+# 预算只剩一半（600 tokens 只装 400 字）。估算偏大只会少装内容，偏小才有
+# 超窗风险，因此每族取公开数据的上沿。
+# ============================================================
+
+CHAR_TOKEN_RATIO_BY_FAMILY: tuple[tuple[str, float], ...] = (
+    ("claude", 1.5),
+    ("gpt", 1.0), ("o1", 1.0), ("o3", 1.0), ("o4", 1.0),
+    ("gemini", 1.0),
+    ("deepseek", 0.75), ("qwen", 0.75),
+    ("glm", 0.8), ("doubao", 0.8), ("moonshot", 0.8), ("kimi", 0.8),
+    ("yi-", 0.8), ("ernie", 0.8), ("hunyuan", 0.8), ("minimax", 0.8),
+)
+DEFAULT_CHAR_TOKEN_RATIO = 1.2
+
+
+def char_token_ratio(model_name: str) -> float:
+    """按模型族查中文字/token 比；未知模型族用保守默认值。"""
+    name = normalize_model_name(model_name)
+    for prefix, ratio in CHAR_TOKEN_RATIO_BY_FAMILY:
+        if name.startswith(prefix):
+            return ratio
+    return DEFAULT_CHAR_TOKEN_RATIO
 
 
 # ============================================================
@@ -97,6 +127,7 @@ class AssembledPrompt:
     actual_tokens_estimate: int = 0
     scene: str = ""
     model_tier: str = ""
+    char_token_ratio: float = 1.5
 
 
 # ============================================================
@@ -120,6 +151,7 @@ class PromptAssembler:
             ValueError: 未知 scene + model_tier 组合；或 required slot 内容为空
         """
         tier = get_model_tier(ctx.model_name)
+        ratio = char_token_ratio(ctx.model_name)
         blueprint = PROMPT_BLUEPRINT.get((ctx.scene, tier))
         if blueprint is None:
             raise ValueError(
@@ -170,8 +202,8 @@ class PromptAssembler:
             if slot.label:
                 content = f"{slot.label}\n{content}"
 
-            # 硬截断
-            truncated = self._truncate(content, slot.max_tokens)
+            # 截断（优先段落边界，见 _truncate）
+            truncated = self._truncate(content, slot.max_tokens, ratio)
             if len(truncated) < len(content):
                 slots_truncated.append(slot.name)
 
@@ -187,11 +219,11 @@ class PromptAssembler:
 
         system_prompt = "\n\n".join(system_parts)
         user_prompt = "\n\n".join(user_parts)
-        tokens = self._estimate_tokens(system_prompt + "\n" + user_prompt)
+        tokens = self._estimate_tokens(system_prompt + "\n" + user_prompt, ratio)
 
         logger.info(
-            "[Assembler] scene=%s tier=%s filled=%d truncated=%d skipped=%d tokens≈%d",
-            ctx.scene, tier, len(slots_filled),
+            "[Assembler] scene=%s tier=%s ratio=%.2f filled=%d truncated=%d skipped=%d tokens≈%d",
+            ctx.scene, tier, ratio, len(slots_filled),
             len(slots_truncated), len(slots_skipped), tokens,
         )
 
@@ -206,28 +238,39 @@ class PromptAssembler:
             actual_tokens_estimate=tokens,
             scene=ctx.scene,
             model_tier=tier,
+            char_token_ratio=ratio,
         )
 
     # ---------------- internal helpers ----------------
 
     @classmethod
-    def _truncate(cls, text: str, max_tokens: int) -> str:
-        """硬截断到 max_tokens（中文字符估算）。"""
+    def _truncate(cls, text: str, max_tokens: int, ratio: float | None = None) -> str:
+        """截断到 max_tokens（按中文字符估算）。
+
+        优先在段落 / 句子边界收口（至少保留 60% 预算），避免把世界规则这类
+        整段设定切在半句；找不到边界才硬切。ratio 不传时沿用 CN_CHAR_TO_TOKEN。
+        """
         if max_tokens <= 0:
             return ""
-        max_chars = int(max_tokens / cls.CN_CHAR_TO_TOKEN)
+        max_chars = int(max_tokens / (ratio or cls.CN_CHAR_TO_TOKEN))
         if len(text) <= max_chars:
             return text
-        return text[:max_chars] + "…(截断)"
+        head = text[:max_chars]
+        floor = int(max_chars * 0.6)
+        for sep in ("\n", "。", "；", "！", "？"):
+            pos = head.rfind(sep)
+            if pos >= floor:
+                return head[: pos + 1].rstrip() + "\n…(截断)"
+        return head + "…(截断)"
 
     @classmethod
-    def _estimate_tokens(cls, text: str) -> int:
-        """粗估 token 数（中文 1 字 ≈ 1.5 token，其他 4 字符 ≈ 1 token）。"""
+    def _estimate_tokens(cls, text: str, ratio: float | None = None) -> int:
+        """粗估 token 数（中文 1 字 ≈ ratio token，其他 4 字符 ≈ 1 token）。"""
         if not text:
             return 0
         chinese_chars = sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
         other_chars = len(text) - chinese_chars
-        return int(chinese_chars * cls.CN_CHAR_TO_TOKEN + other_chars / 4)
+        return int(chinese_chars * (ratio or cls.CN_CHAR_TO_TOKEN) + other_chars / 4)
 
     @staticmethod
     def _make_block(text: str, slot: Slot) -> dict[str, Any]:
