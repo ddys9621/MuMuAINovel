@@ -32,7 +32,6 @@ class WorldbuildingGenerator(BaseV3Generator):
     """世界观建模生成器（Tab5）。"""
 
     DEFAULT_TEMPERATURE = 0.4
-    MAX_TOKENS = 2200
 
     TOP_LOCATIONS = 12
     TOP_ORGS = 8
@@ -70,7 +69,6 @@ class WorldbuildingGenerator(BaseV3Generator):
             prompt=prompt,
             system_prompt=SYSTEM_PROMPT_V3,
             temperature=self.DEFAULT_TEMPERATURE,
-            max_tokens=self.MAX_TOKENS,
             label=_LABEL,
             schema_hint=_SCHEMA_HINT,
         )

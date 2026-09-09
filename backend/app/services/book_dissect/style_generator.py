@@ -28,7 +28,6 @@ class StyleGenerator(BaseV3Generator):
     """文风范本生成器（Tab2）。"""
 
     DEFAULT_TEMPERATURE = 0.5
-    MAX_TOKENS = 1500
 
     SAMPLE_COUNT = 3
     PER_CH_CHARS = 700
@@ -49,7 +48,6 @@ class StyleGenerator(BaseV3Generator):
             prompt=prompt,
             system_prompt=SYSTEM_PROMPT,
             temperature=self.DEFAULT_TEMPERATURE,
-            max_tokens=self.MAX_TOKENS,
             label=_LABEL,
             schema_hint=_SCHEMA_HINT,
         )

@@ -542,7 +542,7 @@ class WorldRuleService:
         # 3. 构建生成 prompt
         prompt = self._build_initial_rules_prompt(project, characters, organizations)
 
-        # 4. 调用大模型生成规则（流式 + 重试 + 渐进式增大 max_tokens + LLM 二次修复）
+        # 4. 调用大模型生成规则（流式 + 重试 + LLM 二次修复；max_tokens 取用户设置）
         try:
             # 使用用户配置的 AIService (如果提供) 或全局默认 AIService
             active_ai_service = user_ai_service if user_ai_service is not None else ai_service
@@ -552,27 +552,14 @@ class WorldRuleService:
             response_text = ""  # 保留到循环外，供二次修复兜底使用
             rules_data = None
 
-            # 世界规则 JSON 较大（3 大分类 × N 条 × 长 details），
-            # 用户默认 max_tokens（通常 2000-4000）会把 JSON 截断在字符串中间，
-            # 而 json-repair 无法恢复"断在字符串内部"的 JSON。
-            # 因此显式指定大额度，并按重试递增以兜底极端长输出。
-            max_tokens_by_attempt = [8000, 10000, 12000]
-
             from app.utils.json_cleaner import clean_and_parse_json, repair_json_with_llm
 
             for attempt in range(max_retries):
-                attempt_max_tokens = (
-                    max_tokens_by_attempt[attempt]
-                    if attempt < len(max_tokens_by_attempt)
-                    else max_tokens_by_attempt[-1]
-                )
                 try:
                     logger.info(
-                        f"🔵 开始第 {attempt + 1}/{max_retries} 次世界规则生成调用"
-                        f"（流式，max_tokens={attempt_max_tokens}）"
+                        f"🔵 开始第 {attempt + 1}/{max_retries} 次世界规则生成调用（流式）"
                     )
 
-                    # 显式指定大 max_tokens 覆盖用户默认值，避免 JSON 被截断；
                     # 低 temperature 提高 JSON 结构合规性
                     response_text = ""
                     async for chunk in active_ai_service.generate_text_stream(
@@ -580,7 +567,6 @@ class WorldRuleService:
                         provider=None,  # 使用用户配置的默认provider
                         model=None,     # 使用用户配置的默认model
                         temperature=0.3,
-                        max_tokens=attempt_max_tokens,
                     ):
                         response_text += chunk
 

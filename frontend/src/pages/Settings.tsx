@@ -127,6 +127,7 @@ export default function Settings() {
         api_base_url: form.api_base_url,
         provider: form.api_provider,
         llm_model: form.llm_model || '',
+        max_tokens: form.max_tokens,
       })
       if (res.success) {
         setTestResult('success')

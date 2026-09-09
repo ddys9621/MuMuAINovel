@@ -4,7 +4,7 @@
 from fastapi import APIRouter, HTTPException, Request, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from pathlib import Path
 from pydantic import BaseModel
 import httpx
@@ -315,6 +315,7 @@ class ApiTestRequest(BaseModel):
     api_base_url: str
     provider: str
     llm_model: str
+    max_tokens: Optional[int] = None  # 未传时回落全局默认，与正式生成保持同一来源
 
 
 @router.post("/test")
@@ -344,7 +345,7 @@ async def test_api_connection(data: ApiTestRequest):
             api_base_url=api_base_url,
             default_model=llm_model,
             default_temperature=0.7,
-            default_max_tokens=100
+            default_max_tokens=data.max_tokens
         )
         
         # 发送简单的测试请求
@@ -360,7 +361,6 @@ async def test_api_connection(data: ApiTestRequest):
             provider=provider,
             model=llm_model,
             temperature=0.7,
-            max_tokens=8000
         )
         
         end_time = time.time()

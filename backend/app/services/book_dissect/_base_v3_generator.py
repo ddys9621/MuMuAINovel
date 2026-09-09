@@ -41,7 +41,6 @@ class BaseV3Generator:
         prompt: str,
         system_prompt: str,
         temperature: float,
-        max_tokens: int,
         label: str,
         schema_hint: str = "",
     ) -> Optional[dict]:
@@ -51,7 +50,6 @@ class BaseV3Generator:
             prompt: 用户 prompt
             system_prompt: system prompt
             temperature: 温度
-            max_tokens: 最大输出 token
             label: 日志前缀（含方括号），如 ``"[拆书V3-方法论]"``
             schema_hint: 字段名提示，传给 ``repair_json_with_llm`` 用于约束
                 字段名不被改名。例如 ``"name, description, prompt_content"``
@@ -70,7 +68,6 @@ class BaseV3Generator:
                 prompt=prompt,
                 system_prompt=system_prompt,
                 temperature=temperature,
-                max_tokens=max_tokens,
             )
         except Exception as exc:
             logger.error("%s LLM 调用失败: %s", label, exc)

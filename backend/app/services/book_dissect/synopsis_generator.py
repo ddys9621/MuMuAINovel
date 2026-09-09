@@ -39,7 +39,6 @@ class SynopsisGenerator(BaseV3Generator):
     """故事类型骨架生成器（V3.2 复活版，原 V2 SynopsisGenerator 已废弃删除）"""
 
     DEFAULT_TEMPERATURE = 0.4
-    MAX_TOKENS = 1800
 
     TOP_CHARACTERS = 8
     MAX_KEY_EVENTS = 25
@@ -82,7 +81,6 @@ class SynopsisGenerator(BaseV3Generator):
             prompt=user_prompt,
             system_prompt=SYSTEM_PROMPT_V3,
             temperature=self.DEFAULT_TEMPERATURE,
-            max_tokens=self.MAX_TOKENS,
             label=_LABEL,
             schema_hint=_SCHEMA_HINT,
         )

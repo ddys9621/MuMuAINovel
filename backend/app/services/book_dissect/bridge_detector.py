@@ -84,7 +84,6 @@ class BridgeDetector:
     # —— LLM 调用参数 ——
     LLM_CONCURRENCY = 3                # 并发上限
     LLM_TEMPERATURE = 0.2
-    LLM_MAX_TOKENS = 4096
 
     # —— 变长规则窗口（rule_fallback 模式扫描的窗口长度集合） ——
     FALLBACK_WINDOW_SIZES = (2, 3, 4, 5, 6, 7)
@@ -456,7 +455,6 @@ class BridgeDetector:
             prompt=user_prompt,
             system_prompt=SYSTEM_PROMPT_V42_BRIDGE,
             temperature=self.LLM_TEMPERATURE,
-            max_tokens=self.LLM_MAX_TOKENS,
         )
         content = (resp or {}).get("content") if isinstance(resp, dict) else None
         if not content:

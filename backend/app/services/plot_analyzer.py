@@ -428,7 +428,6 @@ JSON 结构如下：
             async for chunk in self.ai_service.generate_text_stream(
                 prompt=prompt,
                 temperature=0.1,
-                max_tokens=2000,
             ):
                 chunks.append(chunk)
 

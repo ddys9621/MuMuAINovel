@@ -47,7 +47,6 @@ class DictionaryClassifier:
     # ----- 配置常量 -----
     MAX_CANDIDATES_PER_CALL = 100         # 单次 LLM 调用最多分类多少候选
     DEFAULT_TEMPERATURE = 0.2             # 分类任务用低温度
-    MAX_TOKENS = 4000                     # LLM 输出预算
 
     def __init__(self, ai_service):
         """
@@ -75,7 +74,6 @@ class DictionaryClassifier:
                 prompt=user_prompt,
                 system_prompt=system_prompt,
                 temperature=self.DEFAULT_TEMPERATURE,
-                max_tokens=self.MAX_TOKENS,
             )
         except Exception as exc:
             logger.error("[拆书V2-字典分类] LLM 调用失败: %s", exc)

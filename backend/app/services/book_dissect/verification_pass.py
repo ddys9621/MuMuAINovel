@@ -371,7 +371,6 @@ class VerificationPass:
     """聚合后冲突 LLM 仲裁。"""
 
     DEFAULT_TEMPERATURE = 0.1
-    MAX_TOKENS = 3000
 
     def __init__(self, ai_service):
         """
@@ -403,7 +402,6 @@ class VerificationPass:
                 prompt=user_prompt,
                 system_prompt=SYSTEM_PROMPT_V31_VERIFICATION,
                 temperature=self.DEFAULT_TEMPERATURE,
-                max_tokens=self.MAX_TOKENS,
             )
         except Exception as exc:
             logger.error("[拆书V3.1-仲裁] LLM 调用失败: %s", exc)

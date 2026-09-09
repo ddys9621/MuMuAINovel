@@ -32,7 +32,6 @@ class ArchetypeGenerator(BaseV3Generator):
     """角色塑造手法生成器（Tab4）。"""
 
     DEFAULT_TEMPERATURE = 0.4
-    MAX_TOKENS = 2400
 
     TOP_SUPPORTING = 6
     TOP_ANTAGONISTS = 4
@@ -75,7 +74,6 @@ class ArchetypeGenerator(BaseV3Generator):
             prompt=prompt,
             system_prompt=SYSTEM_PROMPT_V3,
             temperature=self.DEFAULT_TEMPERATURE,
-            max_tokens=self.MAX_TOKENS,
             label=_LABEL,
             schema_hint=_SCHEMA_HINT,
         )

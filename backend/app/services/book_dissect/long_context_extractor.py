@@ -50,10 +50,6 @@ class LongContextExtractor:
     """整本书一次性抽取 ChapterFact 列表。"""
 
     DEFAULT_TEMPERATURE = 0.1
-    # 大模型输出预算，但不会真的占满 200k+ ctx 的 45%；按章节数动态加成
-    BASE_MAX_TOKENS = 16_000
-    MAX_TOKENS_PER_CHAPTER = 600   # 每章预留输出 token
-    MAX_TOKENS_HARD_CAP = 64_000   # 硬上限
 
     # 章节边界标记，与 prompt 中的 "=== 第 N 章 标题 ===" 对齐
     BOUNDARY_TEMPLATE = "=== 第 {n} 章 {title} ==="
@@ -87,14 +83,11 @@ class LongContextExtractor:
         full_text = self._build_full_text(chapters)
         user_prompt = LONG_CONTEXT_EXTRACT_PROMPT.format(full_text=full_text)
 
-        max_tokens = self._compute_max_tokens(len(chapters))
-
         try:
             resp = await self.ai_service.generate_text(
                 prompt=user_prompt,
                 system_prompt=SYSTEM_PROMPT_V31_LONG_CONTEXT,
                 temperature=self.DEFAULT_TEMPERATURE,
-                max_tokens=max_tokens,
             )
         except Exception as exc:
             logger.error("[拆书V3.1-长上下文] LLM 调用失败: %s", exc)
@@ -124,11 +117,6 @@ class LongContextExtractor:
             if content:
                 parts.append(content)
         return "\n\n".join(parts)
-
-    def _compute_max_tokens(self, chapter_count: int) -> int:
-        """按章节数动态计算 max_tokens。"""
-        budget = self.BASE_MAX_TOKENS + chapter_count * self.MAX_TOKENS_PER_CHAPTER
-        return min(budget, self.MAX_TOKENS_HARD_CAP)
 
     def _parse_response(
         self,

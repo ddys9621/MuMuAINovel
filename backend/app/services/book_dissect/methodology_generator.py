@@ -35,7 +35,6 @@ class MethodologyGenerator(BaseV3Generator):
     """写作方法论生成器（Tab1）"""
 
     DEFAULT_TEMPERATURE = 0.4
-    MAX_TOKENS = 2400
 
     TOP_CHARACTERS = 10
     TOP_LOCATIONS = 8
@@ -84,7 +83,6 @@ class MethodologyGenerator(BaseV3Generator):
             prompt=user_prompt,
             system_prompt=SYSTEM_PROMPT_V3,
             temperature=self.DEFAULT_TEMPERATURE,
-            max_tokens=self.MAX_TOKENS,
             label=_LABEL,
             schema_hint=_SCHEMA_HINT,
         )

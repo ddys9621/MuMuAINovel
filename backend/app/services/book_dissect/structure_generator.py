@@ -33,7 +33,6 @@ class StructureGenerator(BaseV3Generator):
     """章节结构手法生成器（Tab3）。"""
 
     DEFAULT_TEMPERATURE = 0.4
-    MAX_TOKENS = 2400
 
     OPENING_COUNT = 3
     ENDING_COUNT = 3
@@ -70,7 +69,6 @@ class StructureGenerator(BaseV3Generator):
             prompt=prompt,
             system_prompt=SYSTEM_PROMPT_V3,
             temperature=self.DEFAULT_TEMPERATURE,
-            max_tokens=self.MAX_TOKENS,
             label=_LABEL,
             schema_hint=_SCHEMA_HINT,
         )

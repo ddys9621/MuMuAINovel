@@ -55,7 +55,6 @@ class ChapterFactExtractor:
 
     # ----- LLM 参数 -----
     DEFAULT_TEMPERATURE = 0.2
-    MAX_TOKENS = 4000
 
     # ----- T2.3 段级切半重试阈值 -----
     # 段长度 > 这个阈值时，失败后会切两半再重试一次
@@ -131,7 +130,6 @@ class ChapterFactExtractor:
                 prompt=user_prompt,
                 system_prompt=sys_prompt,
                 temperature=self.DEFAULT_TEMPERATURE,
-                max_tokens=self.MAX_TOKENS,
                 # P2 修复：启用 JSON mode，强制模型输出合法 JSON
                 # （DeepSeek/Qwen/OpenAI 都支持；Anthropic 自动忽略）
                 # 配合 json-repair 本地兜底 + prompt 中文引号规则，三层防护

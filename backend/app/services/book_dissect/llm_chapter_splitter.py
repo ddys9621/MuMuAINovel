@@ -54,7 +54,6 @@ FIXED_SIZE_MIN = 1_500        # 最后一段短于此值则合并到前一段
 
 # LLM 参数
 DEFAULT_TEMPERATURE = 0.0      # 边界判定要稳定
-MAX_TOKENS = 1_000
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +122,6 @@ class LlmChapterSplitter:
                 prompt=user_prompt,
                 system_prompt=SYSTEM_PROMPT_V31_BOUNDARY,
                 temperature=DEFAULT_TEMPERATURE,
-                max_tokens=MAX_TOKENS,
             )
         except Exception as exc:
             logger.warning("[拆书V3.1-LLM切分] LLM 调用失败: %s", exc)
