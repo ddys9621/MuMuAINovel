@@ -275,11 +275,42 @@ async def get_available_models(
                 }
                 
             elif provider == "anthropic":
-                # Anthropic 没有公开的模型列表API
-                raise HTTPException(
-                    status_code=400,
-                    detail="Anthropic 不支持自动获取模型列表，请手动输入模型名称"
-                )
+                # Anthropic 官方模型列表 API：GET {base}/v1/models
+                # 鉴权用 x-api-key + anthropic-version（非 Bearer），响应 {"data":[{"id","display_name",...}]}
+                base = (api_base_url or "https://api.anthropic.com").rstrip("/")
+                url = f"{base}/models" if base.endswith("/v1") else f"{base}/v1/models"
+                headers = {
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                }
+
+                logger.info(f"正在从 {url} 获取 Anthropic 模型列表")
+                response = await client.get(url, headers=headers)
+                response.raise_for_status()
+
+                data = response.json()
+                models = []
+                for model in data.get("data", []) or []:
+                    model_id = model.get("id", "")
+                    if model_id:
+                        models.append({
+                            "value": model_id,
+                            "label": model.get("display_name") or model_id,
+                            "description": f"Created: {model.get('created_at', 'N/A')}"
+                        })
+
+                if not models:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="未能从 Anthropic API 获取到可用的模型列表"
+                    )
+
+                logger.info(f"成功获取 {len(models)} 个 Anthropic 模型")
+                return {
+                    "provider": provider,
+                    "models": models,
+                    "count": len(models)
+                }
             
             else:
                 raise HTTPException(
