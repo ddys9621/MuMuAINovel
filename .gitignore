@@ -68,6 +68,7 @@ node_modules/
 dist/
 build/
 backend/static/
+backend/installer_output/
 
 # OS
 Thumbs.db

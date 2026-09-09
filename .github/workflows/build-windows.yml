@@ -1,0 +1,101 @@
+name: Build Windows Installer
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+    paths-ignore:
+      - '**.md'
+      - 'agent-docs/**'
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'docker-compose*.yml'
+      - 'docker-entrypoint.sh'
+      - 'deploy.*'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        run: |
+          $v = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME -replace '^v', '' } else { '0.0.0-' + $env:GITHUB_SHA.Substring(0, 7) }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "Version: $v"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend (outputs to backend/static)
+        working-directory: frontend
+        run: npm run build
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install Python dependencies
+        working-directory: backend
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          python -m pip install --upgrade pip
+          pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+          pip install pyinstaller==6.21.0
+
+      - name: PyInstaller
+        working-directory: backend
+        run: pyinstaller mumuai.spec --clean --noconfirm
+
+      - name: Inno Setup
+        working-directory: backend
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DMyAppVersion=${{ steps.ver.outputs.version }}" installer.iss
+          Get-ChildItem installer_output
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MuMuAINovel-Setup-v${{ steps.ver.outputs.version }}
+          path: backend/installer_output/*.exe
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $exe = (Get-ChildItem backend/installer_output/*.exe | Select-Object -First 1).FullName
+          gh release view $env:GITHUB_REF_NAME *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:GITHUB_REF_NAME $exe --clobber
+          } else {
+            gh release create $env:GITHUB_REF_NAME $exe --title $env:GITHUB_REF_NAME --generate-notes
+          }

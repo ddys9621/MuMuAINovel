@@ -1,0 +1,298 @@
+{
+  "$comment": "MCP 商城内置目录。只收录远程（Streamable HTTP / SSE）服务；server 中 {{KEY}} 为安装时用户填写的占位符，必须在 inputs 里声明。verified_at 为最近一次从本机实际探测到端点可达（含用无效 key 得到 401 类响应）的日期。完整性由 tests/test_mcp_marketplace_catalog.py 校验。",
+  "items": [
+    {
+      "id": "zhipu-web-search",
+      "name": "智谱联网搜索",
+      "description": "智谱 GLM 开放平台的联网搜索，中文结果质量高、国内直连。写作时用来核对史实、查资料、找题材灵感，按次计费。",
+      "category": "search_cn",
+      "tags": ["国内直连", "中文搜索", "按次计费"],
+      "transport": "streamable_http",
+      "server": {
+        "url": "https://open.bigmodel.cn/api/mcp-broker/proxy/web-search/mcp?Authorization={{ZHIPU_API_KEY}}"
+      },
+      "inputs": [
+        {
+          "key": "ZHIPU_API_KEY",
+          "label": "智谱开放平台 API Key",
+          "placeholder": "xxxxxxxx.xxxxxxxxxxxxxxxx",
+          "help_url": "https://open.bigmodel.cn/usercenter/apikeys",
+          "help_text": "普通开放平台 Key（非 Coding Plan Key）。search_std 约 0.01 元/次，新用户有免费额度。"
+        }
+      ],
+      "homepage": "https://docs.bigmodel.cn/cn/guide/tools/web-search",
+      "official": true,
+      "region": "cn",
+      "pricing": "按次计费，约 0.01 元/次起，新用户有免费额度",
+      "notes": "Key 无效时智谱返回非标准响应，表现为「连接超时」而不是 401，请先确认 Key 正确。",
+      "recommended": true,
+      "verified_at": "2026-09-09"
+    },
+    {
+      "id": "zhipu-web-search-prime",
+      "name": "智谱联网搜索（Coding Plan 版）",
+      "description": "GLM Coding Plan 套餐自带的 webSearchPrime 联网搜索，配额随套餐赠送，已订阅 Coding Plan 的作者零成本使用。",
+      "category": "search_cn",
+      "tags": ["国内直连", "中文搜索", "套餐配额"],
+      "transport": "streamable_http",
+      "server": {
+        "url": "https://open.bigmodel.cn/api/mcp/web_search_prime/mcp",
+        "headers": {
+          "Authorization": "Bearer {{ZHIPU_CODING_PLAN_KEY}}"
+        }
+      },
+      "inputs": [
+        {
+          "key": "ZHIPU_CODING_PLAN_KEY",
+          "label": "GLM Coding Plan API Key",
+          "help_url": "https://open.bigmodel.cn/usercenter/apikeys",
+          "help_text": "需已订阅 GLM Coding Plan；配额按套餐：Lite 100 次/月、Pro 1000、Max 4000。"
+        }
+      ],
+      "homepage": "https://docs.bigmodel.cn/cn/coding-plan/mcp/search-mcp-server",
+      "official": true,
+      "region": "cn",
+      "pricing": "随 Coding Plan 套餐配额，无额外费用",
+      "notes": "Key 无效时表现为「连接超时」而不是 401。",
+      "recommended": false,
+      "verified_at": "2026-09-09"
+    },
+    {
+      "id": "baidu-ai-search",
+      "name": "百度 AI 搜索",
+      "description": "百度智能云千帆的 AI 搜索：百度搜索结果 + 大模型总结，中文时效信息强，适合查当下热点、行业背景、现实题材素材。",
+      "category": "search_cn",
+      "tags": ["国内直连", "中文搜索", "按次计费"],
+      "transport": "streamable_http",
+      "server": {
+        "url": "https://qianfan.baidubce.com/v2/ai_search/mcp",
+        "headers": {
+          "Authorization": "Bearer {{QIANFAN_API_KEY}}"
+        }
+      },
+      "inputs": [
+        {
+          "key": "QIANFAN_API_KEY",
+          "label": "百度智能云 API Key",
+          "placeholder": "bce-v3/ALTAK-...",
+          "help_url": "https://console.bce.baidu.com/iam/#/iam/apikey/list",
+          "help_text": "创建 API Key 时服务范围勾选「千帆 ModelBuilder」。按次计费，额度以控制台为准。"
+        }
+      ],
+      "homepage": "https://cloud.baidu.com/doc/qianfan/s/Omh4su4s0",
+      "official": true,
+      "region": "cn",
+      "pricing": "按次计费，以百度智能云控制台为准",
+      "notes": null,
+      "recommended": true,
+      "verified_at": "2026-09-09"
+    },
+    {
+      "id": "tencent-web-search",
+      "name": "腾讯云联网搜索（搜狗）",
+      "description": "腾讯云 WebSearch MCP，底层为搜狗全网搜索，覆盖微信公众号、知乎等腾讯生态内容，中文垂类资料检索有优势。",
+      "category": "search_cn",
+      "tags": ["国内直连", "中文搜索", "SSE", "按次计费"],
+      "transport": "sse",
+      "server": {
+        "url": "https://agent.html5.qq.com/prosearch/sse",
+        "headers": {
+          "TENCENTCLOUD_SECRET_ID": "{{TENCENTCLOUD_SECRET_ID}}",
+          "TENCENTCLOUD_SECRET_KEY": "{{TENCENTCLOUD_SECRET_KEY}}",
+          "source": "tx_cloud_user"
+        }
+      },
+      "inputs": [
+        {
+          "key": "TENCENTCLOUD_SECRET_ID",
+          "label": "腾讯云 SecretId",
+          "secret": false,
+          "placeholder": "AKID...",
+          "help_url": "https://console.cloud.tencent.com/wsapi/index",
+          "help_label": "开通联网搜索 API",
+          "help_text": "第一步：在联网搜索 API 控制台开通标准版（按次计费）。"
+        },
+        {
+          "key": "TENCENTCLOUD_SECRET_KEY",
+          "label": "腾讯云 SecretKey",
+          "help_url": "https://console.cloud.tencent.com/cam/capi",
+          "help_label": "API 密钥管理",
+          "help_text": "第二步：在「访问管理 → API 密钥管理」新建密钥，SecretId 与 SecretKey 同页获取。"
+        }
+      ],
+      "homepage": "https://github.com/Tencent/WebSearchMCP",
+      "official": true,
+      "region": "cn",
+      "pricing": "按次计费，以腾讯云控制台为准",
+      "notes": "凭据错误不会在连接测试时报错，会在实际调用搜索时返回鉴权失败。",
+      "recommended": false,
+      "verified_at": "2026-09-09"
+    },
+    {
+      "id": "exa",
+      "name": "Exa 语义搜索",
+      "description": "面向 AI 的语义化全网搜索 + 网页正文抓取（web_search_exa / web_fetch_exa）。不填 Key 也能匿名使用（有限速），零门槛试用。",
+      "category": "search_global",
+      "tags": ["匿名可用", "英文为主", "海外服务"],
+      "transport": "streamable_http",
+      "server": {
+        "url": "https://mcp.exa.ai/mcp",
+        "headers": {
+          "x-api-key": "{{EXA_API_KEY}}"
+        }
+      },
+      "inputs": [
+        {
+          "key": "EXA_API_KEY",
+          "label": "Exa API Key（可选）",
+          "required": false,
+          "help_url": "https://dashboard.exa.ai/api-keys",
+          "help_text": "留空即匿名使用（限速）。注册赠送免费额度。"
+        }
+      ],
+      "homepage": "https://github.com/exa-labs/exa-mcp-server",
+      "official": true,
+      "region": "global",
+      "pricing": "匿名可用（限速）；注册赠送免费额度",
+      "notes": "服务器在海外，国内网络可能较慢。",
+      "recommended": true,
+      "verified_at": "2026-09-09"
+    },
+    {
+      "id": "tavily",
+      "name": "Tavily 搜索",
+      "description": "专为 LLM 设计的搜索 / 网页抽取服务，返回干净的摘要文本，适合做设定资料检索与事实核对。免费额度每月 1000 次。",
+      "category": "search_global",
+      "tags": ["免费额度", "海外服务"],
+      "transport": "streamable_http",
+      "server": {
+        "url": "https://mcp.tavily.com/mcp/",
+        "headers": {
+          "Authorization": "Bearer {{TAVILY_API_KEY}}"
+        }
+      },
+      "inputs": [
+        {
+          "key": "TAVILY_API_KEY",
+          "label": "Tavily API Key",
+          "placeholder": "tvly-...",
+          "help_url": "https://app.tavily.com/home",
+          "help_text": "免费 1000 credits/月，无需绑卡。"
+        }
+      ],
+      "homepage": "https://github.com/tavily-ai/tavily-mcp",
+      "official": true,
+      "region": "global",
+      "pricing": "免费 1000 次/月，无需绑卡",
+      "notes": null,
+      "recommended": true,
+      "verified_at": "2026-09-09"
+    },
+    {
+      "id": "firecrawl",
+      "name": "Firecrawl 网页抓取",
+      "description": "把网页 / 整站转换成干净的 Markdown（scrape / search / parse），适合把参考资料、百科条目整页拉进创作上下文。匿名可用。",
+      "category": "search_global",
+      "tags": ["匿名可用", "网页转 Markdown", "海外服务"],
+      "transport": "streamable_http",
+      "server": {
+        "url": "https://mcp.firecrawl.dev/v2/mcp",
+        "headers": {
+          "Authorization": "Bearer {{FIRECRAWL_API_KEY}}"
+        }
+      },
+      "inputs": [
+        {
+          "key": "FIRECRAWL_API_KEY",
+          "label": "Firecrawl API Key（可选）",
+          "required": false,
+          "placeholder": "fc-...",
+          "help_url": "https://www.firecrawl.dev/app/api-keys",
+          "help_text": "留空即匿名使用（限速）。免费层每月有一定额度。"
+        }
+      ],
+      "homepage": "https://github.com/firecrawl/firecrawl-mcp-server",
+      "official": true,
+      "region": "global",
+      "pricing": "匿名可用（限速）；免费层每月有额度",
+      "notes": null,
+      "recommended": false,
+      "verified_at": "2026-09-09"
+    },
+    {
+      "id": "jina",
+      "name": "Jina 网页阅读",
+      "description": "Jina Reader：任意 URL 转 Markdown（read_url）、网页 / 图片 / arXiv 搜索，读长文资料很好用。",
+      "category": "search_global",
+      "tags": ["网页转 Markdown", "海外服务"],
+      "transport": "streamable_http",
+      "server": {
+        "url": "https://mcp.jina.ai/v1",
+        "headers": {
+          "Authorization": "Bearer {{JINA_API_KEY}}"
+        }
+      },
+      "inputs": [
+        {
+          "key": "JINA_API_KEY",
+          "label": "Jina API Key（可选）",
+          "required": false,
+          "help_url": "https://jina.ai/api-dashboard/key-manager",
+          "help_text": "留空可用但限额更低；新 Key 一次性赠送 1000 万 tokens。"
+        }
+      ],
+      "homepage": "https://github.com/jina-ai/MCP",
+      "official": true,
+      "region": "global",
+      "pricing": "匿名可用（低限额）；新 Key 赠送 1000 万 tokens",
+      "notes": "国内网络可能无法直连（2026-09-09 本机探测超时），建议海外用户或有代理时使用。",
+      "recommended": false,
+      "verified_at": null
+    },
+    {
+      "id": "amap-maps",
+      "name": "高德地图",
+      "description": "高德官方 MCP：地理编码、POI 搜索、路径规划、实时天气、距离测算。写现实题材时校对城市街道、通勤路线、季节气候细节。",
+      "category": "knowledge",
+      "tags": ["国内直连", "免费配额", "地理 / 天气"],
+      "transport": "streamable_http",
+      "server": {
+        "url": "https://mcp.amap.com/mcp?key={{AMAP_KEY}}"
+      },
+      "inputs": [
+        {
+          "key": "AMAP_KEY",
+          "label": "高德 Web 服务 Key",
+          "help_url": "https://console.amap.com/dev/key/app",
+          "help_text": "创建 Key 时「服务平台」必须选「Web服务」。个人开发者有免费月配额。"
+        }
+      ],
+      "homepage": "https://lbs.amap.com/api/mcp-server/gettingstarted",
+      "official": true,
+      "region": "cn",
+      "pricing": "个人开发者有免费月配额",
+      "notes": null,
+      "recommended": true,
+      "verified_at": "2026-09-09"
+    },
+    {
+      "id": "chinese-poetry",
+      "name": "古诗词查询",
+      "description": "基于 chinese-poetry 开源数据集的古诗词检索：按关键词 / 作者 / 朝代搜诗、随机抽诗（飞花令）。写古风、引诗题词、给角色起雅号时很顺手。",
+      "category": "knowledge",
+      "tags": ["免费", "无需 Key", "古风"],
+      "transport": "streamable_http",
+      "server": {
+        "url": "https://poetry-mcp.xumingtech.online/mcp"
+      },
+      "inputs": [],
+      "homepage": "https://github.com/iamxuming/poetry-mcp",
+      "official": false,
+      "region": "cn",
+      "pricing": "免费",
+      "notes": "社区个人托管（Cloudflare Workers），可能不稳定或下线；仓库提供自部署脚本。",
+      "recommended": true,
+      "verified_at": "2026-09-09"
+    }
+  ]
+}
