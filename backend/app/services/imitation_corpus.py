@@ -213,6 +213,7 @@ class ImitationCorpusRetriever:
         task_ids: list[str],
         user_intent: str,
         top_k: int,
+        allow_fallback: bool = True,
     ) -> list[CorpusHit]:
         """主入口：BM25 + 1-hop 扩展。
 
@@ -221,6 +222,9 @@ class ImitationCorpusRetriever:
             task_ids: 涉及的拆书任务 ID 列表
             user_intent: 用户本次仿写意图（自然语言）
             top_k: 最终返回命中数
+            allow_fallback: 无相关命中时是否按章节序补最早章节凑数。
+                prompt 注入场景应传 False——无关章节只会干扰生成；
+                默认 True 保持既有调用方/测试行为不变。
 
         Returns:
             list[CorpusHit]，按 score 倒序，长度 ≤ top_k
@@ -285,8 +289,8 @@ class ImitationCorpusRetriever:
             if len(hits) >= top_k:
                 break
 
-        # 兜底：top_k 不满 → 按 chapter_number 补最早的章节
-        if len(hits) < top_k and docs:
+        # 兜底：top_k 不满 → 按 chapter_number 补最早的章节（可关闭）
+        if allow_fallback and len(hits) < top_k and docs:
             picked = {(h.task_id, h.chapter_number) for h in hits}
             leftover = [
                 d for d in docs

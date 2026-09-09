@@ -97,6 +97,7 @@ async def preview_imitation(
             strength=payload.strength,
             target_word_count=payload.target_word_count,
             style_id=payload.style_id,
+            user_id=user_id,
         )
     except ValueError as e:
         # 参考包未挂载 / 显式 pack 不在挂载列表 / 参考包未就绪 → 422
@@ -128,6 +129,7 @@ async def _imitation_sse_generator(
     user_ai_service: AIService,
     project_id: str,
     payload: ImitateChapterRequest,
+    user_id: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """与 chapters.py /generate-stream 同款 SSE 协议：
 
@@ -153,6 +155,7 @@ async def _imitation_sse_generator(
                 strength=payload.strength,
                 target_word_count=payload.target_word_count,
                 style_id=payload.style_id,
+                user_id=user_id,
             )
         except ValueError as e:
             yield _sse_event({"type": "error", "message": str(e)})
@@ -216,7 +219,7 @@ async def imitate_chapter_stream(
     async def wrapper():
         try:
             async for chunk in _imitation_sse_generator(
-                db, user_ai_service, project_id, payload
+                db, user_ai_service, project_id, payload, user_id=user_id
             ):
                 yield chunk
         except GeneratorExit:

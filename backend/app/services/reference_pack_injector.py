@@ -65,6 +65,9 @@ class StrengthProfile:
     events_chars: int  # V3.2-P2：事件节奏的字符上限
     corpus_top_k: int
     corpus_chars_per_item: int  # 每条语料摘要上限
+    # V4.1：桥段范本 / 角色档案（此前这两维度在传统注入链路被静默丢弃）
+    bridges_chars: int = 900
+    character_archive_chars: int = 900
 
     @classmethod
     def for_strength(cls, strength: str) -> "StrengthProfile":
@@ -83,6 +86,8 @@ class StrengthProfile:
                 events_chars=300,  # V3.2-P2
                 corpus_top_k=1,
                 corpus_chars_per_item=300,
+                bridges_chars=400,  # V4.1
+                character_archive_chars=400,  # V4.1
             )
         if s == "deep":
             return cls(
@@ -98,6 +103,8 @@ class StrengthProfile:
                 events_chars=800,  # V3.2-P2
                 corpus_top_k=3,
                 corpus_chars_per_item=600,
+                bridges_chars=1800,  # V4.1
+                character_archive_chars=1800,  # V4.1
             )
         return cls(
             name="medium",
@@ -112,6 +119,8 @@ class StrengthProfile:
             events_chars=500,  # V3.2-P2
             corpus_top_k=2,
             corpus_chars_per_item=450,
+            bridges_chars=900,  # V4.1
+            character_archive_chars=900,  # V4.1
         )
 
 
@@ -141,6 +150,9 @@ class _ResolvedPack:
     entities: Optional[Dict[str, Any]] = None
     relations: Optional[Dict[str, Any]] = None
     events: Optional[Dict[str, Any]] = None
+    # V4.1：桥段范本库 / 完整角色档案
+    bridges: Optional[Dict[str, Any]] = None
+    character_archive: Optional[Dict[str, Any]] = None
 
     @property
     def has_corpus(self) -> bool:
@@ -344,6 +356,11 @@ class ReferencePackInjector:
                     entities=_safe_json(getattr(pack, "entities_json", None), None),
                     relations=_safe_json(getattr(pack, "relations_json", None), None),
                     events=_safe_json(getattr(pack, "events_json", None), None),
+                    # V4.1 桥段范本 + 角色档案
+                    bridges=_safe_json(getattr(pack, "bridges_json", None), None),
+                    character_archive=_safe_json(
+                        getattr(pack, "character_archive_json", None), None
+                    ),
                     generated_dimensions=_safe_json(pack.generated_dimensions, []) or [],
                     default_dimensions=_safe_json(link.default_dimensions, []) or [],
                     default_strength=link.default_strength or "medium",
@@ -566,6 +583,117 @@ class ReferencePackInjector:
             + "\n\n".join(bodies)
         )
 
+    def _format_bridges(
+        self, packs: List[_ResolvedPack], profile: StrengthProfile
+    ) -> str:
+        """V4.1 桥段范本库：抽象出"桥段类型分布 + 节奏统计"供规划/正文参考。
+
+        只给类型/数量/节奏与目标-爽点的抽象描述，不复刻具体章节内容。
+        """
+        bodies: List[str] = []
+        for p in packs:
+            data = p.bridges
+            if not isinstance(data, dict):
+                continue
+            lines: List[str] = []
+            total = data.get("total_bridges_detected")
+            std = data.get("standard_bridges")
+            if total is not None:
+                std_part = f"（标准四章结构 {std} 个）" if std is not None else ""
+                lines.append(f"- 全书识别桥段：{total} 个{std_part}")
+            bridge_types = data.get("bridge_types") or []
+            if isinstance(bridge_types, list) and bridge_types:
+                type_bits = []
+                for bt in bridge_types[:6]:
+                    if not isinstance(bt, dict):
+                        continue
+                    type_bits.append(f"{bt.get('type', '?')}×{bt.get('count', '?')}")
+                if type_bits:
+                    lines.append(f"- 桥段类型分布：{', '.join(type_bits)}")
+                # 每类取 1 个典型范例的 goal/showoff_point（抽象手法，不含正文）
+                for bt in bridge_types[:3]:
+                    if not isinstance(bt, dict):
+                        continue
+                    examples = bt.get("typical_examples") or []
+                    if isinstance(examples, list) and examples and isinstance(examples[0], dict):
+                        ex = examples[0]
+                        goal = str(ex.get("goal") or "").strip()
+                        showoff = str(ex.get("showoff_point") or "").strip()
+                        if goal or showoff:
+                            lines.append(
+                                f"- 「{bt.get('type', '?')}」型范例：目标={goal or '—'}；爽点设计={showoff or '—'}"
+                            )
+            rhythm = data.get("rhythm_stats")
+            if isinstance(rhythm, dict) and rhythm:
+                items = ", ".join(f"{k}:{v}" for k, v in list(rhythm.items())[:6])
+                lines.append(f"- 节奏统计：{items}")
+            gf = data.get("golden_finger_diversity")
+            if isinstance(gf, dict) and gf:
+                items = ", ".join(f"{k}:{v}" for k, v in list(gf.items())[:6])
+                lines.append(f"- 金手指用法多样性：{items}")
+            if not lines:
+                continue
+            body = f"《{p.source_book_title}》：\n" + "\n".join(lines)
+            bodies.append(_truncate(body, profile.bridges_chars))
+        if not bodies:
+            return ""
+        return (
+            "[参考桥段范本（原书桥段的类型/节奏/目标-爽点设计，仅作结构参考，禁止复刻具体情节）]\n"
+            + "\n\n".join(bodies)
+        )
+
+    def _format_character_archive(
+        self, packs: List[_ResolvedPack], profile: StrengthProfile
+    ) -> str:
+        """V4.1 完整角色档案：抽"主角引出/反派递进/配角功能"手法，不复刻角色本身。"""
+        SECTION_MAP = (
+            ("protagonist_archetypes", "主角塑造"),
+            ("antagonist_progression", "反派递进"),
+            ("support_character_techniques", "配角手法"),
+        )
+        bodies: List[str] = []
+        for p in packs:
+            data = p.character_archive
+            if not isinstance(data, dict):
+                continue
+            lines: List[str] = []
+            for key, label in SECTION_MAP:
+                arr = data.get(key) or []
+                if not isinstance(arr, list) or not arr:
+                    continue
+                for item in arr[:2]:
+                    if not isinstance(item, dict):
+                        continue
+                    bits: List[str] = []
+                    intro = str(item.get("intro_technique") or "").strip()
+                    arc = str(item.get("personality_arc") or "").strip()
+                    prog = str(item.get("ability_progression") or "").strip()
+                    if intro:
+                        bits.append(f"引出手法={intro}")
+                    if arc:
+                        bits.append(f"弧线={arc}")
+                    if prog:
+                        bits.append(f"成长节奏={prog}")
+                    if not bits:
+                        # 泛化兜底：取 item 里前两个字符串字段
+                        for k, v in item.items():
+                            if isinstance(v, str) and v.strip() and k not in ("name",):
+                                bits.append(f"{k}={v.strip()}")
+                            if len(bits) >= 2:
+                                break
+                    if bits:
+                        lines.append(f"- 【{label}】{'；'.join(bits)}")
+            if not lines:
+                continue
+            body = f"《{p.source_book_title}》：\n" + "\n".join(lines)
+            bodies.append(_truncate(body, profile.character_archive_chars))
+        if not bodies:
+            return ""
+        return (
+            "[参考角色档案手法（如何引出/递进/赋予功能，仅作塑造方法参考，禁止照搬原书角色）]\n"
+            + "\n\n".join(bodies)
+        )
+
     def _format_synopsis(
         self, packs: List[_ResolvedPack], profile: StrengthProfile
     ) -> str:
@@ -656,11 +784,14 @@ class ReferencePackInjector:
             return ""
 
         retriever = ImitationCorpusRetriever()
+        # allow_fallback=False：检索无相关命中时返回空，
+        # 不再按章节序强塞最早章节（无关内容只会干扰生成）
         hits = await retriever.retrieve(
             db=db,
             task_ids=task_ids,
             user_intent=anchor_query,
             top_k=profile.corpus_top_k,
+            allow_fallback=False,
         )
         if not hits:
             return ""
@@ -733,49 +864,46 @@ class ReferencePackInjector:
 
         # ---- user_segment ----
         # 拼装顺序遵循 Hierarchical RAG 最佳实践：Story Bible（粗）→ 模式分布（粗+中）→
-        # 手法（中）→ 语料（细）。
-        # synopsis 在最前，entities/relations/events 紧随其后作为「类型/类别/节奏的轻量提示」，
-        # 然后再到 5 个手法维度，最后 corpus 检索。
+        # 手法（中）→ V4.1 范本（中）→ 语料（细）。
+        # produced_dimensions 记录"实际产出非空段落"的维度，
+        # 保证 used_dimensions 对前端/日志如实（选了但内容为空的维度不再谎报）。
         ref_sections: List[str] = []
+        produced_dimensions: List[str] = []
+
+        def _emit(dim: str, text: str) -> None:
+            if text:
+                ref_sections.append(text)
+                produced_dimensions.append(dim)
+
         if "synopsis" in used_dimensions:
-            s = self._format_synopsis(packs, profile)
-            if s:
-                ref_sections.append(s)
+            _emit("synopsis", self._format_synopsis(packs, profile))
         # V3.2-P2：模式三维度（统计聚合）
         if "entities" in used_dimensions:
-            s = self._format_entities(packs, profile)
-            if s:
-                ref_sections.append(s)
+            _emit("entities", self._format_entities(packs, profile))
         if "relations" in used_dimensions:
-            s = self._format_relations(packs, profile)
-            if s:
-                ref_sections.append(s)
+            _emit("relations", self._format_relations(packs, profile))
         if "events" in used_dimensions:
-            s = self._format_events(packs, profile)
-            if s:
-                ref_sections.append(s)
+            _emit("events", self._format_events(packs, profile))
         if "methodology" in used_dimensions:
-            s = self._format_methodology(packs, profile)
-            if s:
-                ref_sections.append(s)
+            _emit("methodology", self._format_methodology(packs, profile))
         if "structure" in used_dimensions:
-            s = self._format_structure(packs, profile)
-            if s:
-                ref_sections.append(s)
+            _emit("structure", self._format_structure(packs, profile))
         if "archetypes" in used_dimensions:
-            s = self._format_archetypes(packs, profile)
-            if s:
-                ref_sections.append(s)
+            _emit("archetypes", self._format_archetypes(packs, profile))
         if "worldbuilding" in used_dimensions:
-            s = self._format_worldbuilding(packs, profile)
-            if s:
-                ref_sections.append(s)
+            _emit("worldbuilding", self._format_worldbuilding(packs, profile))
+        # V4.1：桥段范本 + 角色档案（此前在传统链路被静默丢弃）
+        if "bridges" in used_dimensions:
+            _emit("bridges", self._format_bridges(packs, profile))
+        if "character_archive" in used_dimensions:
+            _emit("character_archive", self._format_character_archive(packs, profile))
         t_5dim = time.perf_counter()
 
         if "corpus" in used_dimensions:
-            s = await self._format_corpus(db, packs, anchor_query or "", profile)
-            if s:
-                ref_sections.append(s)
+            _emit(
+                "corpus",
+                await self._format_corpus(db, packs, anchor_query or "", profile),
+            )
         t_corpus = time.perf_counter()
 
         user_segment = "\n\n".join(ref_sections)
@@ -784,6 +912,11 @@ class ReferencePackInjector:
         system_segment = ""
         if "style" in used_dimensions:
             system_segment = self._format_style_system_prompt(packs, profile)
+            if system_segment:
+                produced_dimensions.append("style")
+
+        # used_dimensions 收敛为"实际产出"的维度（如实反馈）
+        used_dimensions = _dedup_keep_order(produced_dimensions)
 
         # ---- meta ----
         used_packs_meta = self._build_used_packs_meta(packs, used_dimensions)
@@ -870,6 +1003,10 @@ class ReferencePackInjector:
                     pack_dims.append("relations")
                 elif d == "events" and p.events:
                     pack_dims.append("events")
+                elif d == "bridges" and p.bridges:
+                    pack_dims.append("bridges")
+                elif d == "character_archive" and p.character_archive:
+                    pack_dims.append("character_archive")
             out.append(
                 {
                     "pack_id": p.pack_id,

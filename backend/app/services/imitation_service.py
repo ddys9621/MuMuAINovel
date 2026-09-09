@@ -24,7 +24,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.logger import get_logger
@@ -47,6 +47,16 @@ from app.services.reference_pack_injector import (  # noqa: F401  re-export
 )
 
 logger = get_logger(__name__)
+
+
+def _tail_truncate(text: str, limit: int) -> str:
+    """尾部截选：保留末尾 limit 字符（续写场景下，结尾比开头重要得多）。"""
+    if not text:
+        return ""
+    text = text.strip()
+    if limit <= 0 or len(text) <= limit:
+        return text
+    return "…" + text[-limit:].lstrip()
 
 
 # ============================================================
@@ -78,6 +88,11 @@ class ImitationService:
     RECENT_CHAPTERS_FOR_CONTEXT: int = 3
     RECENT_CHAPTER_CHARS_TRUNCATE: int = 1500
     MAIN_CHARACTERS_LIMIT: int = 6
+    # 目标章节"已写正文"结尾截选长度（续写衔接的关键上下文）
+    CURRENT_CHAPTER_TAIL_CHARS: int = 2000
+    # 关联剧情卡注入上限
+    LINKED_PLOT_CARDS_LIMIT: int = 5
+    LINKED_PLOT_CARD_CHARS: int = 160
 
     def __init__(self, ai_service: AIService):
         self.ai_service = ai_service
@@ -260,15 +275,27 @@ class ImitationService:
             if outline_text:
                 lines.append(f"章纲：{_truncate(outline_text, 1000)}")
 
-        # 最近 3 章节选
+            # 本章已写正文（结尾截选）：草稿会被"追加"到编辑器，
+            # 不给已写内容会导致模型从章纲开头重写、追加后情节重复
+            existing = (ch.content or "").strip()
+            if existing:
+                tail = _tail_truncate(existing, self.CURRENT_CHAPTER_TAIL_CHARS)
+                lines.append(
+                    "【本章已写内容 · 结尾截选】\n"
+                    "（本次生成的草稿将追加在这段文字之后，必须从其结尾自然续写，"
+                    "严禁重写/复述已发生的情节与对话）\n"
+                    f"{tail}"
+                )
+
+        # 最近 3 章（结尾截选：续写承接看的是上一章怎么收尾，而非怎么开头）
         if ctx.recent_chapters:
-            recent_lines = ["最近章节（截选）："]
+            recent_lines = ["最近章节（结尾截选）："]
             for ch in ctx.recent_chapters:
-                content = _truncate(
+                content = _tail_truncate(
                     ch.content or "", self.RECENT_CHAPTER_CHARS_TRUNCATE
                 )
                 recent_lines.append(
-                    f"--- 第{ch.chapter_number}章《{ch.title}》 ---\n{content}"
+                    f"--- 第{ch.chapter_number}章《{ch.title}》结尾 ---\n{content}"
                 )
             lines.append("\n".join(recent_lines))
 
@@ -292,9 +319,14 @@ class ImitationService:
         dimensions: Optional[List[str]],
         strength: Optional[str],
         target_word_count: int,
-        style_id: Optional[str] = None,
+        style_id: Optional[int] = None,
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """拼装完整 prompt 并返回元数据（供 API 层包装为响应或喂给 AIService）。
+
+        user_id 可选：提供时会额外注入长期记忆（伏笔/角色状态/情节点）与
+        叙事状态（因果链/承诺/关系/时间线），保证仿写不破坏长篇连续性；
+        省略时跳过（测试/无向量库环境自动降级）。
 
         Returns:
             {
@@ -308,12 +340,26 @@ class ImitationService:
               "reference_chars": int,
             }
         """
-        packs = await self.resolve_packs(db, project_id, pack_ids)
-        used_dimensions = self.resolve_dimensions(packs, dimensions)
-        used_strength = self.resolve_strength(packs, strength)
-        profile = StrengthProfile.for_strength(used_strength)
-
         ctx = await self.load_project_context(db, project_id, target_chapter_id)
+
+        # ====== 参考包组装：统一走 injector.build_reference_block ======
+        # 修复点：此前仿写自维护一套只认 5 手法+corpus 的拼装，
+        # synopsis/entities/relations/events/bridges/character_archive 被静默丢弃，
+        # 而 used_dimensions 仍谎报"已启用"。改走统一入口后：
+        # 1) 12 个维度全部可消费；2) used_dimensions 只含实际产出段落的维度。
+        block = await self.injector.build_reference_block(
+            db,
+            project_id,
+            scene="imitate_chapter",
+            dimensions=dimensions,
+            strength=strength,
+            pack_ids=pack_ids,
+            anchor_query=user_intent,
+            fallback_dimensions=self.DEFAULT_DIMENSION_FALLBACK,
+        )
+        used_dimensions = block.used_dimensions
+        used_strength = block.used_strength
+        ref_sections: List[str] = list(block.user_sections)
 
         # ====== System Prompt ======
         base_system = (
@@ -324,59 +370,58 @@ class ImitationService:
             "禁止照抄原书的具体人名/地名/情节/台词\n"
             "3) 输出体感：保持中文小说叙事节奏，避免分点列举式\n"
             "4) 字数控制：在目标字数 ±15% 区间内，结构完整\n"
-            "5) 仅输出小说正文，不要输出任何解释、标题、章节号、Markdown 标记或元注释"
+            "5) 仅输出小说正文，不要输出任何解释、标题、章节号、Markdown 标记或元注释\n"
+            "6) 若提供了【本章已写内容】：你的输出是它的直接续写，"
+            "必须从其结尾无缝衔接，严禁重复、复述或改写已写段落"
         )
-        if "style" in used_dimensions:
-            style_block = self.injector._format_style_system_prompt(packs, profile)
-            if style_block:
-                base_system = (
-                    base_system + "\n\n[文风参考（影响语气/句式而非具体内容）]\n" + style_block
-                )
+        if block.system_segment:
+            base_system = (
+                base_system
+                + "\n\n[文风参考（影响语气/句式而非具体内容）]\n"
+                + block.system_segment
+            )
 
         # 项目内已有的写作风格叠加（与参考包文风互不冲突，叠加在更后面优先级更高）
+        # 修复点：按项目所有权过滤（全局预设 project_id IS NULL / 本项目自定义），
+        # 防止通过 style_id 读到其他项目的自定义文风内容
         if style_id:
             try:
-                from app.services.prompt_service import WritingStyleManager
                 from app.models.writing_style import WritingStyle
 
                 ws_result = await db.execute(
-                    select(WritingStyle).where(WritingStyle.id == style_id)
+                    select(WritingStyle).where(
+                        WritingStyle.id == style_id,
+                        or_(
+                            WritingStyle.project_id.is_(None),
+                            WritingStyle.project_id == project_id,
+                        ),
+                    )
                 )
                 ws = ws_result.scalar_one_or_none()
                 if ws and ws.prompt_content:
-                    # WritingStyleManager.apply_style_to_prompt 是面向 user prompt 的；
-                    # 这里直接把内容追加到 system 末尾，行为与"更高优先级风格"一致
                     base_system = (
                         base_system
                         + "\n\n[项目内自定义文风（优先级最高）]\n"
                         + ws.prompt_content
                     )
+                elif ws is None:
+                    logger.warning(
+                        "[V3-R5] style_id=%s 不存在或不属于项目 %s，已忽略",
+                        style_id, project_id,
+                    )
             except Exception as e:  # pragma: no cover - 防御性兜底
                 logger.warning("[V3-R5] 项目文风加载失败，已忽略：%s", e)
 
-        # ====== User Prompt ======
-        ref_sections: List[str] = []
-        if "methodology" in used_dimensions:
-            s = self.injector._format_methodology(packs, profile)
-            if s:
-                ref_sections.append(s)
-        if "structure" in used_dimensions:
-            s = self.injector._format_structure(packs, profile)
-            if s:
-                ref_sections.append(s)
-        if "archetypes" in used_dimensions:
-            s = self.injector._format_archetypes(packs, profile)
-            if s:
-                ref_sections.append(s)
-        if "worldbuilding" in used_dimensions:
-            s = self.injector._format_worldbuilding(packs, profile)
-            if s:
-                ref_sections.append(s)
-        if "corpus" in used_dimensions:
-            s = await self.injector._format_corpus(db, packs, user_intent, profile)
-            if s:
-                ref_sections.append(s)
+        # ====== 业务上下文块（剧情卡 / 桥段位置 / 长期记忆） ======
+        cards_block = await self._build_linked_cards_block(db, ctx)
+        bridge_block = await self._build_bridge_constraint_block(
+            db, project_id, ctx, target_word_count
+        )
+        memory_block = await self._build_memory_state_block(
+            db, project_id, ctx, user_id, user_intent
+        )
 
+        # ====== User Prompt ======
         project_state = self._format_project_state(ctx)
         intent_block = self._format_user_intent(user_intent)
         word_block = (
@@ -388,6 +433,12 @@ class ImitationService:
             project_state,
             intent_block,
         ]
+        if cards_block:
+            user_prompt_parts.append(cards_block)
+        if bridge_block:
+            user_prompt_parts.append(bridge_block)
+        if memory_block:
+            user_prompt_parts.append(memory_block)
         if ref_sections:
             user_prompt_parts.extend(ref_sections)
         user_prompt_parts.append(word_block)
@@ -396,42 +447,166 @@ class ImitationService:
         )
         user_prompt = "\n\n".join(user_prompt_parts)
 
-        # 元数据
-        used_packs_meta = []
-        for p in packs:
-            # 该 pack 在本次实际生效的维度 = 维度并集 ∩ 该 pack 提供的维度
-            pack_dims: List[str] = []
-            for d in used_dimensions:
-                if d == "corpus":
-                    pack_dims.append("corpus")  # 由 V2 表提供
-                elif d == "style" and p.style:
-                    pack_dims.append("style")
-                elif d == "methodology" and p.methodology:
-                    pack_dims.append("methodology")
-                elif d == "structure" and p.structure:
-                    pack_dims.append("structure")
-                elif d == "archetypes" and p.archetypes:
-                    pack_dims.append("archetypes")
-                elif d == "worldbuilding" and p.worldbuilding:
-                    pack_dims.append("worldbuilding")
-            used_packs_meta.append(
-                {
-                    "pack_id": p.pack_id,
-                    "source_book_title": p.source_book_title,
-                    "dimensions": _dedup_keep_order(pack_dims),
-                }
-            )
-
         return {
             "system_prompt": base_system,
             "user_prompt": user_prompt,
-            "used_packs": used_packs_meta,
+            "used_packs": block.used_packs,
             "used_dimensions": used_dimensions,
             "strength": used_strength,
             "target_word_count": target_word_count,
             "project_context_chars": len(project_state),
             "reference_chars": sum(len(s) for s in ref_sections),
         }
+
+    # ----------------------------------------------------------------
+    # 业务上下文块构建（剧情卡 / 桥段约束 / 长期记忆）
+    # ----------------------------------------------------------------
+
+    async def _build_linked_cards_block(
+        self, db: AsyncSession, ctx: _ProjectContext
+    ) -> str:
+        """目标章纲关联的剧情卡片（与普通正文生成对齐）。"""
+        if ctx.target_outline is None:
+            return ""
+        try:
+            from app.models.plot_card import PlotCard
+            from app.models.plot_card_chapter_outline_link import (
+                PlotCardChapterOutlineLink,
+            )
+
+            rows = await db.execute(
+                select(PlotCard)
+                .join(
+                    PlotCardChapterOutlineLink,
+                    PlotCard.id == PlotCardChapterOutlineLink.plot_card_id,
+                )
+                .where(
+                    PlotCardChapterOutlineLink.chapter_outline_id
+                    == ctx.target_outline.id
+                )
+                .order_by(PlotCardChapterOutlineLink.created_at)
+            )
+            cards = list(rows.scalars().all())[: self.LINKED_PLOT_CARDS_LIMIT]
+            if not cards:
+                return ""
+            lines = [
+                f"- 【{c.card_type or '剧情'}】{c.title}："
+                f"{_truncate(c.content or '', self.LINKED_PLOT_CARD_CHARS)}"
+                for c in cards
+            ]
+            return "[本章关联剧情卡片（草稿应体现这些设计）]\n" + "\n".join(lines)
+        except Exception as e:  # pragma: no cover - 防御性降级
+            logger.warning("[V3-R5] 剧情卡注入失败（已跳过）：%s", e)
+            return ""
+
+    async def _build_bridge_constraint_block(
+        self,
+        db: AsyncSession,
+        project_id: str,
+        ctx: _ProjectContext,
+        target_word_count: int,
+    ) -> str:
+        """K2 桥段位置约束：目标章纲绑定桥段时注入 C1/C2/C3/C4 位置纪律。
+
+        修复点：此前仿写完全无桥段感——C3 该"装到底不留钩子"的章节
+        可能被写成留悬念，C1 代入章可能被写成大结算。
+        """
+        outline = ctx.target_outline
+        if outline is None or not getattr(outline, "bridge_id", None):
+            return ""
+        try:
+            from app.services.reference_pack import (
+                build_v4_bridge_constraint_only,
+                fetch_bridge_context,
+            )
+
+            bridge_ctx = await fetch_bridge_context(db, outline)
+            if not bridge_ctx:
+                return ""
+            return await build_v4_bridge_constraint_only(
+                db,
+                project_id,
+                scene="chapter_content",
+                bridge_position=getattr(outline, "bridge_position", None),
+                bridge_context=bridge_ctx,
+                chapter_outline_id=outline.id,
+                target_word_count=target_word_count,
+            )
+        except Exception as e:  # pragma: no cover - 防御性降级
+            logger.warning("[V3-R5] 桥段约束注入失败（已跳过）：%s", e)
+            return ""
+
+    async def _build_memory_state_block(
+        self,
+        db: AsyncSession,
+        project_id: str,
+        ctx: _ProjectContext,
+        user_id: Optional[str],
+        user_intent: str,
+    ) -> str:
+        """长期记忆 + 叙事状态（伏笔/角色状态/因果/承诺/关系/时间线）。
+
+        仅当 user_id 提供且目标章节明确时启用；任一子服务失败都单独降级，
+        不阻塞仿写主流程（测试/无向量库环境自然跳过）。
+        """
+        if not user_id or ctx.target_chapter is None:
+            return ""
+
+        chapter_number = ctx.target_chapter.chapter_number
+        outline_query = ""
+        if ctx.target_outline is not None:
+            outline_query = (
+                ctx.target_outline.plot_points or ctx.target_outline.summary or ""
+            )
+        query_text = (outline_query or ctx.target_chapter.summary or user_intent or "")[:500]
+
+        parts: List[str] = []
+
+        # 1) 向量记忆：伏笔 / 角色状态 / 情节点 / 语义相关
+        try:
+            from app.services.memory_service import memory_service
+
+            mem = await memory_service.build_context_for_generation(
+                user_id=user_id,
+                project_id=project_id,
+                current_chapter=chapter_number,
+                chapter_outline=query_text,
+                character_names=[c.name for c in ctx.main_characters] or None,
+            )
+            for key in ("foreshadows", "character_states", "plot_points", "relevant_memories"):
+                v = (mem or {}).get(key) or ""
+                if isinstance(v, str) and v.strip():
+                    parts.append(v.strip())
+        except Exception as e:
+            logger.warning("[V3-R5] 记忆上下文加载失败（已跳过）：%s", e)
+
+        # 2) 叙事状态：因果链 / 承诺 / 关系动态 / 时间线 / POV 已知信息 / 阵营
+        try:
+            from app.services.narrative_state_service import narrative_state_service
+
+            state = await narrative_state_service.build_generation_context(
+                db=db,
+                project_id=project_id,
+                current_chapter=chapter_number,
+                pov_character_name=(
+                    getattr(ctx.target_outline, "pov", None)
+                    if ctx.target_outline is not None
+                    else None
+                ),
+            )
+            for v in (state or {}).values():
+                if isinstance(v, str) and v.strip():
+                    parts.append(v.strip())
+        except Exception as e:
+            logger.warning("[V3-R5] 叙事状态加载失败（已跳过）：%s", e)
+
+        if not parts:
+            return ""
+        joined = _truncate("\n\n".join(parts), 4000)
+        return (
+            "[长期记忆与叙事状态（硬约束：已死角色不得复活；能力/位置/关系/未回收伏笔以此为准）]\n"
+            + joined
+        )
 
     async def stream_imitation(
         self,
@@ -445,6 +620,7 @@ class ImitationService:
         strength: Optional[str],
         target_word_count: int,
         style_id: Optional[int] = None,
+        user_id: Optional[str] = None,
         provider: Optional[str] = None,
         model: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
@@ -459,6 +635,7 @@ class ImitationService:
             strength=strength,
             target_word_count=target_word_count,
             style_id=style_id,
+            user_id=user_id,
         )
         logger.info(
             "[V3-R5] 仿写开始 project=%s strength=%s dims=%s ctx=%d ref=%d",

@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 # ============================================================
@@ -44,8 +44,7 @@ class ReferencePackSummary(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ReferencePackDetail(BaseModel):
@@ -115,11 +114,15 @@ class ReferencePackDetail(BaseModel):
 # ============================================================
 
 
-# 10 个引用维度：5 个核心手法 tab + V3.2 synopsis + V3.2-P2 模式三维度 + corpus
+# 12 个引用维度：5 个核心手法 tab + V3.2 synopsis + V3.2-P2 模式三维度
+# + V4.1 bridges/character_archive + corpus
+# 注意：必须与前端 @/frontend/src/types/reference_pack.ts 的 ReferenceDimension 保持一致，
+# 否则 deep 档挂载会 422（请求校验）/500（响应校验）。
 ReferenceDimension = Literal[
     "methodology", "style", "structure", "archetypes", "worldbuilding",
     "synopsis",  # V3.2 Story Bible
     "entities", "relations", "events",  # V3.2-P2 模式三维度
+    "bridges", "character_archive",  # V4.1 桥段范本 + 完整角色档案
     "corpus",
 ]
 ReferenceStrength = Literal["light", "medium", "deep"]
@@ -157,8 +160,7 @@ class ProjectReferencePackResponse(BaseModel):
     default_strength: ReferenceStrength = "medium"
     attached_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================================
