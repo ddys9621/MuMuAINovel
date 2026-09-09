@@ -1,5 +1,5 @@
 """角色相关的Pydantic模型"""
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
@@ -67,6 +67,7 @@ class CharacterResponse(CharacterBase):
     """角色响应模型"""
     id: str
     project_id: str
+    aliases: Optional[str] = Field(None, description="曾用名(JSON数组)，改名时自动追加旧名")
     avatar_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
@@ -76,9 +77,12 @@ class CharacterResponse(CharacterBase):
     location: Optional[str] = Field(None, description="组织所在地")
     motto: Optional[str] = Field(None, description="组织格言/口号")
     color: Optional[str] = Field(None, description="组织代表颜色")
+    member_names: Optional[List[str]] = Field(
+        None,
+        description="组织在籍成员名（按 OrganizationMember 读时派生；无成员关系记录时回退到 organization_members 快照）",
+    )
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CharacterGenerateRequest(BaseModel):

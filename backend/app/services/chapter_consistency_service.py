@@ -19,6 +19,7 @@ from app.models.character import Character
 from app.models.narrative_promise import NarrativePromise
 from app.models.relationship_event import RelationshipEvent
 from app.models.timeline_event import TimelineEvent
+from app.utils.character_names import build_name_index
 
 logger = get_logger(__name__)
 
@@ -36,6 +37,10 @@ class ChapterConsistencyService:
         analysis: dict[str, Any],
     ) -> dict[str, int]:
         signals = self._extract_continuity_signals(analysis)
+        # AI 可能沿用角色曾用名；信号按名字串链，落库前统一归到正式名
+        canonical_names = await self._load_canonical_names(db, project_id)
+        for signal in signals:
+            signal["character_name"] = self._canonical_name(signal.get("character_name"), canonical_names) or None
 
         await db.execute(delete(ChapterContinuitySignal).where(ChapterContinuitySignal.chapter_id == chapter.id))
         await db.execute(delete(ChapterConsistencyIssue).where(ChapterConsistencyIssue.chapter_id == chapter.id))
@@ -62,6 +67,7 @@ class ChapterConsistencyService:
             chapter=chapter,
             analysis=analysis,
             signals=signals,
+            canonical_names=canonical_names,
         )
 
         for issue in issues:
@@ -237,6 +243,7 @@ class ChapterConsistencyService:
         chapter: Chapter,
         analysis: dict[str, Any],
         signals: list[dict[str, Optional[str]]],
+        canonical_names: Optional[dict[str, str]] = None,
     ) -> list[dict[str, Any]]:
         issues: list[dict[str, Any]] = []
 
@@ -268,7 +275,7 @@ class ChapterConsistencyService:
             for item in current_life_signals
             if item["signal_value"] == "revived"
         }
-        current_character_names = self._collect_current_character_names(analysis)
+        current_character_names = self._collect_current_character_names(analysis, canonical_names)
         for character_name in sorted(current_character_names):
             dead_at = previous_dead_by_character.get(character_name)
             if dead_at and character_name not in revived_names:
@@ -532,46 +539,43 @@ class ChapterConsistencyService:
 
         return signals
 
-    def _collect_current_character_names(self, analysis: dict[str, Any]) -> set[str]:
+    def _collect_current_character_names(
+        self,
+        analysis: dict[str, Any],
+        canonical_names: Optional[dict[str, str]] = None,
+    ) -> set[str]:
         names: set[str] = set()
 
-        for item in analysis.get("character_states", []) or []:
-            name = self._normalize_name(item.get("character_name"))
+        def add(value: Any) -> None:
+            name = self._canonical_name(value, canonical_names)
             if name:
                 names.add(name)
 
+        for item in analysis.get("character_states", []) or []:
+            add(item.get("character_name"))
+
         for item in analysis.get("relationship_deltas", []) or []:
             for key in ("from_character_name", "to_character_name"):
-                name = self._normalize_name(item.get(key))
-                if name:
-                    names.add(name)
+                add(item.get(key))
 
         for item in analysis.get("timeline_events", []) or []:
             for key in ("actor_names", "target_names"):
                 for raw_name in item.get(key, []) or []:
-                    name = self._normalize_name(raw_name)
-                    if name:
-                        names.add(name)
+                    add(raw_name)
 
         for item in analysis.get("causal_links", []) or []:
             for key in ("actor_names", "target_names"):
                 for raw_name in item.get(key, []) or []:
-                    name = self._normalize_name(raw_name)
-                    if name:
-                        names.add(name)
+                    add(raw_name)
 
         for item in analysis.get("knowledge_changes", []) or []:
-            name = self._normalize_name(item.get("character_name"))
-            if name:
-                names.add(name)
+            add(item.get("character_name"))
 
         continuity = analysis.get("continuity_signals") or {}
         for item in continuity.get("life_state_changes", []) or []:
             if (item.get("status") or "").strip().lower() in {"dead", "missing"}:
                 continue
-            name = self._normalize_name(item.get("character_name"))
-            if name:
-                names.add(name)
+            add(item.get("character_name"))
 
         return names
 
@@ -612,6 +616,18 @@ class ChapterConsistencyService:
     async def _load_character_name_map(self, db: AsyncSession, project_id: str) -> dict[str, str]:
         result = await db.execute(select(Character).where(Character.project_id == project_id))
         return {item.id: item.name for item in result.scalars().all() if item.name}
+
+    async def _load_canonical_names(self, db: AsyncSession, project_id: str) -> dict[str, str]:
+        """{归一化键(正式名或曾用名): 正式名}，把 AI 沿用的旧名归到当前名。"""
+        result = await db.execute(select(Character).where(Character.project_id == project_id))
+        index = build_name_index(result.scalars().all(), key=self._normalize_key)
+        return {key: character.name for key, character in index.items()}
+
+    def _canonical_name(self, value: Any, canonical_names: Optional[dict[str, str]]) -> str:
+        name = self._normalize_name(value)
+        if not name or not canonical_names:
+            return name
+        return canonical_names.get(self._normalize_key(name), name)
 
     def _is_location_match(self, outline_scene: str, current_locations: Iterable[str]) -> bool:
         outline_tokens = self._location_tokens(outline_scene)

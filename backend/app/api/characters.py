@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 import json
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 from app.database import get_db
 from app.utils.sse_response import SSEResponse, create_sse_response
@@ -12,6 +12,7 @@ from app.models.project import Project
 from app.models.generation_history import GenerationHistory
 from app.models.relationship import CharacterRelationship, Organization, OrganizationMember, RelationshipType
 from app.services.relationship_matcher import match_relationship_type
+from app.services.character_rename_service import propagate_character_rename
 from app.schemas.character import (
     CharacterCreate,
     CharacterUpdate,
@@ -24,6 +25,7 @@ from app.services.prompt_service import prompt_service
 from app.logger import get_logger
 from app.api.settings import get_user_ai_service
 from app.utils.role_type import normalize_role_type
+from app.utils.character_names import record_former_name
 
 router = APIRouter(prefix="/characters", tags=["角色管理"])
 logger = get_logger(__name__)
@@ -62,30 +64,56 @@ async def verify_project_access(project_id: str, user_id: str, db: AsyncSession)
     return project
 
 
-@router.get("", response_model=CharacterListResponse, summary="获取角色列表")
-async def get_characters(
-    project_id: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db)
-):
-    """获取指定项目的所有角色（query参数版本）"""
-    # 验证用户权限
-    user_id = getattr(request.state, 'user_id', None)
-    await verify_project_access(project_id, user_id, db)
-    
-    # 获取总数
+def _parse_member_snapshot(raw: Optional[str]) -> list[str]:
+    """解析 Character.organization_members 名字快照（AI 生成/导入写入），非法 JSON 视为空。"""
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    names = []
+    for item in parsed:
+        name = item.get("name") if isinstance(item, dict) else item
+        if isinstance(name, str) and name.strip():
+            names.append(name.strip())
+    return names
+
+
+async def _load_org_member_names(project_id: str, db: AsyncSession) -> dict[str, list[str]]:
+    """按组织角色 ID 归组的在籍成员名：OrganizationMember JOIN Character 读时派生，改名后自然是新名。"""
+    result = await db.execute(
+        select(Organization.character_id, Character.name)
+        .join_from(Organization, OrganizationMember, OrganizationMember.organization_id == Organization.id)
+        .join(Character, Character.id == OrganizationMember.character_id)
+        .where(Organization.project_id == project_id, OrganizationMember.status == "active")
+        .order_by(OrganizationMember.rank.desc(), OrganizationMember.created_at)
+    )
+    names: dict[str, list[str]] = {}
+    for org_character_id, member_name in result.all():
+        names.setdefault(org_character_id, []).append(member_name)
+    return names
+
+
+async def _build_character_list(project_id: str, db: AsyncSession) -> CharacterListResponse:
+    """项目角色列表；组织条目附带 Organization 扩展字段与派生的成员名。"""
     count_result = await db.execute(
         select(func.count(Character.id)).where(Character.project_id == project_id)
     )
     total = count_result.scalar_one()
     
-    # 获取角色列表
     result = await db.execute(
         select(Character)
         .where(Character.project_id == project_id)
         .order_by(Character.created_at.desc())
     )
     characters = result.scalars().all()
+    
+    org_result = await db.execute(select(Organization).where(Organization.project_id == project_id))
+    org_by_character = {org.character_id: org for org in org_result.scalars().all()}
+    member_names_by_org = await _load_org_member_names(project_id, db)
     
     # 为组织类型的角色填充Organization表的额外字段
     enriched_characters = []
@@ -94,6 +122,7 @@ async def get_characters(
             "id": char.id,
             "project_id": char.project_id,
             "name": char.name,
+            "aliases": char.aliases,
             "age": char.age,
             "gender": char.gender,
             "is_organization": char.is_organization,
@@ -112,14 +141,12 @@ async def get_characters(
             "power_level": None,
             "location": None,
             "motto": None,
-            "color": None
+            "color": None,
+            "member_names": None,
         }
         
         if char.is_organization:
-            org_result = await db.execute(
-                select(Organization).where(Organization.character_id == char.id)
-            )
-            org = org_result.scalar_one_or_none()
+            org = org_by_character.get(char.id)
             if org:
                 char_dict.update({
                     "power_level": org.power_level,
@@ -127,10 +154,27 @@ async def get_characters(
                     "motto": org.motto,
                     "color": org.color
                 })
+            # 有成员关系记录以关系表为准；没有（典型：AI 刚生成的组织）才回退到快照
+            char_dict["member_names"] = (
+                member_names_by_org.get(char.id) or _parse_member_snapshot(char.organization_members)
+            )
         
         enriched_characters.append(char_dict)
     
     return CharacterListResponse(total=total, items=enriched_characters)
+
+
+@router.get("", response_model=CharacterListResponse, summary="获取角色列表")
+async def get_characters(
+    project_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """获取指定项目的所有角色（query参数版本）"""
+    # 验证用户权限
+    user_id = getattr(request.state, 'user_id', None)
+    await verify_project_access(project_id, user_id, db)
+    return await _build_character_list(project_id, db)
 
 
 @router.get("/project/{project_id}", response_model=CharacterListResponse, summary="获取项目的所有角色")
@@ -143,65 +187,7 @@ async def get_project_characters(
     # 验证用户权限
     user_id = getattr(request.state, 'user_id', None)
     await verify_project_access(project_id, user_id, db)
-    
-    # 获取总数
-    count_result = await db.execute(
-        select(func.count(Character.id)).where(Character.project_id == project_id)
-    )
-    total = count_result.scalar_one()
-    
-    # 获取角色列表
-    result = await db.execute(
-        select(Character)
-        .where(Character.project_id == project_id)
-        .order_by(Character.created_at.desc())
-    )
-    characters = result.scalars().all()
-    
-    # 为组织类型的角色填充Organization表的额外字段
-    enriched_characters = []
-    for char in characters:
-        char_dict = {
-            "id": char.id,
-            "project_id": char.project_id,
-            "name": char.name,
-            "age": char.age,
-            "gender": char.gender,
-            "is_organization": char.is_organization,
-            "role_type": char.role_type,
-            "personality": char.personality,
-            "background": char.background,
-            "appearance": char.appearance,
-            "relationships": char.relationships,
-            "organization_type": char.organization_type,
-            "organization_purpose": char.organization_purpose,
-            "organization_members": char.organization_members,
-            "traits": char.traits,
-            "avatar_url": char.avatar_url,
-            "created_at": char.created_at,
-            "updated_at": char.updated_at,
-            "power_level": None,
-            "location": None,
-            "motto": None,
-            "color": None
-        }
-        
-        if char.is_organization:
-            org_result = await db.execute(
-                select(Organization).where(Organization.character_id == char.id)
-            )
-            org = org_result.scalar_one_or_none()
-            if org:
-                char_dict.update({
-                    "power_level": org.power_level,
-                    "location": org.location,
-                    "motto": org.motto,
-                    "color": org.color
-                })
-        
-        enriched_characters.append(char_dict)
-    
-    return CharacterListResponse(total=total, items=enriched_characters)
+    return await _build_character_list(project_id, db)
 
 
 @router.get("/{character_id}", response_model=CharacterResponse, summary="获取角色详情")
@@ -247,11 +233,18 @@ async def update_character(
     await verify_project_access(character.project_id, user_id, db)
     
     # 更新字段
+    old_name = character.name
     update_data = character_update.model_dump(exclude_unset=True)
     if "role_type" in update_data:
         update_data["role_type"] = normalize_role_type(update_data["role_type"], character.role_type)
     for field, value in update_data.items():
         setattr(character, field, value)
+    
+    # 改名：把其它表里的名字快照一并改掉（同一事务），旧名记入曾用名供按名匹配兜底
+    new_name = update_data.get("name")
+    if new_name and old_name and new_name.strip() != old_name.strip():
+        await propagate_character_rename(db, character.project_id, old_name, new_name)
+        character.aliases = record_former_name(character.aliases, old_name, new_name)
     
     await db.commit()
     await db.refresh(character)

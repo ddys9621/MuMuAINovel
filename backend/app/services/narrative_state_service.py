@@ -18,6 +18,7 @@ from app.models.plot_line import PlotLine
 from app.models.relationship import CharacterRelationship, Organization, OrganizationMember
 from app.models.relationship_event import RelationshipEvent
 from app.models.timeline_event import TimelineEvent
+from app.utils.character_names import build_name_index
 
 logger = get_logger(__name__)
 
@@ -118,7 +119,8 @@ class NarrativeStateService:
 
     async def _load_character_map(self, db: AsyncSession, project_id: str) -> dict[str, Character]:
         result = await db.execute(select(Character).where(Character.project_id == project_id))
-        return {self._normalize_key(item.name): item for item in result.scalars().all() if item.name}
+        # 正式名 + 曾用名都指向同一角色（改名后 AI 仍可能沿用旧名）
+        return build_name_index(result.scalars().all(), key=self._normalize_key)
 
     async def _load_plot_line_map(self, db: AsyncSession, project_id: str) -> dict[str, PlotLine]:
         result = await db.execute(select(PlotLine).where(PlotLine.project_id == project_id))
