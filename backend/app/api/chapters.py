@@ -34,6 +34,7 @@ from app.schemas.chapter import (
     BatchGenerateStatusResponse
 )
 from app.schemas.regeneration import (
+    ApplyRegenerationRequest,
     ChapterRegenerateRequest,
     RegenerationTaskResponse,
     RegenerationTaskStatus
@@ -49,6 +50,7 @@ from app.services.world_rule_service import WorldRuleService
 from app.logger import get_logger
 from app.api.settings import get_user_ai_service
 from app.config import settings as config_settings
+from app.utils.character_names import build_name_index
 from app.utils.data_consistency import sync_organization_member_count
 from app.utils.sse_response import create_sse_response
 from app.utils.text_utils import count_words
@@ -152,11 +154,8 @@ async def _auto_create_entities(
     existing_result = await db.execute(
         select(Character).where(Character.project_id == project_id)
     )
-    existing_map: dict[str, Character] = {
-        (c.name or "").strip().lower(): c
-        for c in existing_result.scalars().all()
-        if c.name
-    }
+    # 正式名 + 曾用名都指向同一角色：改名后旧章节里的旧名不会被当成新角色重复建档
+    existing_map: dict[str, Character] = build_name_index(existing_result.scalars().all())
 
     created = 0
     enriched = 0
@@ -746,18 +745,20 @@ async def update_chapter(
     for field, value in update_data.items():
         setattr(chapter, field, value)
     
-    # 如果内容更新了，重新计算字数
-    if "content" in update_data and chapter.content:
-        new_word_count = count_words(chapter.content)
+    # 如果内容更新了，重新计算字数（含清空为 "" 的场景，word_count 需归零）
+    if "content" in update_data:
+        new_word_count = count_words(chapter.content or "")
         chapter.word_count = new_word_count
-        
+
         # 更新项目字数
         result = await db.execute(
             select(Project).where(Project.id == chapter.project_id)
         )
         project = result.scalar_one_or_none()
         if project:
-            project.current_words = project.current_words - old_word_count + new_word_count
+            project.current_words = max(
+                0, (project.current_words or 0) - old_word_count + new_word_count
+            )
     
     await db.commit()
     await db.refresh(chapter)
@@ -1282,6 +1283,11 @@ async def analyze_chapter_background(
                 existing_analysis.suggestions = analysis_result.get('suggestions', [])
                 existing_analysis.dialogue_ratio = analysis_result.get('dialogue_ratio', 0)
                 existing_analysis.description_ratio = analysis_result.get('description_ratio', 0)
+                # 刷新分析时间戳：用于前端"内容修改后分析过期"判断（is_stale）
+                # 注意必须用 func.now()（SQLite CURRENT_TIMESTAMP，UTC），
+                # 与 chapter.updated_at 的 onupdate=func.now() 保持同一时钟，
+                # 否则 datetime.now()（本地时区）会让 stale 比较在时差窗口内失效
+                existing_analysis.created_at = func.now()
             else:
                 # 创建新记录
                 logger.info(f"  创建新的分析记录")
@@ -1867,16 +1873,18 @@ async def generate_chapter_content_stream(
                         build_v4_bridge_constraint_only,
                         fetch_bridge_context,
                     )
-                    if current_outline and getattr(current_outline, "bridge_id", None):
-                        _bridge_ctx = await fetch_bridge_context(db_session, current_outline)
+                    # 本函数里章纲变量叫 chapter_outline（上文第 1559 行）；此前误写 current_outline，
+                    # NameError 被下面的 except 吞成 WARNING，导致桥段位置约束从未真正注入
+                    if chapter_outline and getattr(chapter_outline, "bridge_id", None):
+                        _bridge_ctx = await fetch_bridge_context(db_session, chapter_outline)
                         if _bridge_ctx:
                             _v4_bridge_seg = await build_v4_bridge_constraint_only(
                                 db_session, project.id,
                                 scene="chapter_content",
-                                model_name=getattr(generate_request, "model", None) or "deepseek-v3",
-                                bridge_position=current_outline.bridge_position,
+                                model_name=getattr(user_ai_service, "default_model", None) or "deepseek-v3",
+                                bridge_position=chapter_outline.bridge_position,
                                 bridge_context=_bridge_ctx,
-                                chapter_outline_id=current_outline.id,
+                                chapter_outline_id=chapter_outline.id,
                                 target_word_count=target_word_count,
                             )
                             if _v4_bridge_seg:
@@ -1887,7 +1895,7 @@ async def generate_chapter_content_stream(
                                 )
                                 logger.info(
                                     f"🎯 [V4.1 K2] 注入桥段位置约束 "
-                                    f"position={current_outline.bridge_position} "
+                                    f"position={chapter_outline.bridge_position} "
                                     f"bridge={_bridge_ctx.get('title','?')}"
                                 )
                 except Exception as _be:  # pragma: no cover
@@ -2239,9 +2247,18 @@ async def get_chapter_analysis(
         db=db,
         chapter=chapter_check,
     )
-    
+
+    # 失效判定：章节内容在分析之后被修改过 → 分析/记忆/审计结果可能过期
+    is_stale = bool(
+        analysis.created_at
+        and chapter_check.updated_at
+        and chapter_check.updated_at > analysis.created_at
+    )
+
     return {
         "chapter_id": chapter_id,
+        "is_stale": is_stale,
+        "content_updated_at": chapter_check.updated_at.isoformat() if chapter_check.updated_at else None,
         "analysis": analysis.to_dict(),  # 使用to_dict()方法
         "memories": [
             {
@@ -3340,12 +3357,20 @@ async def regenerate_chapter_stream(
                 # 发送开始事件
                 yield f"data: {json.dumps({'type': 'start', 'message': '开始重新生成章节...'}, ensure_ascii=False)}\n\n"
                 
+                # 版本号递增：修复历史缺陷（模型默认 1 且从未递增，版本列表全是 v1）
+                ver_result = await db_session.execute(
+                    select(func.max(RegenerationTask.version_number))
+                    .where(RegenerationTask.chapter_id == chapter_id)
+                )
+                next_version = int(ver_result.scalar() or 0) + 1
+
                 # 创建重新生成任务
                 regen_task = RegenerationTask(
                     chapter_id=chapter_id,
                     analysis_id=analysis.id if analysis else None,
                     user_id=user_id,
                     project_id=chapter.project_id,
+                    version_number=next_version,
                     modification_instructions=modification_instructions,
                     original_suggestions=analysis.suggestions if analysis else None,
                     selected_suggestion_indices=regenerate_request.selected_suggestion_indices,
@@ -3424,8 +3449,59 @@ async def regenerate_chapter_stream(
                 # 计算差异统计
                 diff_stats = regenerator.calculate_content_diff(chapter.content, full_content)
 
+                # auto_apply：把新稿真正写回章节正文（原稿已在任务的 original_content 中留档，可回滚）
+                applied = False
+                if regenerate_request.auto_apply and full_content.strip():
+                    target_result = await db_session.execute(
+                        select(Chapter).where(Chapter.id == chapter_id)
+                    )
+                    target_chapter = target_result.scalar_one_or_none()
+                    if target_chapter:
+                        old_wc = target_chapter.word_count or 0
+                        new_wc = count_words(full_content)
+                        target_chapter.content = full_content
+                        target_chapter.word_count = new_wc
+                        target_chapter.status = "completed"
+                        proj_result = await db_session.execute(
+                            select(Project).where(Project.id == target_chapter.project_id)
+                        )
+                        target_project = proj_result.scalar_one_or_none()
+                        if target_project:
+                            target_project.current_words = max(
+                                0, (target_project.current_words or 0) - old_wc + new_wc
+                            )
+                        applied = True
+                        logger.info(f"✅ 重生成新稿已应用到章节正文: {chapter_id}")
+
                 await db_session.commit()
                 db_committed = True
+
+                # auto_apply 后触发重新分析：正文已整章替换，旧的记忆/一致性信号必须刷新，
+                # 否则会以旧稿状态污染后续章节生成（与 generate-stream 的自动分析行为对齐）
+                if applied:
+                    try:
+                        analysis_task = AnalysisTask(
+                            chapter_id=chapter_id,
+                            user_id=user_id,
+                            project_id=chapter.project_id,
+                            status='pending',
+                            progress=0
+                        )
+                        db_session.add(analysis_task)
+                        await db_session.commit()
+                        await db_session.refresh(analysis_task)
+                        await asyncio.sleep(0.05)  # 等 SQLite WAL 写入对其他会话可见
+                        background_tasks.add_task(
+                            analyze_chapter_background,
+                            chapter_id=chapter_id,
+                            user_id=user_id,
+                            project_id=chapter.project_id,
+                            task_id=analysis_task.id,
+                            ai_service=user_ai_service
+                        )
+                        yield f"data: {json.dumps({'type': 'progress', 'message': '🔍 新稿已排队重新分析', 'progress': 97}, ensure_ascii=False)}\n\n"
+                    except Exception as _an_err:
+                        logger.warning(f"⚠️ 重生成后排队分析失败（不影响正文应用）: {_an_err}")
 
                 # 先发送结果数据
                 result_data = {
@@ -3434,7 +3510,7 @@ async def regenerate_chapter_stream(
                         'task_id': task_id,
                         'word_count': count_words(full_content),
                         'version_number': regen_task.version_number,
-                        'auto_applied': regenerate_request.auto_apply,
+                        'auto_applied': applied,
                         'diff_stats': diff_stats
                     }
                 }
@@ -3527,4 +3603,110 @@ async def get_regeneration_tasks(
             }
             for task in tasks
         ]
+    }
+
+
+async def _get_owned_regeneration_task(
+    chapter_id: str,
+    task_id: str,
+    request: Request,
+    db: AsyncSession,
+) -> tuple[Chapter, RegenerationTask]:
+    """校验章节归属 + 任务归属，返回 (chapter, task)。"""
+    user_id = getattr(request.state, 'user_id', None)
+
+    chapter_result = await db.execute(
+        select(Chapter).where(Chapter.id == chapter_id)
+    )
+    chapter = chapter_result.scalar_one_or_none()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+
+    await verify_project_access(chapter.project_id, user_id, db)
+
+    task_result = await db.execute(
+        select(RegenerationTask).where(
+            RegenerationTask.id == task_id,
+            RegenerationTask.chapter_id == chapter_id,
+        )
+    )
+    task = task_result.scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="重新生成任务不存在")
+    return chapter, task
+
+
+@router.get("/{chapter_id}/regeneration/tasks/{task_id}", summary="获取重新生成任务详情（含新旧稿全文）")
+async def get_regeneration_task_detail(
+    chapter_id: str,
+    task_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """返回单个版本的完整信息，供前端做新旧稿对比 / 应用前预览。"""
+    _, task = await _get_owned_regeneration_task(chapter_id, task_id, request, db)
+
+    return {
+        "task_id": task.id,
+        "chapter_id": task.chapter_id,
+        "status": task.status,
+        "version_number": task.version_number,
+        "version_note": task.version_note,
+        "modification_instructions": task.modification_instructions,
+        "custom_instructions": task.custom_instructions,
+        "selected_suggestion_indices": task.selected_suggestion_indices,
+        "original_word_count": task.original_word_count,
+        "regenerated_word_count": task.regenerated_word_count,
+        "original_content": task.original_content,
+        "regenerated_content": task.regenerated_content,
+        "error_message": task.error_message,
+        "created_at": task.created_at.isoformat() if task.created_at else None,
+        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+    }
+
+
+@router.post("/{chapter_id}/regeneration/tasks/{task_id}/apply", summary="应用版本内容到章节正文")
+async def apply_regeneration_task(
+    chapter_id: str,
+    task_id: str,
+    request: Request,
+    payload: ApplyRegenerationRequest = ApplyRegenerationRequest(),
+    db: AsyncSession = Depends(get_db)
+):
+    """把某次重新生成任务的内容写回章节正文。
+
+    - source=regenerated：应用该版本的新稿
+    - source=original：回滚到该版本改稿前的原稿快照
+    """
+    chapter, task = await _get_owned_regeneration_task(chapter_id, task_id, request, db)
+
+    source = (payload.source or "regenerated").lower()
+    if source not in ("regenerated", "original"):
+        raise HTTPException(status_code=400, detail="source 仅支持 regenerated / original")
+
+    content = task.regenerated_content if source == "regenerated" else task.original_content
+    if not content or not content.strip():
+        raise HTTPException(status_code=400, detail="该版本对应内容为空，无法应用")
+
+    old_wc = chapter.word_count or 0
+    new_wc = count_words(content)
+    chapter.content = content
+    chapter.word_count = new_wc
+    chapter.status = "completed"
+
+    project_result = await db.execute(
+        select(Project).where(Project.id == chapter.project_id)
+    )
+    project = project_result.scalar_one_or_none()
+    if project:
+        project.current_words = max(0, (project.current_words or 0) - old_wc + new_wc)
+
+    await db.commit()
+
+    label = "新稿" if source == "regenerated" else "改稿前原稿"
+    logger.info(f"✅ 应用重生成版本到章节: chapter={chapter_id} task={task_id} source={source}")
+    return {
+        "message": f"已把版本 v{task.version_number or 1} 的{label}写入正文",
+        "applied_source": source,
+        "word_count": new_wc,
     }
