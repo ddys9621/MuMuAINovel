@@ -1,12 +1,18 @@
-"""V4.1 K2 桥段 API（Phase 2 P2-4）。
+"""桥段 API（工程化桥段流水线）。
 
 端点：
-- POST   /api/projects/{project_id}/bridges/plan          规划 N 个桥段
+- GET    /api/projects/{project_id}/bridges/plan-preview  槽位表预览（纯计算，不写库）
+- POST   /api/projects/{project_id}/bridges/plan          建骨架：N 个 draft 桥段（无 LLM）
+- DELETE /api/projects/{project_id}/bridges               重置骨架（已展开 → 409）
+- POST   /api/projects/{project_id}/bridges/fill-stream   SSE：按主线节点分批 LLM 填充 draft
 - GET    /api/projects/{project_id}/bridges               列表
 - GET    /api/bridges/{bridge_id}                         详情
 - PATCH  /api/bridges/{bridge_id}                         更新（修改 4 章卡片内容）
 - DELETE /api/bridges/{bridge_id}                         删除
-- POST   /api/bridges/{bridge_id}/expand                  展开为 4 个 ChapterOutline
+- POST   /api/bridges/{bridge_id}/expand                  展开为第 4(n-1)+1…4n 章
+- POST   /api/projects/{project_id}/bridges/expand-all    按序批量展开 ready 桥段
+
+前置不满足 → 400；状态冲突 → 409。
 """
 from __future__ import annotations
 
@@ -14,7 +20,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,7 +28,20 @@ from app.api.settings import get_user_ai_service
 from app.database import get_db
 from app.models.project import Project
 from app.services.ai_service import AIService
-from app.services.bridge_planning_service import BridgePlanningService
+from app.services.bridge_planning_service import BridgePlanningService, bridge_to_dict
+from app.services.bridge_slot_planner import (
+    BridgePlanningConflictError,
+    BridgePlanningPreconditionError,
+)
+
+
+def _raise_http(exc: Exception) -> None:
+    """服务层异常 → HTTP：前置条件 400，状态冲突 409，其余原样抛出。"""
+    if isinstance(exc, BridgePlanningPreconditionError):
+        raise HTTPException(status_code=400, detail=str(exc))
+    if isinstance(exc, BridgePlanningConflictError):
+        raise HTTPException(status_code=409, detail=str(exc))
+    raise exc
 
 
 async def verify_project_access(
@@ -47,20 +66,6 @@ router = APIRouter(tags=["桥段四章 K2"])
 # ============================================================
 # Schemas
 # ============================================================
-
-class PlanBridgesRequest(BaseModel):
-    """规划桥段请求。"""
-    bridge_count: int = Field(default=25, ge=1, le=300)
-    model: Optional[str] = Field(default=None, description="覆盖默认模型")
-    mode: str = Field(
-        default="by_plot_line",
-        description=(
-            "规划模式：'by_plot_line'（推荐）按主线 + 节点权重自动分配桥段配额；"
-            "'free' 自由规划不绑节点（向后兼容）"
-        ),
-        pattern="^(by_plot_line|free)$",
-    )
-
 
 class ExpandBridgeRequest(BaseModel):
     """展开桥段请求。"""
@@ -106,14 +111,17 @@ class BridgeResponse(BaseModel):
     next_bridge_hook: Optional[str]
     status: str
     order_index: Optional[int]
-    # V4.1 方案 C：桥段 ↔ 剧情线节点绑定字段
+    # 桥段 ↔ 主线节点绑定字段（由 bridge_slot_planner 写入）
     plot_line_id: Optional[str] = None
     beat_index: Optional[int] = None
     beat_coverage_start: Optional[float] = None
     beat_coverage_end: Optional[float] = None
+    # 副线任务（bridge_to_dict 解析 JSON）+ 确定性章号范围
+    secondary_beats: list[dict] = []
+    chapter_start: int
+    chapter_end: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================================
@@ -138,33 +146,52 @@ def get_bridge_service(
 # Routes
 # ============================================================
 
-@router.post("/projects/{project_id}/bridges/plan", response_model=list[BridgeResponse])
-async def plan_bridges_endpoint(
+@router.get("/projects/{project_id}/bridges/plan-preview")
+async def preview_bridge_plan_endpoint(
     project_id: str,
-    payload: PlanBridgesRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
     service: BridgePlanningService = Depends(get_bridge_service),
 ):
-    """规划 N 个桥段（自动注入拆书 bridges + synopsis + methodology 维度）。"""
-    user_id = getattr(request.state, "user_id", None)
-    await verify_project_access(project_id, user_id, db)
-
-    # payload.model 为 None 时，由 service 内部回退到 user_ai_service.default_model
-    # payload.mode 决定是否按主线节点分配桥段（默认 by_plot_line，方案 C）
+    """纯计算：返回主线节点 → 桥段槽位表，不写库。"""
+    await verify_project_access(project_id, getattr(request.state, "user_id", None), db)
     try:
-        bridges = await service.plan_bridges(
-            db,
-            project_id=project_id,
-            model_name=payload.model,
-            bridge_count=payload.bridge_count,
-            mode=payload.mode,
-        )
-    except Exception as exc:
-        logger.error("[plot_bridges] 规划失败: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"桥段规划失败: {exc}")
+        plan = await service.preview_plan(db, project_id)
+    except (BridgePlanningPreconditionError, BridgePlanningConflictError) as exc:
+        _raise_http(exc)
+    return plan.to_dict()
 
-    return [BridgeResponse.model_validate(b) for b in bridges]
+
+@router.post("/projects/{project_id}/bridges/plan", response_model=list[BridgeResponse])
+async def plan_bridges_endpoint(
+    project_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    service: BridgePlanningService = Depends(get_bridge_service),
+):
+    """建骨架：创建 N 个 draft 桥段（无 LLM）。已存在 → 409。"""
+    await verify_project_access(project_id, getattr(request.state, "user_id", None), db)
+    try:
+        bridges = await service.plan_bridges(db, project_id)
+    except (BridgePlanningPreconditionError, BridgePlanningConflictError) as exc:
+        _raise_http(exc)
+    return [BridgeResponse(**bridge_to_dict(b)) for b in bridges]
+
+
+@router.delete("/projects/{project_id}/bridges")
+async def reset_bridges_endpoint(
+    project_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    service: BridgePlanningService = Depends(get_bridge_service),
+):
+    """重置骨架：删除全部桥段。已展开 → 409。"""
+    await verify_project_access(project_id, getattr(request.state, "user_id", None), db)
+    try:
+        deleted = await service.reset_bridges(db, project_id)
+    except BridgePlanningConflictError as exc:
+        _raise_http(exc)
+    return {"deleted": deleted}
 
 
 @router.get("/projects/{project_id}/bridges", response_model=list[BridgeResponse])
@@ -179,7 +206,7 @@ async def list_bridges_endpoint(
     await verify_project_access(project_id, user_id, db)
 
     bridges = await service.list_bridges(db, project_id)
-    return [BridgeResponse.model_validate(b) for b in bridges]
+    return [BridgeResponse(**bridge_to_dict(b)) for b in bridges]
 
 
 @router.get("/bridges/{bridge_id}", response_model=BridgeResponse)
@@ -195,7 +222,7 @@ async def get_bridge_endpoint(
 
     user_id = getattr(request.state, "user_id", None)
     await verify_project_access(bridge.project_id, user_id, db)
-    return BridgeResponse.model_validate(bridge)
+    return BridgeResponse(**bridge_to_dict(bridge))
 
 
 @router.patch("/bridges/{bridge_id}", response_model=BridgeResponse)
@@ -220,7 +247,7 @@ async def update_bridge_endpoint(
             setattr(bridge, key, value)
     await db.commit()
     await db.refresh(bridge)
-    return BridgeResponse.model_validate(bridge)
+    return BridgeResponse(**bridge_to_dict(bridge))
 
 
 @router.delete("/bridges/{bridge_id}")

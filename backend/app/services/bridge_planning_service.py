@@ -1,9 +1,10 @@
-"""V4.1 K2 桥段规划服务（Phase 2 P2-2）。
+"""工程化桥段流水线 — 桥段规划服务。
 
-职责：
-1. plan_bridges：根据项目大纲规划 N 个桥段（调用 LLM + 注入 V4.4 bridges 维度参考）
-2. expand_bridge_to_chapters：把单个桥段展开为 4 个 ChapterOutline（含 bridge_id / bridge_position）
-3. CRUD：列表、读取、更新、删除
+三段式（设计文档 @/agent-docs/features/engineered_bridge_pipeline.md）：
+1. plan_bridges：按主线节点由代码算出槽位表，建 N 个 status=draft 的桥段（无 LLM）
+2. fill_bridges：按主线节点分批调 LLM 填 title/goal/爽点/四章卡 → ready（可续跑）
+3. expand_bridge_to_chapters：把 ready 桥段展开为第 4(n-1)+1…4n 章，回写剧情线节点覆盖账本
+4. CRUD：列表、读取、删除、重置
 
 调用 V4.3 PromptAssembler 获取拆书参考包注入的 prompt 上下文。
 """
@@ -11,25 +12,76 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Optional
+from dataclasses import asdict
+from typing import Any, AsyncIterator, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.chapter_outline import ChapterOutline
+from app.models.chapter_outline_plot_line_link import ChapterOutlinePlotLineLink
 from app.models.plot_bridge import PlotBridge
 from app.models.plot_card import PlotCard
 from app.models.plot_card_chapter_outline_link import PlotCardChapterOutlineLink
 from app.models.plot_line import PlotLine
-from app.models.project import Project
 from app.models.story_outline import StoryOutline
+from app.services.bridge_slot_planner import (
+    CHAPTERS_PER_BRIDGE,
+    BridgePlanningConflictError,
+    BridgePlanningPreconditionError,
+    BridgeSlotPlan,
+    PlotLineData,
+    chapter_range,
+    compute_bridge_slots,
+    parse_plot_line,
+)
 from app.services.reference_pack import (
     AssemblyContext,
     PromptAssembler,
 )
 from app.utils.json_cleaner import safe_parse_json
+from app.utils.story_outline_fields import parse_story_outline_fields
 
 logger = logging.getLogger(__name__)
+
+
+def bridge_to_dict(b: PlotBridge) -> dict[str, Any]:
+    """ORM → API dict：解析 secondary_beats JSON，补 chapter_start/chapter_end。"""
+    try:
+        secondary = json.loads(b.secondary_beats) if b.secondary_beats else []
+    except (json.JSONDecodeError, TypeError):
+        secondary = []
+    c_start, c_end = chapter_range(b.bridge_number)
+    return {
+        "id": b.id,
+        "project_id": b.project_id,
+        "bridge_number": b.bridge_number,
+        "title": b.title,
+        "goal": b.goal,
+        "showoff_point": b.showoff_point,
+        "golden_finger_usage": b.golden_finger_usage,
+        "c1_intro": b.c1_intro,
+        "c2_build": b.c2_build,
+        "c3_payoff": b.c3_payoff,
+        "c4_aftermath": b.c4_aftermath,
+        "next_bridge_hook": b.next_bridge_hook,
+        "status": b.status,
+        "order_index": b.order_index,
+        "plot_line_id": b.plot_line_id,
+        "beat_index": b.beat_index,
+        "beat_coverage_start": b.beat_coverage_start,
+        "beat_coverage_end": b.beat_coverage_end,
+        "secondary_beats": secondary if isinstance(secondary, list) else [],
+        "chapter_start": c_start,
+        "chapter_end": c_end,
+    }
+
+
+async def load_plot_line_data(db: AsyncSession, project_id: str) -> list[PlotLineData]:
+    result = await db.execute(
+        select(PlotLine).where(PlotLine.project_id == project_id).order_by(PlotLine.order_index)
+    )
+    return [parse_plot_line(line) for line in result.scalars().all()]
 
 
 async def _load_beat_context_for_bridge(
@@ -129,103 +181,6 @@ async def _load_beat_context_for_bridge(
     return "\n".join(lines)
 
 
-def _clamp01(v: Any) -> Optional[float]:
-    """把任意数值钳制到 [0.0, 1.0]，非数值返回 None。
-
-    用途：LLM 偶尔会输出 1.05 / -0.1 / "0.5" 这类越界或类型不匹配的 coverage 值，
-    在入库前规整一次，避免下游章纲生成读到非法数据。
-    """
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return None
-    if f < 0.0:
-        return 0.0
-    if f > 1.0:
-        return 1.0
-    return f
-
-
-BRIDGE_PLANNING_TASK_PROMPT_FREE = """请基于上述项目大纲 + 参考资料，设计 {bridge_count} 个桥段。
-
-# 桥段四章方法论
-每个桥段约 4 章，结构固定：
-- **C1 代入+信息差**（5:5）：上半日常代入，下半亮出对方困境
-- **C2 拉扯+开装**（9:1）：配角拉扯加强期待，**章尾让主角开始装**
-- **C3 兑现爽点**（10:0）：装到底，**不留钩子**
-- **C4 善后+下一目标**：本桥段收尾 + 引下个桥段
-
-# 输出格式（纯 JSON 数组）
-
-[
-  {{
-    "bridge_number": 1,
-    "title": "桥段简洁标题（8-15 字）",
-    "goal": "本桥段要解决的具体问题（30-60 字）",
-    "showoff_point": "装逼/爽点设计（40-80 字）",
-    "golden_finger_usage": "本桥段如何使用金手指（20-40 字）",
-    "c1_intro": "C1 上半代入素材 + 下半信息差（80-120 字）",
-    "c2_build": "C2 拉扯素材 + 章尾开装动作（80-120 字）",
-    "c3_payoff": "C3 装逼完整展开 + 配角反应（80-120 字）",
-    "c4_aftermath": "C4 本桥段收尾事件 + 下桥段引子（60-100 字）",
-    "next_bridge_hook": "给下一桥段的钩子（20-40 字）"
-  }}
-]
-
-直接返回 JSON 数组，不要任何 markdown 标记。
-"""
-
-
-BRIDGE_PLANNING_TASK_PROMPT_BY_PLOT_LINE = """请基于上述项目大纲 + \
-**剧情线节点配额** + 拆书参考资料，设计 {bridge_count} 个桥段。
-
-# 桥段四章方法论
-每个桥段约 4 章，结构固定：
-- **C1 代入+信息差**（5:5）：上半日常代入，下半亮出对方困境
-- **C2 拉扯+开装**（9:1）：配角拉扯加强期待，**章尾让主角开始装**
-- **C3 兑现爽点**（10:0）：装到底，**不留钩子**
-- **C4 善后+下一目标**：本桥段收尾 + 引下个桥段
-
-# V4.1 方案 C：分层契合规则（必须严格遵守）
-你**必须**按上面【📈 剧情线 + 节点 + 桥段配额】里给出的每个节点配额来分配桥段：
-- 每个桥段对应**一个具体节点**，必须填写 `plot_line_id` 和 `beat_index`
-- 桥段在该节点内占的进度区间用 `beat_coverage_start` / `beat_coverage_end` 表示（0.0-1.0）
-- 同一节点的多个桥段按时间顺序排列，coverage 区间连续不重叠：
-  - 节点配 4 桥段 → 0-0.25 / 0.25-0.5 / 0.5-0.75 / 0.75-1.0
-  - 节点配 3 桥段 → 0-0.33 / 0.33-0.67 / 0.67-1.0
-- 整数桥段编号 `bridge_number` 跨剧情线连续递增（不要按节点重置）
-- 每个桥段的 `goal` 必须与所属节点的主题相关，不要把节点 A 的爽点写到节点 B
-- 主线节点优先满足配额；支线节点的桥段可在 free 余量内灵活安排
-
-# 输出格式（纯 JSON 数组）
-
-[
-  {{
-    "bridge_number": 1,
-    "plot_line_id": "（从上面【📈】块复制 line_id=xxx）",
-    "beat_index": 1,
-    "beat_coverage_start": 0.0,
-    "beat_coverage_end": 0.25,
-    "title": "桥段简洁标题（8-15 字）",
-    "goal": "本桥段要解决的具体问题（30-60 字），需贴合所属节点",
-    "showoff_point": "装逼/爽点设计（40-80 字）",
-    "golden_finger_usage": "本桥段如何使用金手指（20-40 字）",
-    "c1_intro": "C1 上半代入素材 + 下半信息差（80-120 字）",
-    "c2_build": "C2 拉扯素材 + 章尾开装动作（80-120 字）",
-    "c3_payoff": "C3 装逼完整展开 + 配角反应（80-120 字）",
-    "c4_aftermath": "C4 本桥段收尾事件 + 下桥段引子（60-100 字）",
-    "next_bridge_hook": "给下一桥段的钩子（20-40 字）"
-  }}
-]
-
-直接返回 JSON 数组，不要任何 markdown 标记。
-"""
-
-
-# 兼容旧导入：默认指向 free 版（plan_bridges 内根据 mode 选具体模板）
-BRIDGE_PLANNING_TASK_PROMPT = BRIDGE_PLANNING_TASK_PROMPT_FREE
-
-
 CHAPTER_EXPANSION_TASK_PROMPT = """请把下面这个桥段展开为 4 个详细章纲（C1/C2/C3/C4），\
 **每个章纲再细分为 3-5 个场景卡片**（一张卡 ≈ 500-800 字，用于后续场景级流式生成）。
 
@@ -282,145 +237,75 @@ C3 章场景密度最大；C4 章最后一张要含"下桥段引子"。
 
 
 class BridgePlanningService:
-    """桥段规划服务（V4.1 K2 核心）。"""
-
-    DEFAULT_BRIDGE_COUNT = 25  # 默认规划 25 桥段（≈100 章）
+    """桥段规划服务（工程化流水线：plan → fill → expand）。"""
 
     def __init__(self, ai_service):
         self.ai_service = ai_service
         self.assembler = PromptAssembler()
 
-    # ---------------- public API ----------------
+    # ---------------- 骨架层（无 LLM） ----------------
 
-    async def plan_bridges(
-        self,
-        db: AsyncSession,
-        project_id: str,
-        model_name: Optional[str] = None,
-        bridge_count: int = DEFAULT_BRIDGE_COUNT,
-        mode: str = "by_plot_line",
-    ) -> list[PlotBridge]:
-        """主入口：规划 N 个桥段并保存到 DB。
+    async def preview_plan(self, db: AsyncSession, project_id: str) -> BridgeSlotPlan:
+        """纯计算：主线节点 → 桥段槽位表。前置不满足抛 BridgePlanningPreconditionError。"""
+        return compute_bridge_slots(await load_plot_line_data(db, project_id))
 
-        Args:
-            project_id: 项目 ID
-            model_name: 使用的 AI 模型名。决定 PromptAssembler 档位，**同时**作为实际推理模型。
-                        若为 None，则回退到 ai_service.default_model（用户在 Settings 配置的默认模型）。
-            bridge_count: 要规划的桥段数
-            mode: 'by_plot_line'（推荐，方案 C 分层契合）按主线节点权重分配桥段；
-                  'free' 自由规划不绑节点（向后兼容老路径）
-
-        Returns:
-            新创建的 PlotBridge 列表
-
-        说明：
-            by_plot_line 模式下，plot_lines_with_beats slot 会自动注入「主线 + 节点 + 配额」
-            到 prompt（通过 ctx.extra["bridge_count"] 透传 N 给 builder）；
-            如果项目没有 plot_lines / beats，slot 返回空 → 实际行为退化为 free 模式。
-        """
-        if mode not in ("by_plot_line", "free"):
-            raise ValueError(f"unknown mode: {mode!r}")
-
-        # 用户未指定 → 回退到 user_ai_service 的默认模型，保证档位推断与实际推理一致
-        effective_model = model_name or getattr(self.ai_service, "default_model", None) or ""
-
-        # 1. 装配 prompt（by_plot_line 通过 ctx.extra 透传 bridge_count 给 builder）
-        ctx = AssemblyContext(
-            scene="bridge_planning",
-            model_name=effective_model,
-            project_id=project_id,
-            extra={"bridge_count": bridge_count, "plan_mode": mode},
+    async def plan_bridges(self, db: AsyncSession, project_id: str) -> list[PlotBridge]:
+        """建骨架：按槽位表创建 N 个 draft 桥段（无 LLM）。已有桥段 → Conflict。"""
+        existing = await db.execute(
+            select(PlotBridge.id).where(PlotBridge.project_id == project_id).limit(1)
         )
-        prompt = await self.assembler.assemble(db, ctx)
+        if existing.scalar_one_or_none():
+            raise BridgePlanningConflictError("项目已存在桥段骨架，请先重置（DELETE /bridges）后再规划")
 
-        # 2. 把任务说明拼到 user_prompt 末尾（按 mode 选模板）
-        if mode == "by_plot_line" and "plot_lines_with_beats" in prompt.slots_filled:
-            task_template = BRIDGE_PLANNING_TASK_PROMPT_BY_PLOT_LINE
-        else:
-            # free 模式 / 或 by_plot_line 但 plot_lines 不存在 → 退化为 free 模板
-            task_template = BRIDGE_PLANNING_TASK_PROMPT_FREE
-
-        user_prompt = (
-            prompt.user_prompt
-            + "\n\n"
-            + task_template.format(bridge_count=bridge_count)
-        )
-
-        logger.info(
-            "[BridgePlanning] project=%s model=%s mode=%s scene=bridge_planning "
-            "tokens≈%d slots_filled=%d (has_beats_slot=%s)",
-            project_id, effective_model, mode, prompt.actual_tokens_estimate,
-            len(prompt.slots_filled),
-            "plot_lines_with_beats" in prompt.slots_filled,
-        )
-
-        # 3. 调 LLM（流式累积 → 免疫中转代理 30s 网关 timeout）
-        # 历史：原先用 generate_text 非流式；Claude Opus 等慢模型 + 中转代理
-        # 网关常在首字节没到时就 504，导致 ReadTimeout。改流式后只要持续有
-        # chunk 到 client，timeout 计时器就重置，可输出 10+ 分钟。
-        try:
-            resp = await self.ai_service.generate_text_stream_collect(
-                prompt=user_prompt,
-                system_prompt=prompt.system_prompt,
-                model=effective_model or None,  # 空串 → None，交给 ai_service 自身兜底
-                temperature=0.6,
-                max_tokens=8000,
-                context=f"BridgePlanning-{effective_model or 'default'}",
-            )
-            content = (resp or {}).get("content", "") if isinstance(resp, dict) else ""
-        except Exception as exc:
-            logger.error("[BridgePlanning] LLM 调用失败: %s", exc)
-            raise
-
-        # 4. 解析 JSON
-        bridges_data = safe_parse_json(
-            content,
-            default=[],
-            expected_type="array",
-            log_prefix="[BridgePlanning]",
-        )
-        if not isinstance(bridges_data, list) or not bridges_data:
-            raise ValueError("LLM 返回的桥段列表为空或格式错误")
-
-        # 5. 保存到 DB（by_plot_line 模式额外保存节点绑定字段）
+        plan = await self.preview_plan(db, project_id)
         created: list[PlotBridge] = []
-        for idx, data in enumerate(bridges_data, start=1):
-            if not isinstance(data, dict):
-                continue
-            # 校验节点绑定字段（仅当 mode=by_plot_line 且 LLM 提供时才采纳，否则保持 None）
-            beat_start = data.get("beat_coverage_start")
-            beat_end = data.get("beat_coverage_end")
-            beat_start_val = _clamp01(beat_start) if isinstance(beat_start, (int, float)) else None
-            beat_end_val = _clamp01(beat_end) if isinstance(beat_end, (int, float)) else None
-
+        prev: PlotBridge | None = None
+        for slot in plan.slots:
             bridge = PlotBridge(
                 project_id=project_id,
-                plot_line_id=data.get("plot_line_id") if isinstance(data.get("plot_line_id"), str) else None,
-                beat_index=data.get("beat_index") if isinstance(data.get("beat_index"), int) else None,
-                beat_coverage_start=beat_start_val,
-                beat_coverage_end=beat_end_val,
-                bridge_number=data.get("bridge_number") or idx,
-                title=(data.get("title") or f"桥段 {idx}")[:200],
-                goal=(data.get("goal") or "")[:500],
-                showoff_point=(data.get("showoff_point") or "")[:500],
-                golden_finger_usage=data.get("golden_finger_usage"),
-                c1_intro=data.get("c1_intro"),
-                c2_build=data.get("c2_build"),
-                c3_payoff=data.get("c3_payoff"),
-                c4_aftermath=data.get("c4_aftermath"),
-                next_bridge_hook=data.get("next_bridge_hook"),
-                status="ready",
-                order_index=idx,
+                plot_line_id=slot.plot_line_id,
+                beat_index=slot.beat_index,
+                beat_coverage_start=slot.coverage_start,
+                beat_coverage_end=slot.coverage_end,
+                secondary_beats=json.dumps([asdict(t) for t in slot.secondary], ensure_ascii=False),
+                bridge_number=slot.bridge_number,
+                title=f"桥段 {slot.bridge_number} · {slot.beat_title}",
+                goal="",
+                showoff_point="",
+                status="draft",
+                order_index=slot.bridge_number,
             )
             db.add(bridge)
+            await db.flush()
+            if prev is not None:
+                bridge.prev_bridge_id = prev.id
+            prev = bridge
             created.append(bridge)
-
         await db.commit()
         for b in created:
             await db.refresh(b)
-
-        logger.info("[BridgePlanning] 成功生成 %d 个桥段", len(created))
+        logger.info(
+            "[BridgePlan] project=%s 建骨架 %d 个桥段（主线 %s）",
+            project_id, len(created), plan.main_line_id,
+        )
         return created
+
+    async def reset_bridges(self, db: AsyncSession, project_id: str) -> int:
+        """删除项目全部桥段。存在 completed 桥段或已展开章纲 → Conflict。"""
+        bridges = await self.list_bridges(db, project_id)
+        if any(b.status == "completed" for b in bridges):
+            raise BridgePlanningConflictError("存在已展开为章纲的桥段，不能重置骨架；请先删除对应章纲")
+        expanded = await db.execute(
+            select(ChapterOutline.id)
+            .where(ChapterOutline.project_id == project_id, ChapterOutline.bridge_id.isnot(None))
+            .limit(1)
+        )
+        if expanded.scalar_one_or_none():
+            raise BridgePlanningConflictError("项目内存在已展开章纲（bridge_id 非空），不能重置骨架")
+        for b in bridges:
+            await db.delete(b)
+        await db.commit()
+        return len(bridges)
 
     async def expand_bridge_to_chapters(
         self,
