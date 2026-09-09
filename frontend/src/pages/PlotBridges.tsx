@@ -12,7 +12,7 @@
  *
  * K2 设计：桥段四章结构（C1 代入+信息差 / C2 拉扯+开装 / C3 兑现爽点 / C4 善后+下一目标）
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   Button,
@@ -45,6 +45,7 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { plotBridgesApi } from '@/services/plotBridgesApi';
 import { settingsApi } from '@/services/api';
+import type { SSEClientOptions, SSEMessage } from '@/utils/sseClient';
 import {
   BRIDGE_STATUS_LABEL,
   BRIDGE_TEMPLATE_UI,
@@ -52,10 +53,20 @@ import {
   type BridgeGenerationMeta,
   type BridgeSlotPreview,
   type BridgeStatus,
+  type FillBridgesEvent,
+  type FillBridgesResult,
   type FillMetaEvent,
+  type FillPartialEvent,
+  type FillThinkingEvent,
+  type PartialBridge,
   type PlotBridge,
   type UpdateBridgeRequest,
 } from '@/types/plot_bridge';
+
+/** 连接层中断（刷新 / 代理掐断）不等于任务失败：这些错误文案触发重连而不是报错 */
+const CONNECTION_LOST_MESSAGES = ['连接在生成完成前中断', 'Failed to fetch', 'NetworkError'];
+const isConnectionLost = (message: string) =>
+  CONNECTION_LOST_MESSAGES.some((m) => message.includes(m)) || message.startsWith('HTTP error');
 
 const BRIDGE_STATUS_CLASS: Record<BridgeStatus, string> = {
   draft: 'bg-surface-hover text-content-secondary',
@@ -154,6 +165,16 @@ export default function PlotBridgesPage() {
   const [fillProgress, setFillProgress] = useState<{ msg: string; pct: number } | null>(null);
   // 最近一个子批的溯源（模型档位 / 模板 / 参考包 / 警告），由 SSE meta 事件更新
   const [fillMeta, setFillMeta] = useState<FillMetaEvent | null>(null);
+  // 后台填充任务：任务 id / 起始时间 / 已用秒数 / 思考计数 / 打字机快照 / 正在生成的节点 / 子批耗时（ETA）
+  const [fillJobId, setFillJobId] = useState<string | null>(null);
+  const [fillStartedAt, setFillStartedAt] = useState<number | null>(null);
+  const [fillElapsed, setFillElapsed] = useState(0);
+  const [thinking, setThinking] = useState<FillThinkingEvent | null>(null);
+  const [partials, setPartials] = useState<Record<number, PartialBridge>>({});
+  const [activeBeat, setActiveBeat] = useState<number | null>(null);
+  const [batchTimes, setBatchTimes] = useState<Array<{ at: number; count: number }>>([]);
+  const lastSeqRef = useRef(0);
+  const lastErrorCodeRef = useRef<number | undefined>(undefined);
   const [expandingAll, setExpandingAll] = useState(false);
   const [editingBridge, setEditingBridge] = useState<PlotBridge | null>(null);
   const [expandingBridge, setExpandingBridge] = useState<PlotBridge | null>(null);
@@ -223,40 +244,190 @@ export default function PlotBridgesPage() {
     }
   }, [projectId, fetchBridges]);
 
-  /** 第 2 段·填充：SSE 按主线节点分批，中断后再次点击即从剩余 draft 续填 */
+  // 已用时每秒走字（任务在跑时）
+  useEffect(() => {
+    if (!filling || fillStartedAt == null) return;
+    const tick = () => setFillElapsed(Math.max(0, Math.round((Date.now() - fillStartedAt) / 1000)));
+    tick();
+    const t = window.setInterval(tick, 1000);
+    return () => window.clearInterval(t);
+  }, [filling, fillStartedAt]);
+
+  /** 任务事件（首连与重连共用）：start / thinking / partial / bridges */
+  const handleFillEvent = useCallback((m: SSEMessage) => {
+    if (typeof m.seq === 'number') lastSeqRef.current = Math.max(lastSeqRef.current, m.seq);
+    switch (m.type) {
+      case 'start':
+        if (typeof m.job_id === 'string') setFillJobId(m.job_id);
+        break;
+      case 'thinking': {
+        const ev = m as unknown as FillThinkingEvent;
+        setThinking(ev);
+        setActiveBeat(ev.beat_index);
+        break;
+      }
+      case 'partial': {
+        const ev = m as unknown as FillPartialEvent;
+        setActiveBeat(ev.beat_index);
+        setPartials((prev) => {
+          const next = { ...prev };
+          for (const b of ev.bridges) next[b.bridge_number] = b;
+          return next;
+        });
+        break;
+      }
+      case 'bridges': {
+        const ev = m as unknown as FillBridgesEvent;
+        setBridges((prev) => {
+          const byId = new Map(prev.map((b) => [b.id, b]));
+          for (const b of ev.bridges) byId.set(b.id, b);
+          return Array.from(byId.values());
+        });
+        setPartials((prev) => {
+          const next = { ...prev };
+          for (const b of ev.bridges) delete next[b.bridge_number];
+          return next;
+        });
+        setThinking(null);
+        setBatchTimes((prev) => [...prev, { at: Date.now(), count: ev.bridges.length }]);
+        break;
+      }
+      default:
+        break;
+    }
+  }, []);
+
+  /** ETA：按已完成子批的平均每桥段耗时 × 剩余 draft 数 */
+  const etaSeconds = useMemo(() => {
+    if (!fillStartedAt || batchTimes.length === 0) return null;
+    const doneCount = batchTimes.reduce((s, b) => s + b.count, 0);
+    const perBridge = (batchTimes[batchTimes.length - 1].at - fillStartedAt) / 1000 / Math.max(1, doneCount);
+    const remaining = bridges.filter((b) => b.status === 'draft').length;
+    return Math.round(perBridge * remaining);
+  }, [fillStartedAt, batchTimes, bridges]);
+
+  /** 订阅回调（首连 / 重连共用）。onError 只记录错误码，toast 统一在 catch 里做（避免重复） */
+  const fillStreamOptions = useCallback(
+    (): SSEClientOptions<FillBridgesResult> => ({
+      onProgress: (msg, pct) => setFillProgress({ msg, pct }),
+      onMeta: (m) => setFillMeta(m as unknown as FillMetaEvent),
+      onEvent: handleFillEvent,
+      onError: (_err, code) => {
+        lastErrorCodeRef.current = code;
+      },
+      onResult: (r) => {
+        toast.success(`已填充 ${r.filled} 个桥段${r.remaining_drafts ? `，剩余 ${r.remaining_drafts} 个待填` : ''}`);
+      },
+    }),
+    [handleFillEvent],
+  );
+
+  /** 任务结束（完成 / 失败 / 停止）后的收尾 */
+  const finishFill = useCallback(async () => {
+    setFilling(false);
+    setThinking(null);
+    setPartials({});
+    setActiveBeat(null);
+    setBatchTimes([]);
+    setFillJobId(null);
+    setFillStartedAt(null);
+    lastSeqRef.current = 0;
+    await fetchBridges();
+  }, [fetchBridges]);
+
+  /** 订阅结束时的错误处理：499 = 用户主动停止；连接层中断 → 重连；其余报错 */
+  const settleFillError = useCallback((err: unknown, onLost: () => void) => {
+    const message = err instanceof Error ? err.message : '填充失败';
+    if (lastErrorCodeRef.current === 499) {
+      toast.info(message);
+      return true;
+    }
+    if (isConnectionLost(message)) {
+      toast.info('与填充任务的连接中断，任务仍在后台运行，正在重连…');
+      onLost();
+      return false;
+    }
+    toast.error(message, { duration: 8000 });
+    return true;
+  }, []);
+
+  /** 挂载 / 连接中断时：查当前任务并从上次 seq 续接 */
+  const reattachFillJob = useCallback(async () => {
+    if (!projectId) return;
+    let job: Awaited<ReturnType<typeof plotBridgesApi.fillJobCurrent>>['job'];
+    try {
+      job = (await plotBridgesApi.fillJobCurrent(projectId)).job;
+    } catch {
+      return;
+    }
+    if (!job || job.status !== 'running') return;
+
+    setFilling(true);
+    setFillJobId(job.id);
+    setFillStartedAt(job.started_at * 1000);
+    if (job.last_progress) setFillProgress({ msg: job.last_progress.message, pct: job.last_progress.progress });
+    if (job.live.thinking) handleFillEvent(job.live.thinking as unknown as SSEMessage);
+    if (job.live.partial) handleFillEvent(job.live.partial as unknown as SSEMessage);
+    lastErrorCodeRef.current = undefined;
+    let lost = false;
+    try {
+      await plotBridgesApi.fillJobEvents(projectId, job.id, lastSeqRef.current, fillStreamOptions());
+    } catch (err) {
+      const settled = settleFillError(err, () => {
+        lost = true;
+      });
+      if (!settled) {
+        window.setTimeout(() => void reattachFillJob(), 1500);
+      }
+    } finally {
+      if (!lost) await finishFill();
+    }
+  }, [projectId, handleFillEvent, fillStreamOptions, settleFillError, finishFill]);
+
+  useEffect(() => {
+    void reattachFillJob();
+  }, [reattachFillJob]);
+
+  /** 第 2 段·填充：启动后台任务并订阅事件；弹窗可关、页面可刷新，任务不中断 */
   const handleFill = useCallback(
     async (values: { model: string }) => {
       if (!projectId) return;
+      lastSeqRef.current = 0;
+      lastErrorCodeRef.current = undefined;
+      setPartials({});
+      setBatchTimes([]);
+      setThinking(null);
+      setActiveBeat(null);
       setFilling(true);
+      setFillStartedAt(Date.now());
       setFillProgress({ msg: '准备中…', pct: 0 });
       setFillMeta(null);
+      let lost = false;
       try {
-        await plotBridgesApi.fillStream(
-          projectId,
-          { model: values.model || undefined },
-          {
-            onProgress: (msg, pct) => setFillProgress({ msg, pct }),
-            onMeta: (m) => setFillMeta(m as unknown as FillMetaEvent),
-            onResult: (r) => {
-              toast.success(
-                `已填充 ${r.filled} 个桥段${r.remaining_drafts ? `，剩余 ${r.remaining_drafts} 个待填` : ''}`,
-              );
-            },
-            // 不传 onError：ssePost 收到 error 事件会同时回调 onError 并 reject，
-            // 两处都 toast 会弹出两条一模一样的错误；统一交给下面的 catch 处理
-          },
-        );
+        await plotBridgesApi.fillStream(projectId, { model: values.model || undefined }, fillStreamOptions());
         setFillOpen(false);
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : '填充失败', { duration: 8000 });
+        const settled = settleFillError(err, () => {
+          lost = true;
+        });
+        if (!settled) {
+          window.setTimeout(() => void reattachFillJob(), 1500);
+        }
       } finally {
-        setFilling(false);
-        setFillProgress(null);
-        await fetchBridges();
+        if (!lost) await finishFill();
       }
     },
-    [projectId, fetchBridges],
+    [projectId, fillStreamOptions, settleFillError, finishFill, reattachFillJob],
   );
+
+  const handleStopFill = useCallback(async () => {
+    if (!projectId || !fillJobId) return;
+    try {
+      await plotBridgesApi.fillJobCancel(projectId, fillJobId);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '停止失败');
+    }
+  }, [projectId, fillJobId]);
 
   const handleDelete = useCallback(
     async (bridgeId: string) => {
@@ -366,6 +537,33 @@ export default function PlotBridgesPage() {
         </div>
       </section>
 
+      {/* 后台填充横幅：弹窗关闭而任务在跑 */}
+      {filling && !fillOpen && (
+        <section className="hh-panel flex flex-col gap-2 border-l-4 border-brand px-5 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+            <p className="flex min-w-0 items-center gap-2 text-content">
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-brand" />
+              <span className="shrink-0 font-medium">AI 正在后台填充桥段</span>
+              <span className="truncate text-content-secondary">{fillProgress?.msg}</span>
+            </p>
+            <div className="flex shrink-0 items-center gap-2">
+              <button onClick={() => setFillOpen(true)} className="hh-btn-ghost hh-btn-sm">
+                查看
+              </button>
+              <button onClick={handleStopFill} className="hh-btn-ghost hh-btn-sm text-red-500 hover:bg-red-50">
+                停止
+              </button>
+            </div>
+          </div>
+          <div className="hh-progress">
+            <div className="hh-progress-bar" style={{ width: `${fillProgress?.pct ?? 0}%` }} />
+          </div>
+          <p className="flex flex-wrap items-center gap-x-2 text-xs text-content-tertiary tabular-nums">
+            <FillLiveStatus thinking={thinking} elapsed={fillElapsed} eta={etaSeconds} />
+          </p>
+        </section>
+      )}
+
       {/* 状态总览 + 完成跳转提示 */}
       {stats.total > 0 && (
         <section className="hh-panel grid grid-cols-2 divide-surface-border/80 md:grid-cols-5 md:divide-x">
@@ -410,6 +608,9 @@ export default function PlotBridgesPage() {
       ) : (
         <BridgeListByBeat
           bridges={bridges}
+          partials={partials}
+          activeBeat={filling ? activeBeat : null}
+          thinking={thinking}
           onEdit={(b) => setEditingBridge(b)}
           onExpand={(b) => setExpandingBridge(b)}
           onDelete={(id) => handleDelete(id)}
@@ -463,12 +664,10 @@ export default function PlotBridgesPage() {
       <Modal
         title="AI 填充桥段内容"
         open={fillOpen}
-        onCancel={() => !filling && setFillOpen(false)}
+        onCancel={() => setFillOpen(false)}
         footer={null}
-        destroyOnClose
+        destroyOnClose={!filling}
         width={480}
-        maskClosable={!filling}
-        closable={!filling}
       >
         <Form
           // 用 defaultModel 作为 key：异步加载完成后强制重渲染，让 initialValues 生效
@@ -505,7 +704,8 @@ export default function PlotBridgesPage() {
             />
           </Form.Item>
           <p className="mb-4 text-xs leading-5 text-content-tertiary">
-            按主线节点逐批填充，每批一次 LLM 调用；中断或失败后再次点击会从剩余的 {stats.draft} 个待填桥段续跑。
+            按主线节点逐批填充（每批 ≤4 个桥段一次 LLM 调用），任务在后台运行：关掉弹窗、刷新页面都不会中断；
+            停止或失败后再次点击会从剩余的 {stats.draft} 个待填桥段续跑。
           </p>
           {fillProgress && (
             <div className="mb-4">
@@ -514,6 +714,12 @@ export default function PlotBridgesPage() {
               </div>
               <p className="mt-1 text-xs text-content-tertiary">{fillProgress.msg}</p>
             </div>
+          )}
+          {filling && (
+            <p className="mb-3 flex flex-wrap items-center gap-x-2 text-xs text-content-secondary tabular-nums">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-brand" />
+              <FillLiveStatus thinking={thinking} elapsed={fillElapsed} eta={etaSeconds} />
+            </p>
           )}
           {fillMeta && (
             <div className="hh-subpanel mb-4 p-3 text-xs leading-5">
@@ -527,12 +733,25 @@ export default function PlotBridgesPage() {
             </div>
           )}
           <Form.Item className="!mb-0 text-right">
-            <Button onClick={() => setFillOpen(false)} disabled={filling} className="mr-2">
-              取消
-            </Button>
-            <Button type="primary" htmlType="submit" loading={filling} icon={<ThunderboltOutlined />}>
-              {filling ? '填充中…' : `开始填充（${stats.draft} 个）`}
-            </Button>
+            {filling ? (
+              <>
+                <Button onClick={() => setFillOpen(false)} className="mr-2">
+                  后台运行
+                </Button>
+                <Button danger onClick={handleStopFill}>
+                  停止填充
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button onClick={() => setFillOpen(false)} className="mr-2">
+                  取消
+                </Button>
+                <Button type="primary" htmlType="submit" icon={<ThunderboltOutlined />}>
+                  {`开始填充（${stats.draft} 个）`}
+                </Button>
+              </>
+            )}
           </Form.Item>
         </Form>
       </Modal>
@@ -572,6 +791,11 @@ export default function PlotBridgesPage() {
 
 interface BridgeListByBeatProps {
   bridges: PlotBridge[];
+  /** 打字机快照：bridge_number → 已写出的字段（只对 draft 卡片生效） */
+  partials: Record<number, PartialBridge>;
+  /** 正在生成的主线节点（分组标题显示旋转指示） */
+  activeBeat: number | null;
+  thinking: FillThinkingEvent | null;
   onEdit: (b: PlotBridge) => void;
   onExpand: (b: PlotBridge) => void;
   onDelete: (id: string) => void;
@@ -590,6 +814,9 @@ interface BridgeListByBeatProps {
  */
 function BridgeListByBeat({
   bridges,
+  partials,
+  activeBeat,
+  thinking,
   onEdit,
   onExpand,
   onDelete,
@@ -658,12 +885,22 @@ function BridgeListByBeat({
               </span>
               <span className={cn('font-medium', isUnbound ? 'text-content-secondary' : 'text-content')}>{groupLabel}</span>
               <span className="text-xs text-content-tertiary tabular-nums">{groupBridges.length} 个桥段</span>
+              {!isUnbound && activeBeat != null && activeBeat === first?.beat_index && (
+                <span className="inline-flex items-center gap-1 text-xs text-brand tabular-nums">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  {thinking && thinking.content_chars === 0
+                    ? `思考中 ${thinking.reasoning_chars.toLocaleString()} 字`
+                    : '生成中'}
+                </span>
+              )}
             </div>
             <div className="space-y-3">
               {groupBridges.map((bridge) => (
                 <BridgeCard
                   key={bridge.id}
                   bridge={bridge}
+                  partial={bridge.status === 'draft' ? partials[bridge.bridge_number] ?? null : null}
+                  generating={bridge.status === 'draft' && activeBeat != null && activeBeat === bridge.beat_index}
                   onEdit={() => onEdit(bridge)}
                   onExpand={() => onExpand(bridge)}
                   onDelete={() => onDelete(bridge.id)}
@@ -684,17 +921,28 @@ function BridgeListByBeat({
 
 interface BridgeCardProps {
   bridge: PlotBridge;
+  /** 打字机快照（仅 draft 卡片）：LLM 已写出的字段以幽灵文本渲染 */
+  partial?: PartialBridge | null;
+  /** 本卡所属节点正在生成 */
+  generating?: boolean;
   onEdit: () => void;
   onExpand: () => void;
   onDelete: () => void;
 }
 
-function BridgeCard({ bridge, onEdit, onExpand, onDelete }: BridgeCardProps) {
+type GhostKey = Exclude<keyof PartialBridge, 'bridge_number'>;
+
+function BridgeCard({ bridge, partial = null, generating = false, onEdit, onExpand, onDelete }: BridgeCardProps) {
   const isCompleted = bridge.status === 'completed';
   const isDraft = bridge.status === 'draft';
   const secondaryCount = bridge.secondary_beats?.length ?? 0;
   // 填充时记录的题材模板决定卡片标签（装逼点 / 反转点 …，C1-C4 语义）
   const ui = BRIDGE_TEMPLATE_UI[resolveTemplateKey(bridge.template)];
+  // 幽灵文本：真值为空时用打字机快照顶上
+  const ghostText = (key: GhostKey) => (partial && typeof partial[key] === 'string' ? partial[key] : null);
+  const show = (real: string | null | undefined, key: GhostKey) => (real && real.trim() ? real : ghostText(key));
+  const isGhost = (real: string | null | undefined, key: GhostKey) => !(real && real.trim()) && !!ghostText(key);
+  const titleGhost = isDraft && !!ghostText('title');
   // 桥段绑定主线节点时显示节点信息 Tag
   const hasBeatBinding =
     bridge.beat_index != null &&
@@ -710,7 +958,10 @@ function BridgeCard({ bridge, onEdit, onExpand, onDelete }: BridgeCardProps) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <span className="hh-tag tabular-nums">#{bridge.bridge_number}</span>
-          <h3 className="text-[15px] font-semibold text-content">{bridge.title}</h3>
+          <h3 className={cn('text-[15px] font-semibold', titleGhost ? 'italic text-content-secondary' : 'text-content')}>
+            {titleGhost ? ghostText('title') : bridge.title}
+            {generating && !titleGhost && <span className="ml-2 text-xs font-normal text-brand">正在写…</span>}
+          </h3>
           <span className={cn('px-2 py-0.5 text-[11px] font-medium', BRIDGE_STATUS_CLASS[bridge.status])}>
             {BRIDGE_STATUS_LABEL[bridge.status]}
           </span>
@@ -781,23 +1032,29 @@ function BridgeCard({ bridge, onEdit, onExpand, onDelete }: BridgeCardProps) {
 
       <dl className="mt-4 grid gap-x-6 gap-y-2 text-sm md:grid-cols-[auto_1fr]">
         <dt className="text-content-tertiary">目标</dt>
-        <dd className="leading-6 text-content">{bridge.goal}</dd>
+        <dd className={cn('leading-6', isGhost(bridge.goal, 'goal') ? 'italic text-content-secondary' : 'text-content')}>
+          {show(bridge.goal, 'goal') ?? (generating ? '…' : '')}
+        </dd>
         <dt className="text-content-tertiary">{ui.payoffLabel}</dt>
-        <dd className="leading-6 text-content">{bridge.showoff_point}</dd>
-        {bridge.golden_finger_usage && (
+        <dd className={cn('leading-6', isGhost(bridge.showoff_point, 'showoff_point') ? 'italic text-content-secondary' : 'text-content')}>
+          {show(bridge.showoff_point, 'showoff_point') ?? (generating ? '…' : '')}
+        </dd>
+        {show(bridge.golden_finger_usage, 'golden_finger_usage') && (
           <>
             <dt className="text-content-tertiary">金手指</dt>
-            <dd className="leading-6 text-content-secondary">{bridge.golden_finger_usage}</dd>
+            <dd className={cn('leading-6 text-content-secondary', isGhost(bridge.golden_finger_usage, 'golden_finger_usage') && 'italic')}>
+              {show(bridge.golden_finger_usage, 'golden_finger_usage')}
+            </dd>
           </>
         )}
       </dl>
 
-      {/* 4 章卡片预览 */}
+      {/* 4 章卡片预览（draft 时用打字机快照渲染幽灵文本） */}
       <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-4">
-        <ChapterCardPreview label={ui.positions.intro} hint={ui.hints.intro} content={bridge.c1_intro} />
-        <ChapterCardPreview label={ui.positions.build} hint={ui.hints.build} content={bridge.c2_build} />
-        <ChapterCardPreview label={ui.positions.payoff} hint={ui.hints.payoff} content={bridge.c3_payoff} />
-        <ChapterCardPreview label={ui.positions.aftermath} hint={ui.hints.aftermath} content={bridge.c4_aftermath} />
+        <ChapterCardPreview label={ui.positions.intro} hint={ui.hints.intro} content={show(bridge.c1_intro, 'c1_intro')} ghost={isGhost(bridge.c1_intro, 'c1_intro')} />
+        <ChapterCardPreview label={ui.positions.build} hint={ui.hints.build} content={show(bridge.c2_build, 'c2_build')} ghost={isGhost(bridge.c2_build, 'c2_build')} />
+        <ChapterCardPreview label={ui.positions.payoff} hint={ui.hints.payoff} content={show(bridge.c3_payoff, 'c3_payoff')} ghost={isGhost(bridge.c3_payoff, 'c3_payoff')} />
+        <ChapterCardPreview label={ui.positions.aftermath} hint={ui.hints.aftermath} content={show(bridge.c4_aftermath, 'c4_aftermath')} ghost={isGhost(bridge.c4_aftermath, 'c4_aftermath')} />
       </div>
 
       {bridge.next_bridge_hook && (
@@ -814,10 +1071,13 @@ function ChapterCardPreview({
   label,
   hint,
   content,
+  ghost = false,
 }: {
   label: string;
   hint: string;
-  content: string | null;
+  content: string | null | undefined;
+  /** 内容来自打字机快照（尚未落库） */
+  ghost?: boolean;
 }) {
   return (
     <div className="hh-subpanel p-3 text-xs">
@@ -826,12 +1086,40 @@ function ChapterCardPreview({
         <span className="text-[10px] text-content-tertiary">{hint}</span>
       </div>
       <p
-        className={cn('line-clamp-3 leading-5', content ? 'text-content-secondary' : 'text-content-tertiary')}
+        className={cn(
+          'line-clamp-3 leading-5',
+          ghost ? 'italic text-content-secondary' : content ? 'text-content-secondary' : 'text-content-tertiary',
+        )}
         title={content ?? undefined}
       >
         {content || '待 AI 规划'}
       </p>
     </div>
+  );
+}
+
+/** 填充运行态一行：思考计数 / 已写字数 · 已用时 · ETA（弹窗与横幅共用） */
+function FillLiveStatus({
+  thinking,
+  elapsed,
+  eta,
+}: {
+  thinking: FillThinkingEvent | null;
+  elapsed: number;
+  eta: number | null;
+}) {
+  const phase =
+    thinking && thinking.content_chars === 0
+      ? `模型思考中… 已思考 ${thinking.reasoning_chars.toLocaleString()} 字`
+      : thinking
+        ? `已写出 ${thinking.content_chars.toLocaleString()} 字`
+        : '等待模型响应…';
+  return (
+    <>
+      <span>{phase}</span>
+      <span>· 已用 {elapsed}s</span>
+      {eta != null && <span>· 预计还需 ~{Math.max(5, eta)}s</span>}
+    </>
   );
 }
 
