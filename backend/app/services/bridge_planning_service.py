@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import asdict, dataclass
 from typing import Any, AsyncIterator, Optional
 
@@ -52,7 +53,7 @@ from app.services.reference_pack import (
 )
 from app.services.reference_pack.policy_tables import get_policy
 from app.services.reference_pack.slot_builders import get_first_attached_pack
-from app.utils.json_cleaner import safe_parse_json
+from app.utils.json_cleaner import parse_partial_json, safe_parse_json
 from app.utils.story_outline_fields import parse_story_outline_fields
 
 logger = logging.getLogger(__name__)
@@ -312,6 +313,27 @@ _FILL_FIELDS = (
 _FILL_SHORT_FIELDS = {"title": 200, "goal": 500, "showoff_point": 500}
 
 
+def parse_partial_bridges(text: str, numbers: list[int]) -> list[dict[str, Any]]:
+    """把半截 JSON 解析成 partial 快照：只留目标槽位、只留已写出的非空字段，按 numbers 排序。"""
+    data = parse_partial_json(text, expected_type="array")
+    if not isinstance(data, list):
+        return []
+    by_number: dict[int, dict[str, Any]] = {}
+    for item in data:
+        if not isinstance(item, dict) or not str(item.get("bridge_number", "")).isdigit():
+            continue
+        n = int(item["bridge_number"])
+        if n not in numbers:
+            continue
+        snap: dict[str, Any] = {"bridge_number": n}
+        for field_name in _FILL_FIELDS:
+            value = item.get(field_name)
+            if isinstance(value, str) and value.strip():
+                snap[field_name] = value
+        by_number[n] = snap
+    return [by_number[n] for n in numbers if n in by_number]
+
+
 def _collected_json_text(resp: Any, *, what: str) -> str:
     """校验 generate_text_stream_collect 的返回，把"截断 / 空内容"翻译成可操作的错误。
 
@@ -397,9 +419,11 @@ C3 章场景密度最大；C4 章最后一张要含"下桥段引子"。
 class BridgePlanningService:
     """桥段规划服务（工程化流水线：plan → fill → expand）。"""
 
-    def __init__(self, ai_service):
+    def __init__(self, ai_service, *, partial_interval: float = 0.4):
         self.ai_service = ai_service
         self.assembler = PromptAssembler()
+        # partial 快照最小间隔（秒）；测试传 0 让每个 chunk 都触发
+        self.partial_interval = partial_interval
 
     # ---------------- 骨架层（无 LLM） ----------------
 
@@ -616,15 +640,38 @@ class BridgePlanningService:
                     fill_ctx.text,
                     render_fill_task(template, len(chunk), self._slot_table(beat_bridges, chunk_numbers)),
                 ])
-                resp = await self.ai_service.generate_text_stream_collect(
+                what = f"节点 {b_idx} 桥段 {chunk_numbers[0]}-{chunk_numbers[-1]} 填充"
+                buffer: list[str] = []
+                content_chars = 0
+                finish_reason: str | None = None
+                last_partial = float("-inf")
+                async for ev in self.ai_service.generate_text_stream_events(
                     prompt=user_prompt,
                     system_prompt=prompt.system_prompt,
                     model=effective_model or None,
                     temperature=0.6,
-                    context=f"BridgeFill-{effective_model or 'default'}",
-                )
-                what = f"节点 {b_idx} 桥段 {chunk_numbers[0]}-{chunk_numbers[-1]} 填充"
-                content = _collected_json_text(resp, what=what)
+                ):
+                    if ev.kind == "content":
+                        buffer.append(ev.text)
+                        content_chars += len(ev.text)
+                        now = time.monotonic()
+                        if now - last_partial >= self.partial_interval:
+                            snapshot = parse_partial_bridges("".join(buffer), chunk_numbers)
+                            if snapshot:
+                                last_partial = now
+                                yield {
+                                    "type": "partial", "beat_index": b_idx, "bridge_numbers": chunk_numbers,
+                                    "bridges": snapshot, "content_chars": content_chars, "elapsed": round(ev.elapsed, 1),
+                                }
+                    elif ev.kind in ("reasoning", "heartbeat"):
+                        yield {
+                            "type": "thinking", "beat_index": b_idx, "bridge_numbers": chunk_numbers,
+                            "reasoning_chars": ev.reasoning_chars, "content_chars": content_chars,
+                            "elapsed": round(ev.elapsed, 1),
+                        }
+                    elif ev.kind == "done":
+                        finish_reason = ev.finish_reason
+                content = _collected_json_text({"content": "".join(buffer), "finish_reason": finish_reason}, what=what)
                 data = safe_parse_json(content, default=[], expected_type="array", log_prefix="[BridgeFill]")
                 items = {
                     int(d["bridge_number"]): d

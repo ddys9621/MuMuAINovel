@@ -22,6 +22,44 @@ except ImportError:  # pragma: no cover - 兜底
     logger.warning("json_repair 包未安装，将跳过本地 JSON 修复 fallback")
 
 
+def _strip_markdown_fence(text: str) -> str:
+    cleaned = (text or "").strip()
+    if cleaned.startswith("```json"):
+        cleaned = cleaned[7:].lstrip("\n\r")
+    elif cleaned.startswith("```"):
+        cleaned = cleaned[3:].lstrip("\n\r")
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3].rstrip("\n\r")
+    return cleaned.strip()
+
+
+def parse_partial_json(text: str, expected_type: str = "array") -> Any:
+    """对流式输出中的半截 JSON 做容错解析（打字机预览用）。
+
+    依赖 json_repair 补全未闭合的字符串 / 对象 / 数组；解析失败或库缺失返回 None。
+    返回值只用于预览，不得作为最终结果落库（最终仍走 safe_parse_json）。
+    """
+    if not _HAS_JSON_REPAIR:
+        return None
+    cleaned = _strip_markdown_fence(text)
+    if not cleaned:
+        return None
+    if expected_type == "array":
+        start = cleaned.find("[")
+        if start < 0:
+            return None
+        cleaned = cleaned[start:]
+    elif expected_type == "object":
+        start = cleaned.find("{")
+        if start < 0:
+            return None
+        cleaned = cleaned[start:]
+    try:
+        return _repair_json(cleaned, return_objects=True)
+    except Exception:  # noqa: BLE001 - 预览用，任何异常都按"暂不可解析"处理
+        return None
+
+
 def clean_and_parse_json(
     response: str,
     expected_type: Optional[str] = None,
