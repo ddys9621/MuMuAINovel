@@ -1,17 +1,11 @@
 """向量记忆服务 - 基于ChromaDB实现长期记忆和语义检索"""
-import chromadb
-from sentence_transformers import SentenceTransformer
-from typing import List, Dict, Any, Optional
-import json
-from datetime import datetime
-from app.logger import get_logger
 import os
-import hashlib
-
-logger = get_logger(__name__)
 
 # 配置模型缓存目录并强制使用本地模型
-# 计算 backend/embedding 的绝对路径
+# ⚠️ 必须在 import sentence_transformers / huggingface_hub 之前设置：
+# huggingface_hub 在 import 时就把 HF_HUB_OFFLINE 固化为常量，
+# 先 import 再设环境变量等于没设——无本地模型时会发起**无超时**的
+# HF 网络请求，在 HF 不可达的环境（如国内直连）下进程永久挂死。
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))  # 从 app/services 回到 backend
 EMBEDDING_PATH = os.path.join(BASE_DIR, 'embedding')
 
@@ -21,6 +15,16 @@ if 'SENTENCE_TRANSFORMERS_HOME' not in os.environ:
 # 强制使用离线模式，避免重新下载
 os.environ['TRANSFORMERS_OFFLINE'] = '1'
 os.environ['HF_HUB_OFFLINE'] = '1'
+
+import chromadb
+from sentence_transformers import SentenceTransformer
+from typing import List, Dict, Any, Optional
+import json
+from datetime import datetime
+from app.logger import get_logger
+import hashlib
+
+logger = get_logger(__name__)
 
 
 class MemoryService:
@@ -87,9 +91,8 @@ class MemoryService:
             
             try:
                 logger.info("🔄 尝试加载主模型: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-                # 优先使用本地缓存的模型
-                # cache_folder会让模型优先从本地加载，只有不存在时才联网下载
-                # 注意：不要设置local_files_only=True，这会阻止fallback到联网下载
+                # 仅从本地 embedding 目录加载（local_files_only=True + 上方 offline 环境变量）；
+                # 缺模型时快速抛错并提示手动下载，绝不在运行时静默联网
                 self.embedding_model = SentenceTransformer(
                     'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
                     cache_folder=model_cache_dir,
@@ -106,11 +109,13 @@ class MemoryService:
                 logger.info("🔄 尝试使用备用模型: sentence-transformers/all-MiniLM-L6-v2")
                 try:
                     # 降级到更小的模型作为备选
+                    # 同样强制本地：缺模型时应快速失败给出下载指引，而非无超时联网挂死
                     self.embedding_model = SentenceTransformer(
                         'sentence-transformers/all-MiniLM-L6-v2',
                         cache_folder=model_cache_dir,
                         device='cpu',
-                        trust_remote_code=False
+                        trust_remote_code=False,
+                        local_files_only=True,
                     )
                     logger.info("✅ 使用备用Embedding模型 (all-MiniLM-L6-v2)")
                 except Exception as e2:
@@ -130,8 +135,14 @@ class MemoryService:
             logger.info(f"  - Embedding模型: paraphrase-multilingual-MiniLM-L12-v2")
             
         except Exception as e:
+            # 降级而非崩溃：缺模型/向量库故障时应用仍可启动，
+            # 仅向量记忆相关功能不可用（各公共方法有 try/except 空值兜底）
             logger.error(f"❌ MemoryService初始化失败: {str(e)}")
-            raise
+            logger.error("⚠️ 应用将以「无向量记忆」模式运行：语义检索/伏笔追踪/记忆增强上下文不可用")
+            logger.error(f"💡 修复方式：把 embedding 模型放入 {EMBEDDING_PATH} 后重启（桌面版启动器会尝试自动下载）")
+            self.client = None
+            self.embedding_model = None
+            self._initialized = True
     
     def get_collection(self, user_id: str, project_id: str):
         """
@@ -153,6 +164,13 @@ class MemoryService:
         # 4. 不能包含连续的点(..)
         # 5. 不能是有效的IPv4地址
         
+        # 降级守卫：初始化失败（缺模型等）时给出清晰错误，
+        # 调用方各方法的 try/except 会将其转为空结果
+        if self.client is None or self.embedding_model is None:
+            raise RuntimeError(
+                "向量记忆服务不可用（embedding 模型未加载），相关功能已降级"
+            )
+
         # 使用SHA256哈希压缩ID长度，确保不超过63字符
         # 格式: u_{user_hash}_p_{project_hash} (约30字符)
         user_hash = hashlib.sha256(user_id.encode()).hexdigest()[:8]

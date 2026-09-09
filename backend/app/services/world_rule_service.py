@@ -1,20 +1,9 @@
 """世界规则服务 - 为生成流程提供世界观规则支持"""
-from typing import List, Optional, Dict, Any
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func
-import chromadb
-from sentence_transformers import SentenceTransformer
 import os
-import hashlib
-import uuid
-from app.models.world_rule import WorldRule
-from app.models.project import Project
-from app.logger import get_logger
-from app.services.ai_service import ai_service
-
-logger = get_logger(__name__)
 
 # 配置模型缓存目录（与 memory_service 保持一致）
+# ⚠️ 必须在 import sentence_transformers / huggingface_hub 之前设置，
+# 否则 offline 开关不生效，无本地模型时会发起无超时的 HF 网络请求（详见 memory_service 头部说明）
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 EMBEDDING_PATH = os.path.join(BASE_DIR, 'embedding')
 
@@ -23,6 +12,20 @@ if 'SENTENCE_TRANSFORMERS_HOME' not in os.environ:
 
 os.environ['TRANSFORMERS_OFFLINE'] = '1'
 os.environ['HF_HUB_OFFLINE'] = '1'
+
+from typing import List, Optional, Dict, Any
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, and_, func
+import chromadb
+from sentence_transformers import SentenceTransformer
+import hashlib
+import uuid
+from app.models.world_rule import WorldRule
+from app.models.project import Project
+from app.logger import get_logger
+from app.services.ai_service import ai_service
+
+logger = get_logger(__name__)
 
 
 class WorldRuleService:

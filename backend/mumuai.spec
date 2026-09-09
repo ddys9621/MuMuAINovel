@@ -16,12 +16,17 @@ webview_path = Path(webview.__file__).parent
 datas = [
     # 静态文件（前端）
     (str(backend_dir / 'static'), 'static'),
-    # Embedding 模型
-    (str(backend_dir / 'embedding'), 'embedding'),
+    # Embedding 模型不再内置（体积 -470MB）：
+    # 首次启动由 app/services/embedding_bootstrap.py 经镜像自动下载，
+    # 失败则降级为「无向量记忆」模式运行
     # 配置文件模板
     (str(project_root / 'config.ini.template'), '.'),
     # 配置加载器
     (str(backend_dir / 'config_loader.py'), '.'),
+    # 品牌图标（启动控制台窗口运行时加载；由 scripts/make_icon.py 从 logo.svg 生成）
+    (str(backend_dir / 'assets'), 'assets'),
+    # MCP 商城内置目录（app/mcp/marketplace.py 按 __file__ 同目录读取，非 .py 文件需显式打包）
+    (str(backend_dir / 'app' / 'mcp' / 'marketplace_catalog.json'), 'app/mcp'),
     # pywebview 的 lib 目录（包含 DLL 和 runtimes）
     (str(webview_path / 'lib'), 'webview/lib'),
 ]
@@ -57,6 +62,8 @@ hiddenimports = [
     'sentence_transformers',
     'transformers',
     'torch',
+    'huggingface_hub',  # 首启模型下载（embedding_bootstrap）
+    'app.services.embedding_bootstrap',
     'app.api',
     'app.models',
     'app.services',
@@ -113,7 +120,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,  # 可以添加图标文件路径
+    icon=str(backend_dir / 'assets' / 'app.ico'),  # pywebview 会从 exe 提取该图标作为窗口图标
 )
 
 coll = COLLECT(
