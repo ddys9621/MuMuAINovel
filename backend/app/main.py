@@ -77,6 +77,13 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    # 停掉仍在跑的桥段填充任务（桥段保持 draft，下次可续跑）
+    try:
+        from app.services.bridge_fill_jobs import bridge_fill_jobs
+        await bridge_fill_jobs.shutdown()
+    except Exception as e:
+        logger.warning(f"⚠️ 桥段填充任务清理失败: {str(e)}")
+
     # 清理AI服务HTTP客户端资源
     try:
         from app.services.ai_service import ai_service
@@ -217,7 +224,7 @@ from app.api import (
     projects, characters, chapters,
     wizard_stream, relationships, organizations,
     auth, users, settings, writing_styles, memories,
-    mcp_plugins, admin, inspiration,
+    mcp_plugins, mcp_marketplace, admin, inspiration,
     plot_cards, plot_lines, chapter_outlines, story_outlines,
     world_rules, scene_generation, book_dissect,
     reference_pack, imitation
@@ -238,6 +245,7 @@ app.include_router(organizations.router, prefix="/api")
 app.include_router(writing_styles.router, prefix="/api")
 app.include_router(memories.router)  # 记忆管理API (已包含/api前缀)
 app.include_router(mcp_plugins.router, prefix="/api")  # MCP插件管理API
+app.include_router(mcp_marketplace.router, prefix="/api")  # MCP商城（内置精选目录 + 一键安装）
 
 # 新增剧情相关API
 app.include_router(story_outlines.router, prefix="/api")
