@@ -224,8 +224,20 @@ async def fill_bridges_stream_endpoint(
                         f"节点 {evt['beat_index']}：生成桥段 {evt['bridge_numbers'][0]}-{evt['bridge_numbers'][-1]}",
                         int(done_count / total * 100) if total else 0,
                     )
-                elif evt["type"] == "beat_done":
+                elif evt["type"] == "batch_done":
                     done_count += len(evt["bridges"])
+                    nums = evt["bridge_numbers"]
+                    yield SSEResponse.format_sse({
+                        "type": "meta",
+                        "beat_index": evt["beat_index"],
+                        "bridge_numbers": nums,
+                        "provenance": evt["provenance"],
+                    })
+                    yield await SSEResponse.send_progress(
+                        f"节点 {evt['beat_index']}：桥段 {nums[0]}-{nums[-1]} 已填充（累计 {done_count}/{total}）",
+                        int(done_count / total * 100) if total else 100,
+                    )
+                elif evt["type"] == "beat_done":
                     yield await SSEResponse.send_progress(
                         f"节点 {evt['beat_index']} 完成（累计 {done_count}/{total}）",
                         int(done_count / total * 100) if total else 100,

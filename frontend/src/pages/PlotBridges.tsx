@@ -1,58 +1,68 @@
 /**
- * V4.1 K2 桥段规划页
+ * 桥段规划页（工程化桥段流水线）
  *
  * 路由：/project/:projectId/plot-bridges
  *
- * 功能：
- * - 列出项目下所有桥段（按 bridge_number 排序）
- * - "AI 规划桥段"按钮：调 plotBridgesApi.plan() 让 AI 一次性生成 N 个桥段
- * - 编辑单个桥段（弹窗）：修改标题/目标/装逼点/4 章卡片
- * - "展开为 4 章"按钮：调 plotBridgesApi.expand() 把桥段展开为 4 个 ChapterOutline
- * - 删除桥段（确认弹窗）
+ * 三段流程：
+ * 1. 生成桥段骨架：预览槽位表（主线节点 → 桥段数 / 章号，纯计算）→ 确认后建 N 个 draft 桥段
+ * 2. AI 填充桥段内容：按主线节点分批 LLM 填 title/goal/爽点/四章卡（SSE，可续跑）
+ * 3. 展开为章纲：按 bridge_number 顺序把 ready 桥段展开为第 4(n-1)+1…4n 章
+ *
+ * 其它：编辑单个桥段、删除桥段、重置骨架（未展开时）
  *
  * K2 设计：桥段四章结构（C1 代入+信息差 / C2 拉扯+开装 / C3 兑现爽点 / C4 善后+下一目标）
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
-  Alert,
   Button,
-  Card,
-  Empty,
   Form,
   Input,
-  InputNumber,
   Modal,
   Popconfirm,
-  Radio,
+  Popover,
   Select,
-  Spin,
-  Tag,
   Tooltip,
-  Typography,
 } from 'antd';
+import { ReloadOutlined, ThunderboltOutlined, ExpandAltOutlined } from '@ant-design/icons';
 import {
-  EditOutlined,
-  DeleteOutlined,
-  ThunderboltOutlined,
-  ExpandAltOutlined,
-  ReloadOutlined,
-  PlusOutlined,
-  RocketOutlined,
-  CheckCircleOutlined,
-} from '@ant-design/icons';
+  AlertTriangle,
+  ArrowRight,
+  BookOpen,
+  CheckCircle2,
+  Expand,
+  Loader2,
+  Pencil,
+  RefreshCw,
+  Rocket,
+  Target,
+  Trash2,
+  Unlink,
+  Zap,
+} from 'lucide-react';
 import { toast } from 'sonner';
 
+import { cn } from '@/lib/utils';
 import { plotBridgesApi } from '@/services/plotBridgesApi';
 import { settingsApi } from '@/services/api';
 import {
-  BRIDGE_STATUS_COLOR,
   BRIDGE_STATUS_LABEL,
+  BRIDGE_TEMPLATE_UI,
+  resolveTemplateKey,
+  type BridgeGenerationMeta,
+  type BridgeSlotPreview,
+  type BridgeStatus,
+  type FillMetaEvent,
   type PlotBridge,
   type UpdateBridgeRequest,
 } from '@/types/plot_bridge';
 
-const { Text, Paragraph } = Typography;
+const BRIDGE_STATUS_CLASS: Record<BridgeStatus, string> = {
+  draft: 'bg-surface-hover text-content-secondary',
+  ready: 'bg-brand/10 text-brand',
+  generating: 'bg-amber-50 text-amber-600',
+  completed: 'bg-emerald-50 text-emerald-600',
+};
 
 type ModelOption = { value: string; label: string };
 
@@ -137,7 +147,13 @@ export default function PlotBridgesPage() {
   const [bridges, setBridges] = useState<PlotBridge[]>([]);
   const [loading, setLoading] = useState(true);
   const [planning, setPlanning] = useState(false);
-  const [planModalOpen, setPlanModalOpen] = useState(false);
+  const [preview, setPreview] = useState<BridgeSlotPreview | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [fillOpen, setFillOpen] = useState(false);
+  const [filling, setFilling] = useState(false);
+  const [fillProgress, setFillProgress] = useState<{ msg: string; pct: number } | null>(null);
+  // 最近一个子批的溯源（模型档位 / 模板 / 参考包 / 警告），由 SSE meta 事件更新
+  const [fillMeta, setFillMeta] = useState<FillMetaEvent | null>(null);
   const [expandingAll, setExpandingAll] = useState(false);
   const [editingBridge, setEditingBridge] = useState<PlotBridge | null>(null);
   const [expandingBridge, setExpandingBridge] = useState<PlotBridge | null>(null);
@@ -167,24 +183,76 @@ export default function PlotBridgesPage() {
     fetchBridges();
   }, [fetchBridges]);
 
-  const handlePlan = useCallback(
-    async (values: {
-      bridge_count: number;
-      model: string;
-      mode: 'by_plot_line' | 'free';
-    }) => {
+  /** 第 1 段·预览：纯计算槽位表，400 时后端 detail 会说明缺主线/缺节点 */
+  const handleOpenPreview = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const p = await plotBridgesApi.planPreview(projectId);
+      setPreview(p);
+      setPreviewOpen(true);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '无法计算桥段骨架');
+    }
+  }, [projectId]);
+
+  /** 第 1 段·建骨架：N 个 draft 桥段，无 LLM */
+  const handlePlan = useCallback(async () => {
+    if (!projectId) return;
+    setPlanning(true);
+    try {
+      const created = await plotBridgesApi.plan(projectId);
+      toast.success(`已建骨架：${created.length} 个桥段（${created.length * 4} 章）`);
+      setPreviewOpen(false);
+      await fetchBridges();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '建骨架失败');
+    } finally {
+      setPlanning(false);
+    }
+  }, [projectId, fetchBridges]);
+
+  const handleReset = useCallback(async () => {
+    if (!projectId) return;
+    if (!window.confirm('重置将删除全部桥段骨架（仅限尚未展开为章纲时）。是否继续？')) return;
+    try {
+      const res = await plotBridgesApi.reset(projectId);
+      toast.success(`已删除 ${res.deleted} 个桥段`);
+      await fetchBridges();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '重置失败');
+    }
+  }, [projectId, fetchBridges]);
+
+  /** 第 2 段·填充：SSE 按主线节点分批，中断后再次点击即从剩余 draft 续填 */
+  const handleFill = useCallback(
+    async (values: { model: string }) => {
       if (!projectId) return;
-      setPlanning(true);
+      setFilling(true);
+      setFillProgress({ msg: '准备中…', pct: 0 });
+      setFillMeta(null);
       try {
-        const newBridges = await plotBridgesApi.plan(projectId, values);
-        const modeLabel = values.mode === 'by_plot_line' ? '按主线节点' : '自由';
-        toast.success(`AI 已${modeLabel}生成 ${newBridges.length} 个桥段`);
-        setPlanModalOpen(false);
-        await fetchBridges();
+        await plotBridgesApi.fillStream(
+          projectId,
+          { model: values.model || undefined },
+          {
+            onProgress: (msg, pct) => setFillProgress({ msg, pct }),
+            onMeta: (m) => setFillMeta(m as unknown as FillMetaEvent),
+            onResult: (r) => {
+              toast.success(
+                `已填充 ${r.filled} 个桥段${r.remaining_drafts ? `，剩余 ${r.remaining_drafts} 个待填` : ''}`,
+              );
+            },
+            // 不传 onError：ssePost 收到 error 事件会同时回调 onError 并 reject，
+            // 两处都 toast 会弹出两条一模一样的错误；统一交给下面的 catch 处理
+          },
+        );
+        setFillOpen(false);
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : '规划桥段失败');
+        toast.error(err instanceof Error ? err.message : '填充失败', { duration: 8000 });
       } finally {
-        setPlanning(false);
+        setFilling(false);
+        setFillProgress(null);
+        await fetchBridges();
       }
     },
     [projectId, fetchBridges],
@@ -205,13 +273,15 @@ export default function PlotBridgesPage() {
 
   // T2.1：桥段状态统计 + 批量展开
   const stats = useMemo(() => {
+    const draft = bridges.filter((b) => b.status === 'draft').length;
     const ready = bridges.filter((b) => b.status === 'ready').length;
     const completed = bridges.filter((b) => b.status === 'completed').length;
     return {
       total: bridges.length,
+      draft,
       ready,
       completed,
-      allCompleted: bridges.length > 0 && ready === 0 && completed === bridges.length,
+      allCompleted: bridges.length > 0 && draft === 0 && ready === 0 && completed === bridges.length,
     };
   }, [bridges]);
 
@@ -255,103 +325,88 @@ export default function PlotBridgesPage() {
   if (!projectId) return null;
 
   return (
-    <div className="space-y-4 p-6">
-      {/* Header */}
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold">
-            <RocketOutlined className="text-blue-500" />
-            桥段规划（K2 桥段四章）
-          </h1>
-          <Paragraph type="secondary" className="!mb-0 mt-1 text-sm">
-            一本网文 ≈ 200-300 桥段，每桥段 4 章。
-            <strong className="text-blue-600">
-              C1 代入 → C2 拉扯 → C3 兑现 → C4 善后
-            </strong>
-            。AI 规划后可手工微调，再展开为完整章纲。
-          </Paragraph>
+    <div className="animate-fade-in space-y-6">
+      <section className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+        <div className="min-w-0">
+          <p className="hh-eyebrow">桥段</p>
+          <h1 className="mt-2 text-[28px] font-semibold tracking-tight text-content md:text-[32px]">桥段规划</h1>
+          <p className="mt-2 max-w-[640px] text-sm leading-6 text-content-secondary">
+            每个桥段 4 章：
+            <span className="font-medium text-content">C1 代入 → C2 拉扯 → C3 兑现 → C4 善后</span>
+            。先由系统按主线节点权重建骨架（桥段数与章号），再让 AI 逐节点填内容，最后按序展开为章纲。
+          </p>
         </div>
-        <div className="flex gap-2">
-          <Button icon={<ReloadOutlined />} onClick={fetchBridges}>
-            刷新
-          </Button>
-          <Button
-            type="primary"
-            icon={<ThunderboltOutlined />}
-            onClick={() => setPlanModalOpen(true)}
-            disabled={planning}
-          >
-            AI 规划桥段
-          </Button>
-          {stats.ready > 0 && (
-            <Button
-              type="primary"
-              icon={<ExpandAltOutlined />}
-              onClick={handleExpandAll}
-              loading={expandingAll}
-              danger={false}
-              style={{ background: '#16a34a', borderColor: '#16a34a' }}
-            >
-              {expandingAll
-                ? '正在展开...'
-                : `一键展开全部（${stats.ready}）`}
-            </Button>
-          )}
-        </div>
-      </header>
 
-      {/* T2.1：状态总览 + 完成跳转提示 */}
+        <div className="flex shrink-0 flex-wrap items-center gap-2.5">
+          <button onClick={fetchBridges} className="hh-icon-btn h-11 w-11" title="刷新" aria-label="刷新">
+            <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
+          </button>
+          {bridges.length > 0 && stats.completed === 0 && (
+            <button onClick={handleReset} className="hh-btn-ghost text-red-500 hover:bg-red-50 hover:text-red-600">
+              <Trash2 className="h-4 w-4" />
+              重置骨架
+            </button>
+          )}
+          {bridges.length === 0 ? (
+            <button onClick={handleOpenPreview} className="hh-btn-primary">
+              <Rocket className="h-4 w-4" />
+              生成桥段骨架
+            </button>
+          ) : stats.draft > 0 ? (
+            <button onClick={() => setFillOpen(true)} disabled={filling} className="hh-btn-primary">
+              {filling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+              {filling ? '填充中…' : `AI 填充桥段内容（${stats.draft} 待填）`}
+            </button>
+          ) : stats.ready > 0 ? (
+            <button onClick={handleExpandAll} disabled={expandingAll} className="hh-btn-primary">
+              {expandingAll ? <Loader2 className="h-4 w-4 animate-spin" /> : <Expand className="h-4 w-4" />}
+              {expandingAll ? '正在展开…' : `展开为章纲（${stats.ready} 个桥段）`}
+            </button>
+          ) : null}
+        </div>
+      </section>
+
+      {/* 状态总览 + 完成跳转提示 */}
       {stats.total > 0 && (
-        <Alert
-          type={stats.allCompleted ? 'success' : 'info'}
-          showIcon
-          icon={stats.allCompleted ? <CheckCircleOutlined /> : undefined}
-          message={
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <span>
-                共 {stats.total} 个桥段：
-                <Tag color="processing" className="ml-1">就绪 {stats.ready}</Tag>
-                <Tag color="success">已展开 {stats.completed}</Tag>
-                {stats.allCompleted && (
-                  <span className="ml-2 text-green-700">
-                    全部桥段已展开为章纲，可前往章纲页继续创作。
-                  </span>
-                )}
-              </span>
-              {stats.allCompleted && (
-                <Button
-                  type="primary"
-                  onClick={handleGoToChapterOutlines}
-                >
-                  进入章纲页 →
-                </Button>
-              )}
-            </div>
-          }
-        />
+        <section className="hh-panel grid grid-cols-2 divide-surface-border/80 md:grid-cols-5 md:divide-x">
+          <StatItem label="桥段总数" value={stats.total} />
+          <StatItem label="待填充" value={stats.draft} />
+          <StatItem label="就绪待展开" value={stats.ready} />
+          <StatItem label="已展开" value={stats.completed} />
+          <StatItem label="总章数" value={stats.total * 4} />
+        </section>
+      )}
+
+      {stats.allCompleted && (
+        <section className="flex flex-col gap-3 border border-emerald-200 bg-emerald-50/80 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="flex items-center gap-2 text-sm text-emerald-700">
+            <CheckCircle2 className="h-4 w-4 shrink-0" />
+            全部桥段已展开为章纲，可前往章纲页继续创作。
+          </p>
+          <button onClick={handleGoToChapterOutlines} className="hh-btn-primary hh-btn-sm shrink-0">
+            进入章纲页
+            <ArrowRight className="h-3.5 w-3.5" />
+          </button>
+        </section>
       )}
 
       {/* List */}
       {loading ? (
-        <div className="flex justify-center py-20">
-          <Spin size="large" tip="加载中..." />
+        <div className="hh-panel flex items-center justify-center gap-2 py-20 text-sm text-content-secondary">
+          <Loader2 className="h-5 w-5 animate-spin text-brand" />
+          加载中…
         </div>
       ) : bridges.length === 0 ? (
-        <Empty
-          description={
-            <span className="text-sm">
-              暂无桥段。点击"AI 规划桥段"让系统根据故事大纲 + 拆书参考一次性生成。
-            </span>
-          }
-        >
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => setPlanModalOpen(true)}
-          >
-            生成第一批桥段
-          </Button>
-        </Empty>
+        <section className="hh-panel flex flex-col items-center px-6 py-14 text-center">
+          <span className="flex h-14 w-14 items-center justify-center bg-brand/10 text-brand">
+            <Rocket className="h-7 w-7" />
+          </span>
+          <h2 className="mt-5 text-xl font-semibold tracking-tight text-content">还没有桥段骨架</h2>
+          <p className="mt-2 max-w-md text-sm leading-6 text-content-secondary">
+            点击右上角「生成桥段骨架」：系统按主线节点权重算出桥段数与章号，随后再用 AI 填充每个桥段的内容。
+            需要先在「故事大纲 → 剧情线」里有且仅有一条主线（向导会自动生成）。
+          </p>
+        </section>
       ) : (
         <BridgeListByBeat
           bridges={bridges}
@@ -361,45 +416,67 @@ export default function PlotBridgesPage() {
         />
       )}
 
-      {/* AI 规划桥段弹窗 */}
+      {/* 第 1 段：骨架预览（纯计算，不写库）→ 确认建骨架 */}
       <Modal
-        title="AI 规划桥段"
-        open={planModalOpen}
-        onCancel={() => setPlanModalOpen(false)}
+        title="桥段骨架预览"
+        open={previewOpen}
+        onCancel={() => setPreviewOpen(false)}
+        footer={null}
+        destroyOnClose
+        width={560}
+      >
+        {preview && (
+          <div className="space-y-4">
+            <p className="text-sm leading-6 text-content-secondary">
+              主线共 {Object.keys(preview.beat_quotas).length} 个节点 → {preview.total_bridges} 个桥段 →{' '}
+              {preview.total_chapters} 章。桥段数与章号由系统按节点权重确定，AI 只负责填内容。
+            </p>
+            <ul className="hh-subpanel divide-y divide-surface-border/80 text-sm">
+              {Object.entries(preview.beat_quotas).map(([beat, quota]) => {
+                const slots = preview.slots.filter((s) => String(s.beat_index) === beat);
+                const first = slots[0];
+                const last = slots[slots.length - 1];
+                return (
+                  <li key={beat} className="flex items-center justify-between gap-3 px-4 py-2">
+                    <span className="min-w-0 truncate text-content">
+                      [节点 {beat}] {first?.beat_title}
+                    </span>
+                    <span className="shrink-0 text-content-tertiary tabular-nums">
+                      {quota} 个桥段 · 第 {first?.chapter_start}-{last?.chapter_end} 章
+                      {first && first.secondary.length > 0 ? ` · 副线任务 ${first.secondary.length}` : ''}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+            <div className="flex justify-end gap-2">
+              <Button onClick={() => setPreviewOpen(false)}>取消</Button>
+              <Button type="primary" loading={planning} onClick={handlePlan} icon={<ThunderboltOutlined />}>
+                确认建骨架
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* 第 2 段：AI 填充桥段内容（SSE，按主线节点分批，可续跑） */}
+      <Modal
+        title="AI 填充桥段内容"
+        open={fillOpen}
+        onCancel={() => !filling && setFillOpen(false)}
         footer={null}
         destroyOnClose
         width={480}
+        maskClosable={!filling}
+        closable={!filling}
       >
         <Form
           // 用 defaultModel 作为 key：异步加载完成后强制重渲染，让 initialValues 生效
-          key={`plan-form-${defaultModel || 'pending'}`}
+          key={`fill-form-${defaultModel || 'pending'}`}
           layout="vertical"
-          initialValues={{
-            bridge_count: 25,
-            model: defaultModel || modelOptions[0]?.value || 'deepseek-v3',
-            mode: 'by_plot_line',
-          }}
-          onFinish={handlePlan}
+          initialValues={{ model: defaultModel || modelOptions[0]?.value || 'deepseek-v3' }}
+          onFinish={handleFill}
         >
-          <Form.Item
-            label="规划模式"
-            name="mode"
-            extra="按主线节点：桥段绑定剧情线节点，按权重自动分配配额（推荐）；自由：忽略主线节点独立规划"
-            rules={[{ required: true }]}
-          >
-            <Radio.Group>
-              <Radio.Button value="by_plot_line">按主线节点（方案 C）</Radio.Button>
-              <Radio.Button value="free">自由规划</Radio.Button>
-            </Radio.Group>
-          </Form.Item>
-          <Form.Item
-            label="桥段数量"
-            name="bridge_count"
-            extra="1 桥段 ≈ 4 章，25 个桥段 ≈ 100 章"
-            rules={[{ required: true, type: 'number', min: 1, max: 300 }]}
-          >
-            <InputNumber min={1} max={300} step={5} className="w-full" />
-          </Form.Item>
           <Form.Item
             label={
               <div className="flex items-center gap-2">
@@ -424,19 +501,37 @@ export default function PlotBridgesPage() {
               showSearch
               optionFilterProp="label"
               placeholder={loadingModels ? '加载模型中...' : '选择模型'}
+              disabled={filling}
             />
           </Form.Item>
+          <p className="mb-4 text-xs leading-5 text-content-tertiary">
+            按主线节点逐批填充，每批一次 LLM 调用；中断或失败后再次点击会从剩余的 {stats.draft} 个待填桥段续跑。
+          </p>
+          {fillProgress && (
+            <div className="mb-4">
+              <div className="hh-progress">
+                <div className="hh-progress-bar" style={{ width: `${fillProgress.pct}%` }} />
+              </div>
+              <p className="mt-1 text-xs text-content-tertiary">{fillProgress.msg}</p>
+            </div>
+          )}
+          {fillMeta && (
+            <div className="hh-subpanel mb-4 p-3 text-xs leading-5">
+              <p className="text-content-secondary">
+                本批参考：档位 <b>{fillMeta.provenance.model_tier || '?'}</b> · 模板{' '}
+                <b>{BRIDGE_TEMPLATE_UI[resolveTemplateKey(fillMeta.provenance.template)].name}</b>
+                {' · '}参考包 <b>{fillMeta.provenance.reference_pack?.title ?? '未挂载'}</b>
+                {' · '}账本 {fillMeta.provenance.inputs.ledger_bridge_numbers.length} 个桥段
+              </p>
+              <WarningList warnings={fillMeta.provenance.warnings} />
+            </div>
+          )}
           <Form.Item className="!mb-0 text-right">
-            <Button onClick={() => setPlanModalOpen(false)} className="mr-2">
+            <Button onClick={() => setFillOpen(false)} disabled={filling} className="mr-2">
               取消
             </Button>
-            <Button
-              type="primary"
-              htmlType="submit"
-              loading={planning}
-              icon={<ThunderboltOutlined />}
-            >
-              {planning ? '正在规划...' : '开始规划'}
+            <Button type="primary" htmlType="submit" loading={filling} icon={<ThunderboltOutlined />}>
+              {filling ? '填充中…' : `开始填充（${stats.draft} 个）`}
             </Button>
           </Form.Item>
         </Form>
@@ -542,31 +637,29 @@ function BridgeListByBeat({
   }, [groups]);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       {orderedKeys.map((key) => {
         const groupBridges = groups.get(key) ?? [];
         const isUnbound = key === '__unbound__';
         const first = groupBridges[0];
         const groupLabel = isUnbound
-          ? '未绑节点（free 模式 / 老桥段）'
-          : `剧情线 ${first?.plot_line_id?.slice(0, 8) ?? '?'}… · 节点 ${first?.beat_index ?? '?'}（${groupBridges.length} 桥段）`;
+          ? '未绑节点（旧数据，建议重置骨架后重新规划）'
+          : `主线节点 ${first?.beat_index ?? '?'} · 第 ${first?.chapter_start ?? '?'}-${groupBridges[groupBridges.length - 1]?.chapter_end ?? '?'} 章`;
         return (
-          <div key={key} className="space-y-2">
-            <div
-              className={`flex items-center gap-2 rounded px-3 py-1.5 text-sm font-medium ${
-                isUnbound
-                  ? 'bg-gray-50 text-gray-500'
-                  : 'bg-geekblue-50 text-geekblue-700'
-              }`}
-              style={
-                isUnbound
-                  ? undefined
-                  : { background: '#f0f5ff', color: '#1d39c4' }
-              }
-            >
-              {isUnbound ? '🔓' : '🎯'} {groupLabel}
+          <div key={key} className="space-y-3">
+            <div className="flex items-center gap-2 text-sm">
+              <span
+                className={cn(
+                  'flex h-7 w-7 items-center justify-center',
+                  isUnbound ? 'bg-surface-hover text-content-tertiary' : 'bg-brand/10 text-brand',
+                )}
+              >
+                {isUnbound ? <Unlink className="h-3.5 w-3.5" /> : <Target className="h-3.5 w-3.5" />}
+              </span>
+              <span className={cn('font-medium', isUnbound ? 'text-content-secondary' : 'text-content')}>{groupLabel}</span>
+              <span className="text-xs text-content-tertiary tabular-nums">{groupBridges.length} 个桥段</span>
             </div>
-            <div className="space-y-3 pl-3">
+            <div className="space-y-3">
               {groupBridges.map((bridge) => (
                 <BridgeCard
                   key={bridge.id}
@@ -598,7 +691,11 @@ interface BridgeCardProps {
 
 function BridgeCard({ bridge, onEdit, onExpand, onDelete }: BridgeCardProps) {
   const isCompleted = bridge.status === 'completed';
-  // V4.1 方案 C：桥段绑定剧情线节点时显示节点信息 Tag
+  const isDraft = bridge.status === 'draft';
+  const secondaryCount = bridge.secondary_beats?.length ?? 0;
+  // 填充时记录的题材模板决定卡片标签（装逼点 / 反转点 …，C1-C4 语义）
+  const ui = BRIDGE_TEMPLATE_UI[resolveTemplateKey(bridge.template)];
+  // 桥段绑定主线节点时显示节点信息 Tag
   const hasBeatBinding =
     bridge.beat_index != null &&
     bridge.beat_coverage_start != null &&
@@ -609,49 +706,48 @@ function BridgeCard({ bridge, onEdit, onExpand, onDelete }: BridgeCardProps) {
       )}%`
     : null;
   return (
-    <Card
-      size="small"
-      className="hover:shadow-md transition-shadow"
-      title={
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded bg-blue-50 px-2 py-0.5 text-sm font-medium text-blue-600">
-            #{bridge.bridge_number}
-          </span>
-          <span className="font-semibold">{bridge.title}</span>
-          <Tag color={BRIDGE_STATUS_COLOR[bridge.status]}>
+    <article className="hh-panel p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="hh-tag tabular-nums">#{bridge.bridge_number}</span>
+          <h3 className="text-[15px] font-semibold text-content">{bridge.title}</h3>
+          <span className={cn('px-2 py-0.5 text-[11px] font-medium', BRIDGE_STATUS_CLASS[bridge.status])}>
             {BRIDGE_STATUS_LABEL[bridge.status]}
-          </Tag>
+          </span>
+          <span className="inline-flex items-center border border-surface-border px-2 py-0.5 text-[11px] text-content-secondary tabular-nums">
+            第 {bridge.chapter_start}-{bridge.chapter_end} 章
+          </span>
           {hasBeatBinding && (
             <Tooltip
               title={
-                `本桥段绑定到剧情线节点 ${bridge.beat_index}，覆盖该节点进度 ${coveragePct}。` +
-                ' 章节正文生成时会按节点权重推进，避免主线节奏失控。'
+                `本桥段绑定到主线节点 ${bridge.beat_index}，覆盖该节点进度 ${coveragePct}。` +
+                ' 展开为章纲时会把覆盖度均分到 4 章并回写剧情线进度。'
               }
             >
-              <Tag color="geekblue" className="!ml-0">
+              <span className="inline-flex items-center gap-1 border border-surface-border px-2 py-0.5 text-[11px] text-content-secondary tabular-nums">
+                <Target className="h-3 w-3" />
                 节点 {bridge.beat_index} · {coveragePct}
-              </Tag>
+              </span>
             </Tooltip>
           )}
-        </div>
-      }
-      extra={
-        <div className="flex gap-1">
-          <Tooltip title="编辑桥段">
-            <Button size="small" icon={<EditOutlined />} onClick={onEdit} />
-          </Tooltip>
-          <Tooltip
-            title={isCompleted ? '此桥段已展开为 4 章，可重新展开覆盖' : '展开为 4 个 ChapterOutline'}
-          >
-            <Button
-              size="small"
-              type={isCompleted ? 'default' : 'primary'}
-              icon={<ExpandAltOutlined />}
-              onClick={onExpand}
+          {secondaryCount > 0 && (
+            <Tooltip
+              title={bridge.secondary_beats
+                .map((t) => `${t.line_type === 'character' ? '角色线' : '支线'}《${t.line_title}》[节点 ${t.beat_index}] ${t.beat_title}`)
+                .join('；')}
             >
-              {isCompleted ? '重新展开' : '展开 4 章'}
-            </Button>
-          </Tooltip>
+              <span className="inline-flex items-center border border-surface-border px-2 py-0.5 text-[11px] text-content-secondary tabular-nums">
+                副线任务 {secondaryCount}
+              </span>
+            </Tooltip>
+          )}
+          <ProvenanceChip meta={bridge.generation_meta ?? null} />
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1">
+          <button onClick={onEdit} className="hh-icon-btn-plain h-8 w-8" title="编辑桥段" aria-label="编辑桥段">
+            <Pencil className="h-4 w-4" />
+          </button>
           <Popconfirm
             title={`确定删除桥段「${bridge.title}」？`}
             description="不会删除已展开的章纲，但会解除关联"
@@ -660,44 +756,57 @@ function BridgeCard({ bridge, onEdit, onExpand, onDelete }: BridgeCardProps) {
             cancelText="取消"
             okButtonProps={{ danger: true }}
           >
-            <Tooltip title="删除桥段">
-              <Button size="small" danger icon={<DeleteOutlined />} />
-            </Tooltip>
+            <button className="hh-icon-btn-plain h-8 w-8 hover:text-red-500" title="删除桥段" aria-label="删除桥段">
+              <Trash2 className="h-4 w-4" />
+            </button>
           </Popconfirm>
+          {isCompleted ? (
+            <span className="ml-1 inline-flex items-center gap-1 text-xs text-emerald-600">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              已展开
+            </span>
+          ) : (
+            <button
+              onClick={onExpand}
+              disabled={isDraft}
+              className="hh-btn-primary hh-btn-sm ml-1"
+              title={isDraft ? '请先用「AI 填充桥段内容」填充后再展开' : `展开为第 ${bridge.chapter_start}-${bridge.chapter_end} 章（需前一桥段已展开）`}
+            >
+              <Expand className="h-3.5 w-3.5" />
+              {isDraft ? '待填充' : '展开 4 章'}
+            </button>
+          )}
         </div>
-      }
-    >
-      <div className="space-y-2 text-sm">
-        <div>
-          <Text strong className="text-blue-600">目标：</Text>
-          <Text>{bridge.goal}</Text>
-        </div>
-        <div>
-          <Text strong className="text-orange-600">装逼点：</Text>
-          <Text>{bridge.showoff_point}</Text>
-        </div>
-        {bridge.golden_finger_usage && (
-          <div>
-            <Text strong className="text-purple-600">金手指用法：</Text>
-            <Text type="secondary">{bridge.golden_finger_usage}</Text>
-          </div>
-        )}
-
-        {/* 4 章卡片预览 */}
-        <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-4">
-          <ChapterCardPreview label="C1 代入" hint="5:5" content={bridge.c1_intro} color="bg-blue-50" />
-          <ChapterCardPreview label="C2 拉扯" hint="9:1 章尾开装" content={bridge.c2_build} color="bg-yellow-50" />
-          <ChapterCardPreview label="C3 兑现" hint="无钩子" content={bridge.c3_payoff} color="bg-orange-50" />
-          <ChapterCardPreview label="C4 善后" hint="承上启下" content={bridge.c4_aftermath} color="bg-green-50" />
-        </div>
-
-        {bridge.next_bridge_hook && (
-          <div className="mt-2 rounded bg-gray-50 px-2 py-1.5 text-xs text-gray-600">
-            <Text strong>下桥段钩子：</Text> {bridge.next_bridge_hook}
-          </div>
-        )}
       </div>
-    </Card>
+
+      <dl className="mt-4 grid gap-x-6 gap-y-2 text-sm md:grid-cols-[auto_1fr]">
+        <dt className="text-content-tertiary">目标</dt>
+        <dd className="leading-6 text-content">{bridge.goal}</dd>
+        <dt className="text-content-tertiary">{ui.payoffLabel}</dt>
+        <dd className="leading-6 text-content">{bridge.showoff_point}</dd>
+        {bridge.golden_finger_usage && (
+          <>
+            <dt className="text-content-tertiary">金手指</dt>
+            <dd className="leading-6 text-content-secondary">{bridge.golden_finger_usage}</dd>
+          </>
+        )}
+      </dl>
+
+      {/* 4 章卡片预览 */}
+      <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-4">
+        <ChapterCardPreview label={ui.positions.intro} hint={ui.hints.intro} content={bridge.c1_intro} />
+        <ChapterCardPreview label={ui.positions.build} hint={ui.hints.build} content={bridge.c2_build} />
+        <ChapterCardPreview label={ui.positions.payoff} hint={ui.hints.payoff} content={bridge.c3_payoff} />
+        <ChapterCardPreview label={ui.positions.aftermath} hint={ui.hints.aftermath} content={bridge.c4_aftermath} />
+      </div>
+
+      {bridge.next_bridge_hook && (
+        <p className="mt-3 border-l-2 border-brand/40 pl-3 text-xs leading-6 text-content-secondary">
+          <span className="font-medium text-content">下桥段钩子：</span>
+          {bridge.next_bridge_hook}
+        </p>
+      )}
+    </article>
   );
 }
 
@@ -705,25 +814,132 @@ function ChapterCardPreview({
   label,
   hint,
   content,
-  color,
 }: {
   label: string;
   hint: string;
   content: string | null;
-  color: string;
 }) {
   return (
-    <div className={`${color} rounded p-2 text-xs`}>
-      <div className="mb-1 flex items-center justify-between">
-        <Text strong className="text-gray-800">{label}</Text>
-        <Text type="secondary" className="text-[10px]">{hint}</Text>
+    <div className="hh-subpanel p-3 text-xs">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <span className="font-semibold text-brand">{label}</span>
+        <span className="text-[10px] text-content-tertiary">{hint}</span>
       </div>
-      <Paragraph
-        ellipsis={{ rows: 3, tooltip: content }}
-        className="!mb-0 text-gray-600"
+      <p
+        className={cn('line-clamp-3 leading-5', content ? 'text-content-secondary' : 'text-content-tertiary')}
+        title={content ?? undefined}
       >
-        {content || '（待 AI 规划）'}
-      </Paragraph>
+        {content || '待 AI 规划'}
+      </p>
+    </div>
+  );
+}
+
+// ============================================================
+// 生成溯源：本桥段填充时参考了什么 / 缺了什么
+// ============================================================
+
+const SLOT_LABEL: Record<string, string> = {
+  project_skeleton: '项目信息',
+  project_characters: '本书角色',
+  world_rules_table: '世界规则表',
+  plot_lines_with_beats: '全书骨架',
+  dissect_methodology: '拆书·方法论',
+  dissect_structure: '拆书·结构',
+  dissect_bridges: '拆书·桥段范本',
+  dissect_character_archive: '拆书·角色档案',
+  dissect_synopsis: '拆书·全书弧线',
+  dissect_archetypes: '拆书·角色塑造',
+  dissect_worldbuilding: '拆书·世界观',
+  dissect_corpus: '拆书·范本片段',
+  dissect_style: '拆书·文风',
+  system_role: '系统角色',
+  system_base_style: '基础文风',
+  output_spec: '输出要求',
+};
+
+const slotLabel = (s: string) => SLOT_LABEL[s] ?? s;
+
+function WarningList({ warnings }: { warnings: string[] }) {
+  if (warnings.length === 0) return null;
+  return (
+    <ul className="mt-1 space-y-0.5 text-amber-600">
+      {warnings.map((w) => (
+        <li key={w} className="flex items-start gap-1">
+          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+          <span>{w}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function ProvenanceChip({ meta }: { meta: BridgeGenerationMeta | null }) {
+  if (!meta) return null;
+  const warn = meta.warnings.length;
+  const templateName = BRIDGE_TEMPLATE_UI[resolveTemplateKey(meta.template)].name;
+  const pack = meta.reference_pack;
+  const inputs = meta.inputs;
+  const content = (
+    <div className="max-w-[360px] space-y-2 text-xs leading-5">
+      <p className="text-content-secondary">
+        {meta.model} · 档位 {meta.model_tier || '?'} · {templateName} · ≈{meta.tokens_estimate} tokens
+      </p>
+      <div>
+        <p className="font-medium text-content">参考包</p>
+        <p className="text-content-secondary">
+          {pack
+            ? `${pack.title}：${Object.entries(pack.dimensions).map(([d, s]) => `${slotLabel(`dissect_${d}`)}(${s})`).join('、')}`
+            : '未挂载'}
+        </p>
+      </div>
+      <div>
+        <p className="font-medium text-content">业务输入</p>
+        <p className="text-content-secondary">
+          节点 {inputs.beat.index}《{inputs.beat.title}》
+          {inputs.next_beat_title ? ` · 下节点《${inputs.next_beat_title}》` : ''}
+          {inputs.ledger_bridge_numbers.length ? ` · 账本 ${inputs.ledger_bridge_numbers.length} 个桥段` : ' · 无前文账本'}
+          {inputs.opening_rules ? ' · 黄金三章规则' : ''}
+          {inputs.story_outline_fields.length ? ` · 大纲字段 ${inputs.story_outline_fields.length} 项` : ''}
+        </p>
+      </div>
+      <div>
+        <p className="font-medium text-content">注入槽位</p>
+        <p className="text-content-secondary">{meta.slots.filled.map(slotLabel).join('、') || '—'}</p>
+        {meta.slots.truncated.length > 0 && (
+          <p className="text-amber-600">被截断：{meta.slots.truncated.map(slotLabel).join('、')}</p>
+        )}
+        {meta.slots.skipped.length > 0 && (
+          <p className="text-content-tertiary">未注入（为空）：{meta.slots.skipped.map(slotLabel).join('、')}</p>
+        )}
+      </div>
+      <WarningList warnings={meta.warnings} />
+      <p className="text-content-tertiary">{meta.generated_at}</p>
+    </div>
+  );
+  return (
+    <Popover content={content} title="本桥段参考了什么" trigger="click" placement="bottomLeft">
+      <button
+        type="button"
+        className={cn(
+          'inline-flex items-center gap-1 border px-2 py-0.5 text-[11px] tabular-nums',
+          warn > 0 ? 'border-amber-300 text-amber-600' : 'border-surface-border text-content-secondary',
+        )}
+        title="查看本桥段填充时参考的资料"
+      >
+        <BookOpen className="h-3 w-3" />
+        参考 {meta.slots.filled.length}
+        {warn > 0 ? ` · ⚠ ${warn}` : ''}
+      </button>
+    </Popover>
+  );
+}
+
+function StatItem({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="px-5 py-4 md:px-6">
+      <p className="text-xs text-content-tertiary">{label}</p>
+      <p className="mt-1 text-2xl font-semibold tracking-tight text-content tabular-nums">{value}</p>
     </div>
   );
 }
@@ -799,8 +1015,8 @@ function EditBridgeModal({
           <Input.TextArea rows={2} placeholder="装逼/爽点设计（40-80 字）" />
         </Form.Item>
 
-        <div className="my-3 border-t pt-3">
-          <Text strong className="mb-2 block">4 章内容卡（章纲展开时用）</Text>
+        <div className="my-3 border-t border-surface-border pt-3">
+          <p className="mb-2 text-sm font-semibold text-content">4 章内容卡（章纲展开时用）</p>
         </div>
         <Form.Item label="C1 代入+信息差（5:5）" name="c1_intro">
           <Input.TextArea rows={3} placeholder="上半日常代入素材 + 下半信息差（80-120 字）" />
@@ -848,7 +1064,7 @@ function ExpandBridgeModal({
   loadingModels: boolean;
   refreshModels: () => void;
 }) {
-  const [form] = Form.useForm<{ start_chapter_number: number; model: string }>();
+  const [form] = Form.useForm<{ model: string }>();
   const [expanding, setExpanding] = useState(false);
 
   // 异步加载完成、或弹窗打开时，把表单 model 字段同步到用户默认模型
@@ -858,14 +1074,12 @@ function ExpandBridgeModal({
     if (target) form.setFieldValue('model', target);
   }, [bridge, defaultModel, modelOptions, form]);
 
-  const handleExpand = async (values: { start_chapter_number: number; model: string }) => {
+  const handleExpand = async (values: { model: string }) => {
     if (!bridge) return;
     setExpanding(true);
     try {
-      const res = await plotBridgesApi.expand(bridge.id, values);
-      toast.success(
-        `已展开 ${res.chapter_count} 个章纲（第 ${values.start_chapter_number}-${values.start_chapter_number + 3} 章）`,
-      );
+      const res = await plotBridgesApi.expand(bridge.id, { model: values.model || undefined });
+      toast.success(`已展开 ${res.chapter_count} 个章纲（第 ${bridge.chapter_start}-${bridge.chapter_end} 章）`);
       onExpanded();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '展开失败');
@@ -887,19 +1101,14 @@ function ExpandBridgeModal({
         layout="vertical"
         form={form}
         initialValues={{
-          start_chapter_number: 1,
           model: defaultModel || modelOptions[0]?.value || 'deepseek-v3',
         }}
         onFinish={handleExpand}
       >
-        <Form.Item
-          label="起始章号"
-          name="start_chapter_number"
-          rules={[{ required: true, type: 'number', min: 1 }]}
-          extra="将生成连续 4 章：起始章 → 起始章+3"
-        >
-          <InputNumber min={1} className="w-full" />
-        </Form.Item>
+        <p className="mb-4 text-sm leading-6 text-content-secondary">
+          将生成第 <span className="font-medium text-content tabular-nums">{bridge?.chapter_start}-{bridge?.chapter_end}</span> 章
+          （章号由桥段序号决定，需前一桥段已展开）。
+        </p>
         <Form.Item
           label={
             <div className="flex items-center gap-2">

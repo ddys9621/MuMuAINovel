@@ -20,6 +20,75 @@ export const BRIDGE_POSITION_RATIO: Record<BridgePosition, string> = {
   aftermath: '6:4',
 };
 
+/** 题材族模板 key（对应 backend/app/services/bridge_templates.py） */
+export type BridgeTemplateKey = 'showoff' | 'mystery' | 'romance' | 'infinite';
+
+export const BRIDGE_TEMPLATE_UI: Record<
+  BridgeTemplateKey,
+  { name: string; payoffLabel: string; positions: Record<BridgePosition, string>; hints: Record<BridgePosition, string> }
+> = {
+  showoff: {
+    name: '爽文装逼打脸流',
+    payoffLabel: '装逼点',
+    positions: { intro: 'C1 代入', build: 'C2 拉扯', payoff: 'C3 兑现', aftermath: 'C4 善后' },
+    hints: { intro: '5:5', build: '9:1 章尾开装', payoff: '无钩子', aftermath: '承上启下' },
+  },
+  mystery: {
+    name: '悬疑反转流',
+    payoffLabel: '反转点',
+    positions: { intro: 'C1 异象疑点', build: 'C2 追查误导', payoff: 'C3 反转揭示', aftermath: 'C4 余波新疑' },
+    hints: { intro: '5:5', build: '9:1 章尾关键线索', payoff: '无钩子', aftermath: '承上启下' },
+  },
+  romance: {
+    name: '言情推拉流',
+    payoffLabel: '情感兑现点',
+    positions: { intro: 'C1 情感缺口', build: 'C2 推拉误会', payoff: 'C3 情感兑现', aftermath: 'C4 新状态' },
+    hints: { intro: '5:5', build: '9:1 章尾心动动作', payoff: '无钩子', aftermath: '承上启下' },
+  },
+  infinite: {
+    name: '无限流规则破局',
+    payoffLabel: '破局点',
+    positions: { intro: 'C1 入局规则', build: 'C2 试探代价', payoff: 'C3 破局兑现', aftermath: 'C4 结算' },
+    hints: { intro: '5:5', build: '9:1 章尾看破规则', payoff: '无钩子', aftermath: '承上启下' },
+  },
+};
+
+/** 把后端返回的 template 字符串收敛成已知 key（未知 / 缺失 → showoff） */
+export function resolveTemplateKey(key: string | null | undefined): BridgeTemplateKey {
+  return key && key in BRIDGE_TEMPLATE_UI ? (key as BridgeTemplateKey) : 'showoff';
+}
+
+/** 桥段填充溯源（plot_bridges.generation_meta，后端 build_fill_provenance 产出） */
+export interface BridgeGenerationMeta {
+  version: number;
+  generated_at: string;
+  scene: string;
+  model: string;
+  model_tier: string;
+  template: string;
+  reference_pack: { title: string; dimensions: Record<string, string> } | null;
+  slots: { filled: string[]; truncated: string[]; skipped: string[] };
+  inputs: {
+    story_outline_fields: string[];
+    beat: { index: number; title: string };
+    next_beat_title: string | null;
+    prev_bridge_number: number | null;
+    ledger_bridge_numbers: number[];
+    opening_rules: boolean;
+    bridge_numbers: number[];
+  };
+  tokens_estimate: number;
+  warnings: string[];
+}
+
+/** fill-stream 的 meta 事件（每个子批一次） */
+export interface FillMetaEvent {
+  type: 'meta';
+  beat_index: number;
+  bridge_numbers: number[];
+  provenance: BridgeGenerationMeta;
+}
+
 export type BridgeStatus = 'draft' | 'ready' | 'generating' | 'completed';
 
 export const BRIDGE_STATUS_LABEL: Record<BridgeStatus, string> = {
@@ -73,6 +142,10 @@ export interface PlotBridge {
   /** 确定性章号范围：第 4(n-1)+1 … 4n 章 */
   chapter_start: number;
   chapter_end: number;
+  /** 最近一次 LLM 填充的溯源；draft / 旧数据为 null */
+  generation_meta?: BridgeGenerationMeta | null;
+  /** 填充时使用的题材模板 key；null 时按 showoff 展示 */
+  template?: string | null;
 }
 
 /** GET /projects/{id}/bridges/plan-preview 返回的槽位表（纯计算，不写库） */
