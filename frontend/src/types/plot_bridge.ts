@@ -87,6 +87,60 @@ export interface FillMetaEvent {
   beat_index: number;
   bridge_numbers: number[];
   provenance: BridgeGenerationMeta;
+  seq?: number;
+}
+
+/** 打字机快照：LLM 已写出的字段（半截 JSON 容错解析结果） */
+export type PartialBridge = { bridge_number: number } & Partial<
+  Pick<
+    PlotBridge,
+    'title' | 'goal' | 'showoff_point' | 'golden_finger_usage' | 'c1_intro' | 'c2_build' | 'c3_payoff' | 'c4_aftermath' | 'next_bridge_hook'
+  >
+>;
+
+export interface FillPartialEvent {
+  type: 'partial';
+  beat_index: number;
+  bridge_numbers: number[];
+  bridges: PartialBridge[];
+  content_chars: number;
+  elapsed: number;
+  seq?: number;
+}
+
+/** 推理模型思考中 / 网络静默心跳：只有计数与计时，不含思考文本 */
+export interface FillThinkingEvent {
+  type: 'thinking';
+  beat_index: number;
+  bridge_numbers: number[];
+  reasoning_chars: number;
+  content_chars: number;
+  elapsed: number;
+  seq?: number;
+}
+
+/** 一个子批落库后的完整桥段（卡片 draft → ready） */
+export interface FillBridgesEvent {
+  type: 'bridges';
+  beat_index: number;
+  bridges: PlotBridge[];
+  seq?: number;
+}
+
+/** GET fill-jobs/current 的任务快照 */
+export interface FillJobSnapshot {
+  id: string;
+  project_id: string;
+  status: 'running' | 'done' | 'error' | 'cancelled';
+  model: string | null;
+  beat_index: number | null;
+  started_at: number;
+  finished_at: number | null;
+  elapsed: number;
+  seq: number;
+  error: string | null;
+  last_progress: { type: 'progress'; message: string; progress: number; status: string; seq: number } | null;
+  live: { partial?: FillPartialEvent; thinking?: FillThinkingEvent };
 }
 
 export type BridgeStatus = 'draft' | 'ready' | 'generating' | 'completed';

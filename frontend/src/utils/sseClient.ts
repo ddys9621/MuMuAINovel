@@ -1,5 +1,5 @@
 export interface SSEMessage {
-  type: 'progress' | 'chunk' | 'result' | 'error' | 'done' | 'start' | 'content';
+  type: 'progress' | 'chunk' | 'result' | 'error' | 'done' | 'start' | 'content' | 'meta' | 'thinking' | 'partial' | 'bridges';
   message?: string;
   progress?: number;
   word_count?: number;
@@ -8,6 +8,8 @@ export interface SSEMessage {
   data?: unknown;
   error?: string;
   code?: number;
+  /** meta 等扩展事件携带的附加字段（如 used_packs / used_dimensions / strength） */
+  [key: string]: unknown;
 }
 
 export interface SSEClientOptions<TResult = unknown> {
@@ -17,7 +19,16 @@ export interface SSEClientOptions<TResult = unknown> {
   onError?: (error: string, code?: number) => void;
   onComplete?: () => void;
   onConnectionError?: (error: Event) => void;
+  /** type=meta 事件（如一键仿写的 used_packs/used_dimensions/strength） */
+  onMeta?: (meta: Record<string, unknown>) => void;
+  /** 业务自定义事件（thinking / partial / bridges / start 及未知类型），原样回调 */
+  onEvent?: (message: SSEMessage) => void;
   signal?: AbortSignal;
+}
+
+/** 后端存在 {error} 与 {message} 两种错误字段风格，统一取值 */
+function extractErrorText(message: SSEMessage): string {
+  return message.error || message.message || '未知错误';
 }
 
 type ResolveSSE = (value: unknown) => void;
@@ -89,11 +100,13 @@ export class SSEClient<TResult = unknown> {
         }
         break;
 
-      case 'error':
-        this.options.onError?.(message.error || '未知错误', message.code);
+      case 'error': {
+        const errText = extractErrorText(message);
+        this.options.onError?.(errText, message.code);
         this.close();
-        reject(new Error(message.error || '未知错误'));
+        reject(new Error(errText));
         break;
+      }
 
       case 'done':
         this.options.onComplete?.();
@@ -105,12 +118,20 @@ export class SSEClient<TResult = unknown> {
         }
         break;
 
+      case 'meta':
+        this.options.onMeta?.(message as Record<string, unknown>);
+        break;
+
+      case 'thinking':
+      case 'partial':
+      case 'bridges':
       case 'start':
-        console.debug(`[SSE] 收到消息类型: ${message.type}`, message);
+        this.options.onEvent?.(message);
         break;
 
       default:
         console.debug(`[SSE] 收到未处理的消息类型: ${message.type}`, message);
+        this.options.onEvent?.(message);
         break;
     }
   }
@@ -136,6 +157,8 @@ export class SSEPostClient<TResult = unknown, TRequest = unknown> {
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   private isAborted = false;
   private resultData: TResult | undefined;
+  /** 已收到 done / error 事件，Promise 已经落定 */
+  private settled = false;
 
   constructor(url: string, data: TRequest, options: SSEClientOptions<TResult> = {}) {
     this.url = url;
@@ -191,6 +214,12 @@ export class SSEPostClient<TResult = unknown, TRequest = unknown> {
         const { done, value } = await this.reader.read();
 
         if (done) {
+          // 流被对端/代理关闭却没收到 done/error 事件：不能让 Promise 永远挂起
+          if (!this.settled && !this.isAborted) {
+            const message = '连接在生成完成前中断';
+            this.options.onError?.(message);
+            reject(new Error(message));
+          }
           break;
         }
 
@@ -222,7 +251,7 @@ export class SSEPostClient<TResult = unknown, TRequest = unknown> {
       } else {
         const message = error instanceof Error ? error.message : 'Request failed';
         console.error('SSE POST request failed:', error);
-        this.options.onError?.(message);
+        if (!this.settled) this.options.onError?.(message);
         reject(error);
       }
     } finally {
@@ -270,12 +299,16 @@ export class SSEPostClient<TResult = unknown, TRequest = unknown> {
         }
         break;
 
-      case 'error':
-        this.options.onError?.(message.error || '未知错误', message.code);
-        reject(new Error(message.error || '未知错误'));
+      case 'error': {
+        const errText = extractErrorText(message);
+        this.settled = true;
+        this.options.onError?.(errText, message.code);
+        reject(new Error(errText));
         break;
+      }
 
       case 'done':
+        this.settled = true;
         this.options.onComplete?.();
         if (this.resultData !== undefined) {
           resolve(this.resultData);
@@ -286,12 +319,20 @@ export class SSEPostClient<TResult = unknown, TRequest = unknown> {
         }
         break;
 
+      case 'meta':
+        this.options.onMeta?.(message as Record<string, unknown>);
+        break;
+
+      case 'thinking':
+      case 'partial':
+      case 'bridges':
       case 'start':
-        console.debug(`[SSE] 收到消息类型: ${message.type}`, message);
+        this.options.onEvent?.(message);
         break;
 
       default:
         console.debug(`[SSE] 收到未处理的消息类型: ${message.type}`, message);
+        this.options.onEvent?.(message);
         break;
     }
   }
