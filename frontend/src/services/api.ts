@@ -25,6 +25,8 @@ import type {
   GenerateCharacterRequest,
   GenerateCharactersResponse,
   GenerateOutlineResponse,
+  WizardPlotLinesRequest,
+  WizardPlotLinesResponse,
   Settings,
   SettingsUpdate,
   WritingStyle,
@@ -39,6 +41,8 @@ import type {
   MCPTool,
   MCPToolCallRequest,
   MCPToolCallResponse,
+  MCPMarketplaceListResponse,
+  MCPMarketplaceInstallRequest,
   PlotCard,
   PlotCardCreate,
   PlotCardUpdate,
@@ -57,7 +61,6 @@ import type {
   ChapterOutline,
   ChapterOutlineCreate,
   ChapterOutlineUpdate,
-  ChapterOutlineGenerateRequest,
   ChapterOutlineReorderRequest,
   ChapterOutlineListResponse,
   ChapterOutlineBatchCreateRequest,
@@ -214,7 +217,7 @@ export const settingsApi = {
   getAvailableModels: (params: { api_key: string; api_base_url: string; provider: string }) =>
     api.get<unknown, { provider: string; models: Array<{ value: string; label: string; description: string }>; count?: number }>('/settings/models', { params }),
   
-  testApiConnection: (params: { api_key: string; api_base_url: string; provider: string; llm_model: string }) =>
+  testApiConnection: (params: { api_key: string; api_base_url: string; provider: string; llm_model: string; max_tokens?: number }) =>
     api.post<unknown, {
       success: boolean;
       message: string;
@@ -433,6 +436,32 @@ export const chapterApi = {
       }>;
     }>(`/chapters/${chapterId}/regeneration/tasks`, { params: { limit } }),
 
+  // 重新生成任务详情（含新旧稿全文）
+  getRegenerationTask: (chapterId: string, taskId: string) =>
+    api.get<unknown, {
+      task_id: string;
+      chapter_id: string;
+      status: string;
+      version_number: number | null;
+      version_note: string | null;
+      modification_instructions: string | null;
+      custom_instructions: string | null;
+      original_word_count: number | null;
+      regenerated_word_count: number | null;
+      original_content: string | null;
+      regenerated_content: string | null;
+      error_message: string | null;
+      created_at: string | null;
+      completed_at: string | null;
+    }>(`/chapters/${chapterId}/regeneration/tasks/${taskId}`),
+
+  // 应用某个版本到章节正文（regenerated=新稿 / original=回滚原稿）
+  applyRegenerationTask: (chapterId: string, taskId: string, source: 'regenerated' | 'original') =>
+    api.post<unknown, { message: string; applied_source: string; word_count: number }>(
+      `/chapters/${chapterId}/regeneration/tasks/${taskId}/apply`,
+      { source }
+    ),
+
   // 章节导航
   getNavigation: (chapterId: string) =>
     api.get<unknown, {
@@ -561,13 +590,15 @@ export const inspirationApi = {
     description?: string;
     theme?: string;
     genre?: string | string[];
+    narrative_perspective?: string;
   }) =>
     api.post<unknown, {
       title: string;
       description: string;
       theme: string;
       genre: string[];
-      narrative_perspective: string;
+      narrative_perspective?: string;
+      error?: string;
     }>('/inspiration/quick-generate', data),
 };
 
@@ -659,6 +690,16 @@ export const wizardStreamApi = {
     options?: SSEClientOptions<GenerateOutlineResponse>
   ) => ssePost<GenerateOutlineResponse>(
     '/api/wizard-stream/outline',
+    data,
+    options
+  ),
+
+  // 向导步骤 4：生成主线 + 支线（含节点），主线预计章节数 = chapter_count
+  generatePlotLinesStream: (
+    data: WizardPlotLinesRequest,
+    options?: SSEClientOptions<WizardPlotLinesResponse>
+  ) => ssePost<WizardPlotLinesResponse>(
+    '/api/wizard-stream/plot-lines',
     data,
     options
   ),
@@ -764,6 +805,17 @@ export const mcpPluginApi = {
   // 清理缓存
   clearCache: (userId?: string, pluginName?: string) =>
     api.post<unknown, { success: boolean; message: string }>('/mcp/plugins/cache/clear', null, { params: { user_id: userId, plugin_name: pluginName } }),
+};
+
+// MCP 商城（内置精选目录 + 一键安装）
+export const mcpMarketplaceApi = {
+  // 目录列表（含当前用户的已安装标记）
+  list: () =>
+    api.get<unknown, MCPMarketplaceListResponse>('/mcp/marketplace'),
+
+  // 一键安装：inputs 为占位符 → 用户填写的 API Key 等
+  install: (itemId: string, data: MCPMarketplaceInstallRequest = {}) =>
+    api.post<unknown, MCPPlugin>(`/mcp/marketplace/${itemId}/install`, data),
 };
 
 // 管理员API
@@ -952,10 +1004,6 @@ export const chapterOutlineApi = {
   // 批量创建章纲
   batchCreateChapterOutlines: (data: ChapterOutlineBatchCreateRequest) =>
     api.post<unknown, ChapterOutline[]>('/chapter-outlines/batch', data),
-
-  // AI生成章纲
-  generateChapterOutlines: (data: ChapterOutlineGenerateRequest) =>
-    api.post<unknown, ChapterOutline[]>('/chapter-outlines/generate', data),
 
   // 获取项目章纲统计信息
   getChapterOutlineStatistics: (projectId: string) =>

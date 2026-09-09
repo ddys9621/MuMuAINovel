@@ -57,8 +57,6 @@ export interface Project {
   chapter_count?: number;
   narrative_perspective?: string;
   character_count?: number;
-  /** F3：是否启用桥段规划阶段（step 3.5）；默认 true */
-  enable_bridge_planning?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -96,8 +94,6 @@ export interface ProjectUpdate {
   chapter_count?: number;
   narrative_perspective?: string;
   character_count?: number;
-  /** F3：是否启用桥段规划阶段（step 3.5） */
-  enable_bridge_planning?: boolean;
   // current_words 由章节内容自动计算，不在此接口中
 }
 
@@ -184,6 +180,8 @@ export interface Character {
   location?: string;
   motto?: string;
   color?: string;
+  // 组织在籍成员名：后端按成员关系表读时派生（无关系记录时回退到 organization_members 快照）
+  member_names?: string[];
   created_at: string;
   updated_at: string;
 }
@@ -328,10 +326,27 @@ export interface GenerateOutlineResponse {
   outline?: Outline;
   outlines?: Outline[];
   total_chapters?: number;
-  /** T2.1：后端根据 project.enable_bridge_planning 返回的下一步路由建议 */
-  next_wizard_route?: 'bridge_planning' | 'chapter_outlines';
-  /** T2.1：项目当前的桥段规划开关状态（同步给前端，避免多 GET 一次） */
-  enable_bridge_planning?: boolean;
+}
+
+/** 向导步骤 4：剧情线生成请求（POST /api/wizard-stream/plot-lines） */
+export interface WizardPlotLinesRequest {
+  project_id: string;
+  chapter_count: number;
+  sub_line_count?: number;
+  requirements?: string;
+  enable_mcp?: boolean;
+  selected_plugins?: string[];
+  pack_ids?: string[];
+  dimensions?: string[];
+  strength?: 'light' | 'medium' | 'deep';
+}
+
+/** 向导步骤 4：剧情线生成结果 */
+export interface WizardPlotLinesResponse {
+  message: string;
+  main_line: { id: string; title: string; estimated_chapters: number; beat_count: number };
+  sub_lines: Array<{ id: string; title: string }>;
+  plan_preview: { total_bridges: number; total_chapters: number };
 }
 
 // API响应类型
@@ -656,6 +671,7 @@ export interface MCPPlugin {
   // HTTP类型字段
   server_url?: string;
   headers?: Record<string, string>;
+  transport?: 'streamable_http' | 'sse' | null;
   
   // Stdio类型字段
   command?: string;
@@ -723,6 +739,54 @@ export interface MCPToolCallResponse {
   success: boolean;
   result?: unknown;
   error?: string;
+}
+
+// MCP 商城（内置精选目录 + 一键安装）
+export interface MCPMarketplaceInput {
+  key: string;
+  label: string;
+  required: boolean;
+  secret: boolean;
+  placeholder?: string | null;
+  help_url?: string | null;
+  /** 链接文案，缺省「获取 Key」 */
+  help_label?: string | null;
+  help_text?: string | null;
+}
+
+export interface MCPMarketplaceItem {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  tags: string[];
+  transport: 'streamable_http' | 'sse';
+  server_url: string;
+  inputs: MCPMarketplaceInput[];
+  homepage: string;
+  official: boolean;
+  region: 'cn' | 'global';
+  pricing: string;
+  notes?: string | null;
+  recommended: boolean;
+  verified_at?: string | null;
+  installed_plugin_id?: string | null;
+  installed_status?: 'active' | 'inactive' | 'error' | null;
+}
+
+export interface MCPMarketplaceCategory {
+  id: string;
+  label: string;
+}
+
+export interface MCPMarketplaceListResponse {
+  categories: MCPMarketplaceCategory[];
+  items: MCPMarketplaceItem[];
+}
+
+export interface MCPMarketplaceInstallRequest {
+  inputs?: Record<string, string>;
+  enabled?: boolean;
 }
 
 // 剧情卡片类型定义
@@ -983,23 +1047,6 @@ export interface ChapterOutlineUpdate {
   // 系统字段
   target_word_count?: number;
   order_index?: number;
-}
-
-export interface ChapterOutlineGenerateRequest {
-  project_id: string;
-  plot_line_id?: string;
-  prompt?: string;
-  start_chapter: number;
-  chapter_count: number;
-  target_word_count: number;
-  based_on_outline: boolean;
-  enable_mcp?: boolean;
-  selected_plugins?: string[];
-  auto_generate_plot_cards?: boolean;
-  // R8 拆书参考包显式参数（任一为空则走默认）
-  pack_ids?: string[];
-  dimensions?: string[];
-  strength?: 'light' | 'medium' | 'deep';
 }
 
 export interface ChapterOutlineReorderRequest {
