@@ -20,7 +20,7 @@ class Project(Base):
     current_words = Column(Integer, default=0, comment="当前字数")
     status = Column(String(20), default="planning", comment="创作状态")
     wizard_status = Column(String(20), default="incomplete", comment="向导完成状态: incomplete/completed")
-    wizard_step = Column(Integer, default=0, comment="向导当前步骤: 0-4 (3.5 桥段规划在 wizard_step=3 完成后通过 enable_bridge_planning 路由)")
+    wizard_step = Column(Integer, default=0, comment="向导当前步骤: 0-4（1 世界观 / 2 角色 / 3 故事大纲 / 4 剧情线；之后固定进入桥段规划）")
 
     # 世界构建字段
     world_time_period = Column(Text, comment="时间背景")
@@ -34,13 +34,13 @@ class Project(Base):
     narrative_perspective = Column(String(50), comment="叙事视角：first_person/third_person/omniscient")
     character_count = Column(Integer, default=5, comment="角色数量")
 
-    # F3 (T2.1)：是否在 step 3 之后进入 step 3.5 桥段规划再生成章纲
+    # DEPRECATED：工程化桥段流水线固定进入桥段规划，业务代码不再读写此列；保留仅为兼容旧库（不做 DROP COLUMN）
     enable_bridge_planning = Column(
         Boolean,
         default=True,
         server_default="1",
         nullable=False,
-        comment="是否启用桥段规划阶段（step 3.5）；True 时章纲按桥段展开，False 走传统线性路径",
+        comment="[已废弃] 桥段规划开关，流水线固定启用；字段保留仅为兼容旧库",
     )
 
     created_at = Column(DateTime, server_default=func.now(), comment="创建时间")

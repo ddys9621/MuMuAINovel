@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete, or_, select
 from typing import Dict, Any, AsyncGenerator
+import asyncio
 import json
 import re
 
@@ -1747,13 +1748,7 @@ async def outline_generator(
 
         logger.info(f"故事前提大纲生成完成 - 项目: {project_id}")
 
-        # T2.1: 根据 enable_bridge_planning 路由到 step 3.5 桥段规划页或直接进章纲页
-        # 注意：wizard_step=3 含义保持「大纲完成」不变（向后兼容旧 DB）；
-        # next_wizard_route 字段给前端做即时跳转使用，
-        # 重启浏览器时前端可通过 (project.enable_bridge_planning + 是否已有 plot_bridges) 判断。
-        next_wizard_route = "bridge_planning" if project.enable_bridge_planning else "chapter_outlines"
-
-        # 发送最终结果
+        # 发送最终结果（下一步固定为向导步骤 4：剧情线生成，见 plot_lines_generator）
         yield await SSEResponse.send_result({
             "message": "故事前提大纲生成完成",
             "outline": {
@@ -1766,9 +1761,6 @@ async def outline_generator(
                 "updated_at": outline.updated_at.isoformat() if outline.updated_at else None
             },
             "total_chapters": 1,
-            # T2.1：前端根据此字段决定 step 3 完成后是跳桥段规划页（step 3.5）还是章纲页（step 4）
-            "next_wizard_route": next_wizard_route,
-            "enable_bridge_planning": bool(project.enable_bridge_planning),
         })
         
         yield await SSEResponse.send_progress("完成!", 100, "success")
@@ -1803,6 +1795,154 @@ async def generate_outline_stream(
     logger.info(f"  - 请求参数: provider={data.get('provider')}, model={data.get('model')}")
     
     return create_sse_response(outline_generator(data, db, user_ai_service))
+
+
+async def _run_with_heartbeat(coro, interval: float = 15.0):
+    """把一个阻塞较久的协程包成异步生成器：等待期间定时 yield SSE 心跳，结束时 yield 结果对象。
+
+    调用方按 `isinstance(item, str)` 区分心跳字符串与结果。
+    """
+    task = asyncio.ensure_future(coro)
+    try:
+        while not task.done():
+            done, _ = await asyncio.wait({task}, timeout=interval)
+            if not done:
+                yield await SSEResponse.send_heartbeat()
+        yield task.result()
+    finally:
+        if not task.done():
+            task.cancel()
+
+
+async def plot_lines_generator(
+    data: Dict[str, Any],
+    db: AsyncSession,
+    user_ai_service: AIService
+) -> AsyncGenerator[str, None]:
+    """向导步骤 4：生成 1 条主线 + N 条支线（含节点）。主线预计章节数固定为项目章节数。
+
+    前置（不满足直接 error，不做退化）：项目存在、有 active 故事大纲、项目内尚无主线。
+    """
+    from app.services.bridge_slot_planner import (
+        BridgePlanningPreconditionError,
+        compute_bridge_slots,
+        parse_plot_line,
+    )
+    from app.services.plot_generation_service import PlotGenerationService
+
+    project_id = data.get("project_id")
+    chapter_count = int(data.get("chapter_count") or 0)
+    sub_line_count = int(data.get("sub_line_count", 2) or 0)
+    requirements = (data.get("requirements") or "").strip()
+    user_id = data.get("user_id")
+
+    try:
+        yield await SSEResponse.send_progress("校验前置条件...", 3)
+        project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
+        if not project:
+            yield await SSEResponse.send_error("项目不存在", 404)
+            return
+        if chapter_count < 1:
+            yield await SSEResponse.send_error("chapter_count 必须 ≥ 1", 400)
+            return
+        outline = (await db.execute(
+            select(StoryOutline)
+            .where(StoryOutline.project_id == project_id, StoryOutline.is_active == True)  # noqa: E712
+            .order_by(StoryOutline.version.desc()).limit(1)
+        )).scalar_one_or_none()
+        if not outline:
+            yield await SSEResponse.send_error("请先完成故事大纲，再生成剧情线", 400)
+            return
+        existing_main = (await db.execute(
+            select(PlotLine.id).where(PlotLine.project_id == project_id, PlotLine.line_type == "main").limit(1)
+        )).scalar_one_or_none()
+        if existing_main:
+            yield await SSEResponse.send_error("项目已存在主线剧情线，工程化流水线要求且仅要求一条主线", 400)
+            return
+
+        service = PlotGenerationService(user_ai_service)
+        common = dict(
+            db=db, project_id=project_id, outline_id=outline.id,
+            custom_prompt=requirements or None,
+            enable_mcp=bool(data.get("enable_mcp", False)),
+            selected_plugins=data.get("selected_plugins") or [],
+            user_id=user_id,
+            pack_ids=data.get("pack_ids"), dimensions=data.get("dimensions"), strength=data.get("strength"),
+            provider=data.get("provider"), model=data.get("model"),
+        )
+
+        yield await SSEResponse.send_progress(f"生成主线（全书 {chapter_count} 章）...", 10)
+        main_lines = None
+        async for item in _run_with_heartbeat(service.generate_plot_lines(line_type="main", count=1, **common)):
+            if isinstance(item, str):
+                yield item
+            else:
+                main_lines = item
+        if not main_lines:
+            yield await SSEResponse.send_error("主线生成失败：AI 未返回剧情线", 500)
+            return
+        main = main_lines[0]
+        main.estimated_chapters = chapter_count
+        await db.commit()
+        await db.refresh(main)
+        yield await SSEResponse.send_progress(f"主线《{main.title}》完成，预计 {chapter_count} 章", 55)
+
+        sub_lines = []
+        if sub_line_count > 0:
+            yield await SSEResponse.send_progress(f"生成 {sub_line_count} 条支线...", 60)
+            async for item in _run_with_heartbeat(
+                service.generate_plot_lines(line_type="sub", count=sub_line_count, based_on_lines=[main.id], **common)
+            ):
+                if isinstance(item, str):
+                    yield item
+                else:
+                    sub_lines = item
+
+        project.wizard_step = 4
+        project.wizard_status = "incomplete"
+        await db.commit()
+
+        yield await SSEResponse.send_progress("计算桥段骨架预览...", 92)
+        all_lines = [parse_plot_line(l) for l in (await db.execute(
+            select(PlotLine).where(PlotLine.project_id == project_id).order_by(PlotLine.order_index)
+        )).scalars().all()]
+        try:
+            plan = compute_bridge_slots(all_lines)
+        except BridgePlanningPreconditionError as exc:
+            yield await SSEResponse.send_error(f"剧情线已生成但不满足桥段规划前置条件：{exc}", 400)
+            return
+
+        main_data = parse_plot_line(main)
+        yield await SSEResponse.send_result({
+            "message": "剧情线生成完成",
+            "main_line": {
+                "id": main.id, "title": main.title,
+                "estimated_chapters": main.estimated_chapters, "beat_count": len(main_data.beats),
+            },
+            "sub_lines": [{"id": s.id, "title": s.title} for s in sub_lines],
+            "plan_preview": {"total_bridges": plan.total_bridges, "total_chapters": plan.total_chapters},
+        })
+        yield await SSEResponse.send_progress("完成!", 100, "success")
+        yield await SSEResponse.send_done()
+    except GeneratorExit:
+        logger.warning("剧情线生成器被提前关闭")
+    except Exception as e:
+        logger.error(f"剧情线生成失败: {str(e)}", exc_info=True)
+        yield await SSEResponse.send_error(f"生成失败: {str(e)}")
+
+
+@router.post("/plot-lines", summary="流式生成剧情线（向导步骤 4）")
+async def generate_plot_lines_stream(
+    request: Request,
+    data: Dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    user_ai_service: AIService = Depends(get_user_ai_service)
+):
+    """向导步骤 4：主线 ×1（预计章节数 = chapter_count）+ 支线 ×sub_line_count，含节点。"""
+    if hasattr(request.state, 'user_id'):
+        data['user_id'] = request.state.user_id
+    logger.info(f"剧情线生成开始 - 用户: {data.get('user_id', 'unknown')}, 项目: {data.get('project_id')}")
+    return create_sse_response(plot_lines_generator(data, db, user_ai_service))
 
 
 async def cleanup_wizard_generator(
