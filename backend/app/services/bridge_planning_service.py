@@ -181,6 +181,49 @@ async def _load_beat_context_for_bridge(
     return "\n".join(lines)
 
 
+BRIDGE_FILL_TASK_PROMPT = """请为下面 {count} 个桥段槽位填写内容。槽位的编号、所属节点、覆盖区间、章号已由系统确定，**只填创意内容**。
+
+# 桥段四章方法论
+每个桥段 4 章，结构固定：
+- **C1 代入+信息差**（5:5）：上半日常代入，下半亮出对方困境
+- **C2 拉扯+开装**（9:1）：配角拉扯加强期待，**章尾让主角开始装**
+- **C3 兑现爽点**（10:0）：装到底，**不留钩子**
+- **C4 善后+下一目标**：本桥段收尾 + 引下个桥段
+
+# 本批槽位
+{slot_table}
+
+# 约束
+- 严格按槽位顺序输出 {count} 个对象，`bridge_number` 必须与槽位一致
+- 每个桥段的 goal 必须落在所属节点主题内，进度按覆盖区间推进（区间末尾对应节点完成度）
+- 有副线任务的桥段，须在 c1-c4 中安排该副线的推进（不得抢占主线爽点）
+- 金手指使用方式在相邻桥段间不得重复
+- 最后一个桥段的 next_bridge_hook 要为下一节点开头留引子
+
+# 输出格式（纯 JSON 数组，不要 markdown）
+[
+  {{
+    "bridge_number": <槽位编号>,
+    "title": "桥段简洁标题（8-15 字）",
+    "goal": "本桥段要解决的具体问题（30-60 字）",
+    "showoff_point": "装逼/爽点设计（40-80 字）",
+    "golden_finger_usage": "本桥段如何使用金手指（20-40 字）",
+    "c1_intro": "C1 上半代入素材 + 下半信息差（80-120 字）",
+    "c2_build": "C2 拉扯素材 + 章尾开装动作（80-120 字）",
+    "c3_payoff": "C3 装逼完整展开 + 配角反应（80-120 字）",
+    "c4_aftermath": "C4 本桥段收尾事件 + 下桥段引子（60-100 字）",
+    "next_bridge_hook": "给下一桥段的钩子（20-40 字）"
+  }}
+]
+"""
+
+_FILL_FIELDS = (
+    "title", "goal", "showoff_point", "golden_finger_usage",
+    "c1_intro", "c2_build", "c3_payoff", "c4_aftermath", "next_bridge_hook",
+)
+_FILL_SHORT_FIELDS = {"title": 200, "goal": 500, "showoff_point": 500}
+
+
 CHAPTER_EXPANSION_TASK_PROMPT = """请把下面这个桥段展开为 4 个详细章纲（C1/C2/C3/C4），\
 **每个章纲再细分为 3-5 个场景卡片**（一张卡 ≈ 500-800 字，用于后续场景级流式生成）。
 
@@ -306,6 +349,181 @@ class BridgePlanningService:
             await db.delete(b)
         await db.commit()
         return len(bridges)
+
+    # ---------------- 填充层（LLM，按主线节点分批） ----------------
+
+    async def _build_fill_context(
+        self,
+        db: AsyncSession,
+        project_id: str,
+        main: PlotLineData,
+        beat_index: int,
+        drafts: list[PlotBridge],
+    ) -> str:
+        """故事大纲核心字段 + 所属节点（含前后节点）+ 上一桥段钩子。"""
+        outline_result = await db.execute(
+            select(StoryOutline)
+            .where(StoryOutline.project_id == project_id, StoryOutline.is_active == True)  # noqa: E712
+            .order_by(StoryOutline.version.desc())
+            .limit(1)
+        )
+        outline = outline_result.scalar_one_or_none()
+        fields = parse_story_outline_fields(outline.content if outline else None)
+
+        parts: list[str] = ["【📖 故事前提】"]
+        if fields["premise"]:
+            parts.append(f"- 梗概：{fields['premise'][:400]}")
+        if fields["golden_finger"]:
+            parts.append(f"- 金手指：{fields['golden_finger'][:200]}")
+        if fields["selling_points"]:
+            parts.append(f"- 核心卖点：{'、'.join(str(x) for x in fields['selling_points'][:6])}")
+        if fields["main_tropes"]:
+            parts.append(f"- 主要套路：{'、'.join(str(x) for x in fields['main_tropes'][:6])}")
+        if fields["power_system"]:
+            parts.append(f"- 升级路线：{fields['power_system'][:200]}")
+
+        beats = list(main.beats)
+        cur = next(b for b in beats if b.index == beat_index)
+        pos = beats.index(cur)
+        parts.append("")
+        parts.append("【📍 本批所属主线节点】")
+        parts.append(f"- 主线：《{main.title}》（全书 {main.estimated_chapters} 章）")
+        parts.append(f"- 当前节点：[节点 {cur.index}] {cur.title}（权重 {cur.weight:.0%}）")
+        if cur.description:
+            parts.append(f"  描述：{cur.description[:300]}")
+        if pos > 0:
+            p = beats[pos - 1]
+            parts.append(f"- 上一节点：[节点 {p.index}] {p.title}（已收尾）")
+        if pos + 1 < len(beats):
+            nx = beats[pos + 1]
+            parts.append(f"- 下一节点：[节点 {nx.index}] {nx.title}（待开启）")
+
+        prev_result = await db.execute(
+            select(PlotBridge).where(
+                PlotBridge.project_id == project_id,
+                PlotBridge.bridge_number == drafts[0].bridge_number - 1,
+            )
+        )
+        prev = prev_result.scalar_one_or_none()
+        if prev is not None and prev.status != "draft":
+            parts.append("")
+            parts.append("【⛓ 上一桥段】")
+            parts.append(f"- 桥段 {prev.bridge_number}《{prev.title}》")
+            if prev.c4_aftermath:
+                parts.append(f"- C4 收尾：{prev.c4_aftermath[:200]}")
+            if prev.next_bridge_hook:
+                parts.append(f"- 留给本批的钩子：{prev.next_bridge_hook}")
+
+        return "\n".join(parts)
+
+    @staticmethod
+    def _slot_table(drafts: list[PlotBridge]) -> str:
+        rows: list[str] = []
+        for b in drafts:
+            c_start, c_end = chapter_range(b.bridge_number)
+            cs = (b.beat_coverage_start or 0.0) * 100
+            ce = (b.beat_coverage_end or 0.0) * 100
+            row = f"- 桥段 {b.bridge_number}：第 {c_start}-{c_end} 章，节点进度 {cs:.0f}% → {ce:.0f}%"
+            try:
+                secondary = json.loads(b.secondary_beats) if b.secondary_beats else []
+            except (json.JSONDecodeError, TypeError):
+                secondary = []
+            for t in secondary:
+                row += (
+                    f"\n    · 副线任务：{t.get('line_type')}《{t.get('line_title')}》"
+                    f"[节点 {t.get('beat_index')}] {t.get('beat_title')} "
+                    f"进度 {float(t.get('coverage_start', 0)) * 100:.0f}% → {float(t.get('coverage_end', 0)) * 100:.0f}%"
+                )
+                if t.get("beat_description"):
+                    row += f"｜{str(t['beat_description'])[:80]}"
+            rows.append(row)
+        return "\n".join(rows)
+
+    async def fill_bridges(
+        self,
+        db: AsyncSession,
+        project_id: str,
+        model_name: Optional[str],
+        beat_index: Optional[int] = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """按主线节点顺序，把 status=draft 的桥段分批交给 LLM 填内容 → ready。
+
+        可续跑：只处理 draft；beat_index 指定时只填该节点。
+        LLM 返回条目与槽位不一致 → ValueError（该批保持 draft，调用方终止流）。
+        """
+        effective_model = model_name or getattr(self.ai_service, "default_model", None) or ""
+        drafts_result = await db.execute(
+            select(PlotBridge)
+            .where(PlotBridge.project_id == project_id, PlotBridge.status == "draft")
+            .order_by(PlotBridge.bridge_number)
+        )
+        drafts = list(drafts_result.scalars().all())
+        if beat_index is not None:
+            drafts = [b for b in drafts if b.beat_index == beat_index]
+        if not drafts:
+            yield {"type": "done", "filled": 0, "remaining_drafts": 0}
+            return
+
+        lines = await load_plot_line_data(db, project_id)
+        main = next(l for l in lines if l.id == drafts[0].plot_line_id)
+        by_beat: dict[int, list[PlotBridge]] = {}
+        for b in drafts:
+            by_beat.setdefault(b.beat_index, []).append(b)
+
+        ctx = AssemblyContext(scene="bridge_planning", model_name=effective_model, project_id=project_id)
+        prompt = await self.assembler.assemble(db, ctx)
+
+        filled = 0
+        for b_idx in sorted(by_beat):
+            batch = by_beat[b_idx]
+            numbers = [b.bridge_number for b in batch]
+            yield {"type": "beat_start", "beat_index": b_idx, "bridge_numbers": numbers}
+
+            context_block = await self._build_fill_context(db, project_id, main, b_idx, batch)
+            user_prompt = "\n\n".join([
+                prompt.user_prompt,
+                context_block,
+                BRIDGE_FILL_TASK_PROMPT.format(count=len(batch), slot_table=self._slot_table(batch)),
+            ])
+            resp = await self.ai_service.generate_text_stream_collect(
+                prompt=user_prompt,
+                system_prompt=prompt.system_prompt,
+                model=effective_model or None,
+                temperature=0.6,
+                max_tokens=8000,
+                context=f"BridgeFill-{effective_model or 'default'}",
+            )
+            content = (resp or {}).get("content", "") if isinstance(resp, dict) else ""
+            data = safe_parse_json(content, default=[], expected_type="array", log_prefix="[BridgeFill]")
+            items = {
+                int(d["bridge_number"]): d
+                for d in data
+                if isinstance(d, dict) and str(d.get("bridge_number", "")).isdigit()
+            }
+            if set(items) != set(numbers):
+                raise ValueError(
+                    f"节点 {b_idx} 的桥段数量不符：期望 {numbers}，LLM 返回 {sorted(items)}"
+                )
+            for b in batch:
+                item = items[b.bridge_number]
+                for field_name in _FILL_FIELDS:
+                    value = item.get(field_name)
+                    if not isinstance(value, str) or not value.strip():
+                        continue
+                    value = value.strip()
+                    limit = _FILL_SHORT_FIELDS.get(field_name)
+                    setattr(b, field_name, value[:limit] if limit else value)
+                b.status = "ready"
+            await db.commit()
+            for b in batch:
+                await db.refresh(b)
+            filled += len(batch)
+            yield {"type": "beat_done", "beat_index": b_idx, "bridges": [bridge_to_dict(b) for b in batch]}
+
+        remaining = await db.execute(
+            select(PlotBridge.id).where(PlotBridge.project_id == project_id, PlotBridge.status == "draft")
+        )
+        yield {"type": "done", "filled": filled, "remaining_drafts": len(remaining.scalars().all())}
 
     async def expand_bridge_to_chapters(
         self,

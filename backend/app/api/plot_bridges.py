@@ -26,8 +26,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.settings import get_user_ai_service
 from app.database import get_db
+from app.models.plot_bridge import PlotBridge
 from app.models.project import Project
 from app.services.ai_service import AIService
+from app.utils.sse_response import SSEResponse, create_sse_response
 from app.services.bridge_planning_service import BridgePlanningService, bridge_to_dict
 from app.services.bridge_slot_planner import (
     BridgePlanningConflictError,
@@ -66,6 +68,12 @@ router = APIRouter(tags=["桥段四章 K2"])
 # ============================================================
 # Schemas
 # ============================================================
+
+class FillBridgesRequest(BaseModel):
+    """填充桥段内容请求。"""
+    model: Optional[str] = Field(default=None, description="覆盖默认模型")
+    beat_index: Optional[int] = Field(default=None, ge=1, description="只填充该主线节点的 draft 桥段")
+
 
 class ExpandBridgeRequest(BaseModel):
     """展开桥段请求。"""
@@ -192,6 +200,48 @@ async def reset_bridges_endpoint(
     except BridgePlanningConflictError as exc:
         _raise_http(exc)
     return {"deleted": deleted}
+
+
+@router.post("/projects/{project_id}/bridges/fill-stream")
+async def fill_bridges_stream_endpoint(
+    project_id: str,
+    payload: FillBridgesRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    service: BridgePlanningService = Depends(get_bridge_service),
+):
+    """SSE：按主线节点分批用 LLM 填充 draft 桥段。首个失败即终止，重跑自动续填。"""
+    await verify_project_access(project_id, getattr(request.state, "user_id", None), db)
+
+    async def gen():
+        total_result = await db.execute(
+            select(PlotBridge.id).where(PlotBridge.project_id == project_id, PlotBridge.status == "draft")
+        )
+        total = len(total_result.scalars().all())
+        done_count = 0
+        try:
+            yield await SSEResponse.send_progress("开始填充桥段内容...", 1)
+            async for evt in service.fill_bridges(db, project_id, payload.model, payload.beat_index):
+                if evt["type"] == "beat_start":
+                    yield await SSEResponse.send_progress(
+                        f"节点 {evt['beat_index']}：生成桥段 {evt['bridge_numbers'][0]}-{evt['bridge_numbers'][-1]}",
+                        int(done_count / total * 100) if total else 0,
+                    )
+                elif evt["type"] == "beat_done":
+                    done_count += len(evt["bridges"])
+                    yield await SSEResponse.send_progress(
+                        f"节点 {evt['beat_index']} 完成（累计 {done_count}/{total}）",
+                        int(done_count / total * 100) if total else 100,
+                    )
+                else:
+                    yield await SSEResponse.send_result(evt)
+            yield await SSEResponse.send_progress("完成!", 100, "success")
+            yield await SSEResponse.send_done()
+        except Exception as exc:  # noqa: BLE001 - 统一转 SSE error 事件
+            logger.error("[plot_bridges] 填充失败: %s", exc, exc_info=True)
+            yield await SSEResponse.send_error(f"桥段填充失败: {exc}")
+
+    return create_sse_response(gen())
 
 
 @router.get("/projects/{project_id}/bridges", response_model=list[BridgeResponse])
