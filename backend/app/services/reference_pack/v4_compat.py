@@ -188,7 +188,7 @@ async def build_v4_bridge_constraint_only(
 async def fetch_bridge_context(
     db: AsyncSession, chapter_outline: Any
 ) -> Optional[dict[str, Any]]:
-    """根据 ChapterOutline 取出桥段上下文（含 next_bridge_goal）。
+    """根据 ChapterOutline 取出桥段上下文（含 next_bridge_goal 与题材模板 template）。
 
     Args:
         chapter_outline: ChapterOutline ORM 对象（含 bridge_id）
@@ -216,11 +216,29 @@ async def fetch_bridge_context(
             .where(PlotBridge.bridge_number == bridge.bridge_number + 1)
         )).scalar_one_or_none()
 
+        # 题材模板：优先桥段填充时记录的 generation_meta.template，否则按项目 genre 解析
+        import json
+
+        from app.models.project import Project
+        from app.services.bridge_templates import resolve_template
+
+        recorded = None
+        if getattr(bridge, "generation_meta", None):
+            try:
+                recorded = (json.loads(bridge.generation_meta) or {}).get("template")
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                recorded = None
+        project = (await db.execute(
+            select(Project).where(Project.id == bridge.project_id)
+        )).scalar_one_or_none()
+        template_key = resolve_template(getattr(project, "genre", None), explicit_key=recorded).key
+
         return {
             "title": bridge.title,
             "goal": bridge.goal,
             "showoff_point": bridge.showoff_point,
             "next_bridge_goal": next_bridge.goal if next_bridge else "（下一桥段未设定）",
+            "template": template_key,
         }
     except Exception as exc:
         logger.warning("[v4_compat] fetch_bridge_context 失败: %s", exc)

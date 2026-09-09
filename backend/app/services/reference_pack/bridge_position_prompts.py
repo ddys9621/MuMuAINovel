@@ -114,13 +114,287 @@ BRIDGE_POSITION_AFTERMATH = """【🎯 桥段位置约束 - 本章 = 桥段「{b
 """
 
 
-# 位置 → 模板映射
-BRIDGE_POSITION_TEMPLATES: dict[str, str] = {
-    "intro":     BRIDGE_POSITION_INTRO,
-    "build":     BRIDGE_POSITION_BUILD,
-    "payoff":    BRIDGE_POSITION_PAYOFF,
-    "aftermath": BRIDGE_POSITION_AFTERMATH,
+# ============================================================
+# 悬疑反转流（mystery）—— 占位符与 showoff 完全一致
+# ============================================================
+
+MYSTERY_INTRO = """【🎯 桥段位置约束 - 本章 = 桥段「{bridge_title}」C1 章（悬疑：日常+异象疑点）】
+
+本桥段目标：{bridge_goal}
+本桥段反转点：{bridge_showoff}
+
+**章内结构（严格 5:5）**：
+
+▼ 上半部分（约 {upper_word_count} 字）— 目的：代入
+   - 用主角的日常场景让读者代入，顺带交代与本案相关的背景
+   - **禁止**：上半直接进入案情或抛出新角色
+
+▼ 下半部分（约 {lower_word_count} 字）— 目的：抛出反常
+   - 出现一个反常细节 / 新案情 / 与已知事实矛盾的信息
+   - 让读者先于角色察觉“不对”，形成信息差
+   - **禁止**：在本章解释反常（解释是 C3 的事）
+
+**章末钩子**：以反常细节为钩，让读者想看主角怎么追
+"""
+
+MYSTERY_BUILD = """【🎯 桥段位置约束 - 本章 = 桥段「{bridge_title}」C2 章（悬疑：追查+误导）】
+
+本桥段目标：{bridge_goal}
+本桥段反转点：{bridge_showoff}
+
+**章内结构（严格 9:1）**：
+
+▼ 主体部分（约 {main_word_count} 字）— 目的：收集线索并误导
+   - 主角按“看似合理”的方向追查，配角给出误导性解释，嫌疑转移
+   - 每条被 C3 用到的线索都必须在这里明写出来（对读者公平）
+   - **禁止**：主角在本章看破真相
+
+▼ 章末（约 {ending_word_count} 字）— 目的：关键线索
+   - **必须**：发现一条与主流解释矛盾的关键线索（一件物证 / 一句话 / 一个时间差）
+   - 只呈现线索本身，**不要**给出解读
+
+**章末钩子**：以关键线索为钩，让读者迫切想看 C3 的揭示
+"""
+
+MYSTERY_PAYOFF = """【🎯 桥段位置约束 - 本章 = 桥段「{bridge_title}」C3 章（悬疑：反转揭示）】
+
+本桥段目标：{bridge_goal}
+本桥段反转点：{bridge_showoff}
+
+**章内结构（10:0 纯揭示）**：
+
+▼ 整章目的：兑现局部真相，把前两章的判断整个掀翻
+   - 逐条回收 C1/C2 埋下的线索，让读者事后能验证
+   - 涉案人物的反应（震惊 / 崩溃 / 沉默）**必须充分描写**
+   - 给读者前两章积压的疑惑一次性释放
+
+**严格禁止**：
+   - ❌ 章末留任何钩子（不要写“但这只是开始”这类）
+   - ❌ 凭空冒出未铺垫的线索或证人
+   - ❌ 借主角口把真相“总结”成大道理
+   - ❌ 引入新的次级案情
+
+**章末处理**：以一个具体的、收束性的场景结尾即可
+"""
+
+MYSTERY_AFTERMATH = """【🎯 桥段位置约束 - 本章 = 桥段「{bridge_title}」C4 章（悬疑：余波+新疑）】
+
+本桥段目标：{bridge_goal}（已在 C3 揭示）
+下一桥段目标：{next_bridge_goal}
+
+**章内结构（承上启下）**：
+
+▼ 第一部分 — 本案收束（约 {first_part_word_count} 字）
+   - 明确写出局部真相带来的后果：谁被排除 / 谁暴露 / 主角得到了什么新信息
+   - 可插入 1-2 段日常对话舒缓情绪（可选）
+
+▼ 第二部分 — 更大疑点（约 {second_part_word_count} 字）
+   - 揭示的真相背后露出一个更大的矛盾或未解之谜，指向下一桥段目标
+   - 用一个具体的物证 / 人物 / 时间点落地，不要空泛
+
+**严格禁止**：
+   - ❌ 重复解释 C3 已揭示的内容
+   - ❌ 强行总结道理
+   - ❌ 第二部分内容超过下桥段钩子需要的量
+
+**章末钩子**：下桥段要追的具体疑点
+"""
+
+
+# ============================================================
+# 言情推拉流（romance）
+# ============================================================
+
+ROMANCE_INTRO = """【🎯 桥段位置约束 - 本章 = 桥段「{bridge_title}」C1 章（言情：日常+情感缺口）】
+
+本桥段目标：{bridge_goal}
+本桥段情感兑现点：{bridge_showoff}
+
+**章内结构（严格 5:5）**：
+
+▼ 上半部分（约 {upper_word_count} 字）— 目的：代入
+   - 用主角的日常与二人当前的相处状态让读者代入
+   - **禁止**：上半直接进入本桥段的情感事件
+
+▼ 下半部分（约 {lower_word_count} 字）— 目的：暴露缺口
+   - 暴露一个未被满足的情感需要，或埋下一个误解的种子
+   - 读者看得见缺口，角色自己未必看得见
+   - **禁止**：在本章解决缺口
+
+**章末钩子**：以缺口为钩，让读者想看它怎么被触碰
+"""
+
+ROMANCE_BUILD = """【🎯 桥段位置约束 - 本章 = 桥段「{bridge_title}」C2 章（言情：推拉+误会）】
+
+本桥段目标：{bridge_goal}
+本桥段情感兑现点：{bridge_showoff}
+
+**章内结构（严格 9:1）**：
+
+▼ 主体部分（约 {main_word_count} 字）— 目的：推拉
+   - 升温与拉开交替，第三方（情敌 / 闺蜜 / 家人）搅动
+   - 误会必须有信息差支撑，不得靠角色智商下线
+   - **禁止**：主角在本章把话说透
+
+▼ 章末（约 {ending_word_count} 字）— 目的：心动/心碎动作
+   - **必须**：一个具体的外显动作（递伞 / 转身 / 撕信 / 拨号又挂断）
+   - 只呈现动作，**不要**写出对方反应（反应留给 C3）
+
+**章末钩子**：以这个动作为钩
+"""
+
+ROMANCE_PAYOFF = """【🎯 桥段位置约束 - 本章 = 桥段「{bridge_title}」C3 章（言情：情感兑现）】
+
+本桥段目标：{bridge_goal}
+本桥段情感兑现点：{bridge_showoff}
+
+**章内结构（10:0 纯兑现）**：
+
+▼ 整章目的：把压了两章的情绪一次放完（甜到底或虐到底）
+   - 双方的反应、台词、身体感受**必须充分描写**
+   - 关系因此落到一个明确的新位置
+
+**严格禁止**：
+   - ❌ 章末留任何钩子
+   - ❌ 兑现一半又收回（拖延感）
+   - ❌ 借旁白升华爱情观
+   - ❌ 引入新的第三方事件
+
+**章末处理**：以一个具体的、收束性的场景结尾即可
+"""
+
+ROMANCE_AFTERMATH = """【🎯 桥段位置约束 - 本章 = 桥段「{bridge_title}」C4 章（言情：新状态+新阻力）】
+
+本桥段目标：{bridge_goal}（已在 C3 兑现）
+下一桥段目标：{next_bridge_goal}
+
+**章内结构（承上启下）**：
+
+▼ 第一部分 — 关系新状态（约 {first_part_word_count} 字）
+   - 用可见变化写出关系落到了哪一步（称呼 / 距离 / 承诺 / 秘密共享）
+   - 可插入 1-2 段轻松日常（可选）
+
+▼ 第二部分 — 新阻力（约 {second_part_word_count} 字）
+   - 抛出下一个阻力（外部事件 / 身份 / 第三方），指向下一桥段目标
+   - 阻力要具体，落到一个人物或一件事上
+
+**严格禁止**：
+   - ❌ 重复 C3 的情绪
+   - ❌ 强行总结感情道理
+   - ❌ 第二部分内容超过下桥段钩子需要的量
+
+**章末钩子**：下桥段要面对的具体阻力
+"""
+
+
+# ============================================================
+# 无限流规则破局（infinite）
+# ============================================================
+
+INFINITE_INTRO = """【🎯 桥段位置约束 - 本章 = 桥段「{bridge_title}」C1 章（无限流：入局+规则展示）】
+
+本桥段目标：{bridge_goal}
+本桥段破局点：{bridge_showoff}
+
+**章内结构（严格 5:5）**：
+
+▼ 上半部分（约 {upper_word_count} 字）— 目的：代入
+   - 用结算 / 休整 / 队友日常让读者代入，顺带交代当前资源与状态
+   - **禁止**：上半直接进入副本
+
+▼ 下半部分（约 {lower_word_count} 字）— 目的：入局与表面规则
+   - 进入新局，亮出表面规则（可见的、字面的）
+   - 用一个小惩罚或旁人的死亡证明规则是真的
+   - **禁止**：在本章看破规则的真实含义
+
+**章末钩子**：以第一条致命规则为钩
+"""
+
+INFINITE_BUILD = """【🎯 桥段位置约束 - 本章 = 桥段「{bridge_title}」C2 章（无限流：试探+代价）】
+
+本桥段目标：{bridge_goal}
+本桥段破局点：{bridge_showoff}
+
+**章内结构（严格 9:1）**：
+
+▼ 主体部分（约 {main_word_count} 字）— 目的：试错与代价
+   - 队伍按字面理解试探规则，误读带来实际损失（队友 / 道具 / 身体）
+   - 每条被 C3 用到的规则细节都必须在这里展示过
+   - **禁止**：主角在本章完成破局
+
+▼ 章末（约 {ending_word_count} 字）— 目的：看破关键规则
+   - **必须**：主角注意到一处规则的真实含义（措辞 / 例外 / 顺序）
+   - 只呈现“注意到了”，**不要**写出利用方式
+
+**章末钩子**：以看破的瞬间为钩
+"""
+
+INFINITE_PAYOFF = """【🎯 桥段位置约束 - 本章 = 桥段「{bridge_title}」C3 章（无限流：破局兑现）】
+
+本桥段目标：{bridge_goal}
+本桥段破局点：{bridge_showoff}
+
+**章内结构（10:0 纯破局）**：
+
+▼ 整章目的：利用规则完成反杀或通关，恐惧转为掌控
+   - 破局过程逐步展开，每一步都对应 C1/C2 展示过的规则
+   - 队友与对手的反应**必须充分描写**
+
+**严格禁止**：
+   - ❌ 章末留任何钩子
+   - ❌ 破局违反本桥段已展示的规则
+   - ❌ 借金手指直接给答案代替推理
+   - ❌ 引入新的副本机制
+
+**章末处理**：以一个具体的、收束性的场景结尾即可
+"""
+
+INFINITE_AFTERMATH = """【🎯 桥段位置约束 - 本章 = 桥段「{bridge_title}」C4 章（无限流：结算+下一副本）】
+
+本桥段目标：{bridge_goal}（已在 C3 兑现）
+下一桥段目标：{next_bridge_goal}
+
+**章内结构（承上启下）**：
+
+▼ 第一部分 — 结算（约 {first_part_word_count} 字）
+   - 奖励结算、幸存者清点、代价落地（谁没回来 / 失去了什么）
+   - 可插入 1-2 段队友日常舒缓情绪（可选）
+
+▼ 第二部分 — 下一副本引子（约 {second_part_word_count} 字）
+   - 露出下一副本或更高层世界的第一条信息，指向下一桥段目标
+   - 用一个具体的提示 / 人物 / 异常落地
+
+**严格禁止**：
+   - ❌ 重复 C3 的破局过程
+   - ❌ 强行总结生存哲理
+   - ❌ 第二部分内容超过下桥段钩子需要的量
+
+**章末钩子**：下一副本的具体威胁
+"""
+
+
+# 题材族 → 位置 → 模板（key 与 app/services/bridge_templates.py 一致）
+BRIDGE_POSITION_TEMPLATES_BY_FAMILY: dict[str, dict[str, str]] = {
+    "showoff": {
+        "intro": BRIDGE_POSITION_INTRO, "build": BRIDGE_POSITION_BUILD,
+        "payoff": BRIDGE_POSITION_PAYOFF, "aftermath": BRIDGE_POSITION_AFTERMATH,
+    },
+    "mystery": {
+        "intro": MYSTERY_INTRO, "build": MYSTERY_BUILD,
+        "payoff": MYSTERY_PAYOFF, "aftermath": MYSTERY_AFTERMATH,
+    },
+    "romance": {
+        "intro": ROMANCE_INTRO, "build": ROMANCE_BUILD,
+        "payoff": ROMANCE_PAYOFF, "aftermath": ROMANCE_AFTERMATH,
+    },
+    "infinite": {
+        "intro": INFINITE_INTRO, "build": INFINITE_BUILD,
+        "payoff": INFINITE_PAYOFF, "aftermath": INFINITE_AFTERMATH,
+    },
 }
+
+# 位置 → 模板映射（向后兼容：默认 showoff）
+BRIDGE_POSITION_TEMPLATES: dict[str, str] = BRIDGE_POSITION_TEMPLATES_BY_FAMILY["showoff"]
 
 
 def format_position_constraint(
@@ -130,6 +404,7 @@ def format_position_constraint(
     bridge_showoff: str,
     target_word_count: int = 3000,
     next_bridge_goal: str = "（下一桥段未设定）",
+    template: str = "showoff",
 ) -> str:
     """格式化指定位置的约束模板。
 
@@ -137,14 +412,16 @@ def format_position_constraint(
         position: 'intro' / 'build' / 'payoff' / 'aftermath'
         bridge_title: 桥段标题
         bridge_goal: 桥段目标
-        bridge_showoff: 桥段装逼点
+        bridge_showoff: 桥段装逼点（其它题材为反转点 / 情感兑现点 / 破局点）
         target_word_count: 本章目标字数（用于计算上下半篇幅）
         next_bridge_goal: 下一桥段目标（仅 aftermath 使用）
+        template: 题材族 key（showoff / mystery / romance / infinite），未知回落 showoff
 
     Returns:
         格式化后的 prompt 段，可直接拼入 user_prompt
     """
-    template = BRIDGE_POSITION_TEMPLATES.get(position)
+    family = BRIDGE_POSITION_TEMPLATES_BY_FAMILY.get(template) or BRIDGE_POSITION_TEMPLATES_BY_FAMILY["showoff"]
+    template = family.get(position)
     if not template:
         return ""
 

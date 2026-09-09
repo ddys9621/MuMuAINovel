@@ -286,6 +286,7 @@ async def build_bridge_position(db: AsyncSession, ctx: Any) -> str:
         next_bridge_goal=ctx.bridge_context.get(
             "next_bridge_goal", "（下一桥段未设定）"
         ),
+        template=ctx.bridge_context.get("template") or "showoff",
     )
 
 
