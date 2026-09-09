@@ -26,6 +26,8 @@
     }
     issues: Array<Record<string, unknown>>
   }
+  /** 章节内容在本次分析之后被修改过（分析/审计结果可能过期） */
+  is_stale?: boolean
   [key: string]: unknown
 }
 
@@ -139,5 +141,6 @@ export function normalizeAnalysisData(payload: Record<string, unknown>): Normali
       },
       issues: toRecordArray(consistencyAuditSource.issues),
     },
+    is_stale: Boolean(payloadSource.is_stale),
   }
 }

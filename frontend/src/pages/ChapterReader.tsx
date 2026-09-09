@@ -158,6 +158,13 @@ function AnalysisSidebar({
 
         {analysis && !loading && (
           <>
+            {analysis.is_stale && (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs leading-6 text-amber-700">
+                ⚠️ 章节内容在本次分析之后被修改过，以下分析、记忆与一致性审计结果可能已过期。
+                建议回到「章节管理」重新点击「分析」。
+              </div>
+            )}
+
             {score != null && (
               <div className="fanqie-soft-card p-4">
                 <div className="mb-2 flex items-center gap-2">

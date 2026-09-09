@@ -94,7 +94,7 @@ function NarrativeStatePanel({ data, loading }: { data: NormalizedAnalysisData |
             const pt = String(p.promise_type || '')
             const pr = String(p.priority || '')
             return (
-              <Card key={String(p.id || i)} size="small" style={{ borderLeft: `3px solid ${st === 'resolved' ? '#52c41a' : st === 'broken' ? '#ff4d4f' : '#1890ff'}` }}>
+              <Card key={String(p.id || i)} size="small" style={{ borderLeft: `3px solid ${st === 'resolved' ? '#10b981' : st === 'broken' ? '#ef4444' : '#007aff'}` }}>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 4 }}>
                   {pt && <Tag color="purple">{P_TYPE_LABEL[pt] || pt}</Tag>}
                   <Tag color={P_STATUS_COLOR[st] || 'default'}>{P_STATUS_LABEL[st] || st}</Tag>
@@ -102,8 +102,8 @@ function NarrativeStatePanel({ data, loading }: { data: NormalizedAnalysisData |
                   {pr === 'high' && <Tag color="orange">高优</Tag>}
                 </div>
                 <div style={{ fontWeight: 600, fontSize: 13 }}>{String(p.title || '未命名')}</div>
-                {Boolean(p.content) && <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>{String(p.content)}</div>}
-                <div style={{ fontSize: 11, color: '#999', marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {Boolean(p.content) && <div style={{ fontSize: 12, color: '#5f7090', marginTop: 4 }}>{String(p.content)}</div>}
+                <div style={{ fontSize: 11, color: '#93a4be', marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {Boolean(p.owner_character_name) && <span>发起: {String(p.owner_character_name)}</span>}
                   {Boolean(p.target_character_name) && <span>对象: {String(p.target_character_name)}</span>}
                   {p.source_chapter_number != null && <span>第{String(p.source_chapter_number)}章埋设</span>}
@@ -128,14 +128,14 @@ function NarrativeStatePanel({ data, loading }: { data: NormalizedAnalysisData |
             const actors = (evt.actor_names as string[]) || []
             const targets = (evt.target_names as string[]) || []
             return (
-              <Card key={String(evt.id || i)} size="small" style={{ borderLeft: '3px solid #1890ff' }}>
+              <Card key={String(evt.id || i)} size="small" style={{ borderLeft: '3px solid #007aff' }}>
                 <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
                   {Boolean(evt.event_type) && <Tag color="blue">{String(evt.event_type)}</Tag>}
                   {evt.public_visibility === 'secret' && <Tag>秘密</Tag>}
                 </div>
                 <div style={{ fontWeight: 600, fontSize: 13 }}>{String(evt.title || '未命名事件')}</div>
-                {Boolean(evt.description) && <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>{String(evt.description)}</div>}
-                <div style={{ fontSize: 11, color: '#999', marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {Boolean(evt.description) && <div style={{ fontSize: 12, color: '#5f7090', marginTop: 4 }}>{String(evt.description)}</div>}
+                <div style={{ fontSize: 11, color: '#93a4be', marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {Boolean(evt.location) && <span>📍 {String(evt.location)}</span>}
                   {Boolean(evt.time_marker) && <span>🕐 {String(evt.time_marker)}</span>}
                   {actors.length > 0 && <span>参与: {actors.join(', ')}</span>}
@@ -159,14 +159,14 @@ function NarrativeStatePanel({ data, loading }: { data: NormalizedAnalysisData |
           {relGraph.edges.map((e, i) => {
             const d = Number(e.delta || 0)
             return (
-              <Card key={i} size="small" style={{ borderLeft: `3px solid ${d > 0 ? '#52c41a' : d < 0 ? '#ff4d4f' : '#d9d9d9'}` }}>
+              <Card key={i} size="small" style={{ borderLeft: `3px solid ${d > 0 ? '#10b981' : d < 0 ? '#ef4444' : '#d9e4f3'}` }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
                   <span style={{ fontWeight: 600 }}>{String(e.source)}</span>
-                  <span style={{ color: '#999' }}>→</span>
+                  <span style={{ color: '#93a4be' }}>→</span>
                   <span style={{ fontWeight: 600 }}>{String(e.target)}</span>
                   <Tag color={d > 0 ? 'green' : d < 0 ? 'red' : 'default'} style={{ marginLeft: 'auto' }}>{d > 0 ? '+' : ''}{d}</Tag>
                 </div>
-                <div style={{ fontSize: 11, color: '#999', marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                <div style={{ fontSize: 11, color: '#93a4be', marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {Boolean(e.reason) && <span>{String(e.reason)}</span>}
                   {Boolean(e.new_status) && <span>状态: {String(e.new_status)}</span>}
                 </div>
@@ -186,7 +186,7 @@ function NarrativeStatePanel({ data, loading }: { data: NormalizedAnalysisData |
       children: (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {causal.map((lk, i) => (
-            <Card key={i} size="small" style={{ borderLeft: '3px solid #faad14' }}>
+            <Card key={i} size="small" style={{ borderLeft: '3px solid #f59e0b' }}>
               <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
                 <Tag color="gold">重要度 {Number(lk.importance || 0)}</Tag>
                 {Boolean(lk.reversible) && <Tag color="green">可逆</Tag>}
@@ -220,14 +220,14 @@ function NarrativeStatePanel({ data, loading }: { data: NormalizedAnalysisData |
           {issues.map((iss, i) => {
             const sev = String(iss.severity || 'medium')
             return (
-              <Card key={i} size="small" style={{ borderLeft: `3px solid ${sev === 'critical' ? '#ff4d4f' : sev === 'high' ? '#fa8c16' : sev === 'medium' ? '#fadb14' : '#d9d9d9'}` }}>
+              <Card key={i} size="small" style={{ borderLeft: `3px solid ${sev === 'critical' ? '#ef4444' : sev === 'high' ? '#f59e0b' : sev === 'medium' ? '#f59e0b' : '#d9e4f3'}` }}>
                 <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
                   <Tag color={SEV_COLOR[sev] || 'default'}>{SEV_LABEL[sev] || sev}</Tag>
                   {Boolean(iss.issue_type) && <Tag>{String(iss.issue_type)}</Tag>}
                 </div>
                 <div style={{ fontWeight: 600, fontSize: 13 }}>{String(iss.title || '未命名问题')}</div>
-                {Boolean(iss.details) && <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>{String(iss.details)}</div>}
-                <div style={{ fontSize: 11, color: '#999', marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {Boolean(iss.details) && <div style={{ fontSize: 12, color: '#5f7090', marginTop: 4 }}>{String(iss.details)}</div>}
+                <div style={{ fontSize: 11, color: '#93a4be', marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {Boolean(iss.character_name) && <span>角色: {String(iss.character_name)}</span>}
                   {iss.reference_chapter_number != null && <span>参考: 第{String(iss.reference_chapter_number)}章</span>}
                 </div>
@@ -490,18 +490,24 @@ const ChapterAnalysis: React.FC = () => {
 
   if (loading) {
     return (
-      <div style={{ textAlign: 'center', padding: '100px 0' }}>
-        <Spin size="large" tip="加载章节中...">
-          <div style={{ minHeight: 100 }} />
-        </Spin>
+      <div className="animate-fade-in space-y-6">
+        <PageHeader chapterCount={chapters.length} />
+        <div className="hh-panel flex items-center justify-center py-20">
+          <Spin size="large" tip="加载章节中...">
+            <div style={{ minHeight: 100 }} />
+          </Spin>
+        </div>
       </div>
     );
   }
 
   return (
+    <div className="animate-fade-in space-y-6">
+    <PageHeader chapterCount={chapters.length} />
     <div style={{
       display: 'flex',
-      height: '100%',
+      height: isMobile ? 'auto' : 'calc(100dvh - 240px)',
+      minHeight: isMobile ? undefined : 520,
       gap: isMobile ? 0 : 16,
       flexDirection: isMobile ? 'column' : 'row'
     }}>
@@ -524,8 +530,8 @@ const ChapterAnalysis: React.FC = () => {
                   style={{
                     cursor: 'pointer',
                     padding: '12px 16px',
-                    background: selectedChapter?.id === chapter.id ? '#e6f7ff' : 'transparent',
-                    borderLeft: selectedChapter?.id === chapter.id ? '3px solid #1890ff' : '3px solid transparent',
+                    background: selectedChapter?.id === chapter.id ? 'rgba(0,122,255,0.08)' : 'transparent',
+                    borderLeft: selectedChapter?.id === chapter.id ? '3px solid #007aff' : '3px solid transparent',
                   }}
                   actions={[
                     <Popconfirm
@@ -546,7 +552,7 @@ const ChapterAnalysis: React.FC = () => {
                         icon={<DeleteOutlined />}
                         danger
                         onClick={(e) => e.stopPropagation()}
-                        style={{ color: '#ff4d4f' }}
+                        style={{ color: '#ef4444' }}
                       />
                     </Popconfirm>
                   ]}
@@ -594,8 +600,8 @@ const ChapterAnalysis: React.FC = () => {
                   style={{
                     cursor: 'pointer',
                     padding: '12px 16px',
-                    background: selectedChapter?.id === chapter.id ? '#e6f7ff' : 'transparent',
-                    borderLeft: selectedChapter?.id === chapter.id ? '3px solid #1890ff' : '3px solid transparent',
+                    background: selectedChapter?.id === chapter.id ? 'rgba(0,122,255,0.08)' : 'transparent',
+                    borderLeft: selectedChapter?.id === chapter.id ? '3px solid #007aff' : '3px solid transparent',
                   }}
                   actions={[
                     <Popconfirm
@@ -616,7 +622,7 @@ const ChapterAnalysis: React.FC = () => {
                         icon={<DeleteOutlined />}
                         danger
                         onClick={(e) => e.stopPropagation()}
-                        style={{ color: '#ff4d4f' }}
+                        style={{ color: '#ef4444' }}
                       />
                     </Popconfirm>
                   ]}
@@ -803,7 +809,7 @@ const ChapterAnalysis: React.FC = () => {
                           checkedChildren={<EyeOutlined />}
                           unCheckedChildren={<EyeInvisibleOutlined />}
                         />
-                        <span style={{ fontSize: 13, color: '#666' }}>显示标注</span>
+                        <span style={{ fontSize: 13, color: '#5f7090' }}>显示标注</span>
                       </>
                     )}
                   </Space>
@@ -814,7 +820,7 @@ const ChapterAnalysis: React.FC = () => {
                 <div style={{
                   marginTop: 12,
                   fontSize: isMobile ? 11 : 12,
-                  color: '#999',
+                  color: '#93a4be',
                   lineHeight: 1.5
                 }}>
                   共有 {annotationsData.summary.total_annotations} 个标注：
@@ -946,7 +952,20 @@ const ChapterAnalysis: React.FC = () => {
         )}
       </div>
     </div>
+    </div>
   );
 };
+
+function PageHeader({ chapterCount }: { chapterCount: number }) {
+  return (
+    <section className="min-w-0">
+      <h1 className="text-[28px] font-semibold tracking-tight text-content md:text-[32px]">剧情分析</h1>
+      <p className="mt-2 max-w-[600px] text-sm leading-6 text-content-secondary">
+        逐章查看 AI 分析结果：正文中的钩子、伏笔、情节点标注，以及叙事状态与一致性审计。
+        {chapterCount > 0 && ` 共 ${chapterCount} 章。`}
+      </p>
+    </section>
+  );
+}
 
 export default ChapterAnalysis;

@@ -2285,6 +2285,10 @@ async def get_chapter_analysis(
     }
 
 
+# 可在章节正文中定位/展示的记忆类型（与前端 AnnotatedText / MemorySidebar 的类型集合一致）
+ANNOTATION_MEMORY_TYPES = ("hook", "foreshadow", "plot_point", "character_event")
+
+
 @router.get("/{chapter_id}/annotations", summary="获取章节标注数据")
 async def get_chapter_annotations(
     chapter_id: str,
@@ -2321,10 +2325,15 @@ async def get_chapter_annotations(
     )
     analysis = analysis_result.scalar_one_or_none()
     
-    # 获取记忆
+    # 获取记忆：只取锚定在正文上的标注类型。
+    # chapter_summary 记忆的 chapter_position/text_length 是 (0, len(摘要))，与正文无关，
+    # 若原样下发会变成一条吞掉章节开头的伪标注，与真实标注重叠导致前端正文错位、重复。
     memories_result = await db.execute(
         select(StoryMemory)
-        .where(StoryMemory.chapter_id == chapter_id)
+        .where(
+            StoryMemory.chapter_id == chapter_id,
+            StoryMemory.memory_type.in_(ANNOTATION_MEMORY_TYPES),
+        )
         .order_by(StoryMemory.importance_score.desc())
     )
     memories = memories_result.scalars().all()

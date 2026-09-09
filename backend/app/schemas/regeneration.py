@@ -43,6 +43,14 @@ class ChapterRegenerateRequest(BaseModel):
     auto_apply: bool = Field(False, description="是否自动应用（替换当前内容）")
 
 
+class ApplyRegenerationRequest(BaseModel):
+    """应用重新生成版本请求"""
+    source: str = Field(
+        "regenerated",
+        description="应用来源: regenerated(把该版本新稿写入正文)/original(回滚到该版本改稿前的原稿)",
+    )
+
+
 class RegenerationTaskResponse(BaseModel):
     """重新生成任务响应"""
     task_id: str
