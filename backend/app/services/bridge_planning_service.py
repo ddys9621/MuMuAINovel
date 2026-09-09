@@ -178,6 +178,20 @@ async def _load_beat_context_for_bridge(
         )
     else:
         lines.append("请确保 4 章内容在节点主题内推进，C4 章末尾给下一节点留好引子。")
+
+    try:
+        secondary = json.loads(bridge.secondary_beats) if bridge.secondary_beats else []
+    except (json.JSONDecodeError, TypeError):
+        secondary = []
+    if secondary:
+        lines.append("")
+        lines.append("【🧵 副线任务（本桥段 4 章内须推进，不得抢占主线爽点）】")
+        for t in secondary:
+            lines.append(
+                f"- {t.get('line_type')}《{t.get('line_title')}》[节点 {t.get('beat_index')}] {t.get('beat_title')}："
+                f"进度 {float(t.get('coverage_start', 0)) * 100:.0f}% → {float(t.get('coverage_end', 0)) * 100:.0f}%"
+                + (f"｜{str(t['beat_description'])[:120]}" if t.get("beat_description") else "")
+            )
     return "\n".join(lines)
 
 
@@ -525,41 +539,58 @@ class BridgePlanningService:
         )
         yield {"type": "done", "filled": filled, "remaining_drafts": len(remaining.scalars().all())}
 
+    # ---------------- 展开层（LLM，确定性章号 + 节点覆盖账本） ----------------
+
     async def expand_bridge_to_chapters(
         self,
         db: AsyncSession,
         bridge_id: str,
         model_name: Optional[str],
-        start_chapter_number: int,
     ) -> list[ChapterOutline]:
-        """把单个桥段展开为 4 个 ChapterOutline。
+        """把一个 ready 桥段展开为第 4(n-1)+1 … 4n 章的 4 个 ChapterOutline。
 
-        生成的 ChapterOutline 自动带上 bridge_id + bridge_position（intro/build/payoff/aftermath）。
-
-        Args:
-            model_name: 同 plan_bridges 语义；None 时回退到 ai_service.default_model。
+        前置：status == ready；前一桥段已 completed；目标章号未被占用。
+        产物：ChapterOutline(bridge_id/bridge_position) + PlotCard 场景卡 + ChapterOutlinePlotLineLink 账本。
         """
-        bridge_result = await db.execute(
-            select(PlotBridge).where(PlotBridge.id == bridge_id)
-        )
+        bridge_result = await db.execute(select(PlotBridge).where(PlotBridge.id == bridge_id))
         bridge = bridge_result.scalar_one_or_none()
         if not bridge:
             raise ValueError(f"桥段不存在: {bridge_id}")
+        if bridge.status != "ready":
+            raise BridgePlanningPreconditionError(
+                f"桥段 {bridge.bridge_number} 状态为 {bridge.status}，只有 ready 状态可展开"
+            )
+        if bridge.bridge_number > 1:
+            prev_result = await db.execute(
+                select(PlotBridge.status).where(
+                    PlotBridge.project_id == bridge.project_id,
+                    PlotBridge.bridge_number == bridge.bridge_number - 1,
+                )
+            )
+            prev_status = prev_result.scalar_one_or_none()
+            if prev_status != "completed":
+                raise BridgePlanningPreconditionError(
+                    f"桥段 {bridge.bridge_number - 1} 尚未展开（状态 {prev_status}），必须按顺序展开"
+                )
+
+        c_start, c_end = chapter_range(bridge.bridge_number)
+        occupied = await db.execute(
+            select(ChapterOutline.chapter_number).where(
+                ChapterOutline.project_id == bridge.project_id,
+                ChapterOutline.chapter_number.between(c_start, c_end),
+            )
+        )
+        taken = sorted(occupied.scalars().all())
+        if taken:
+            raise BridgePlanningConflictError(
+                f"章号冲突：第 {taken[0]} 章已存在，桥段 {bridge.bridge_number} 需要第 {c_start}-{c_end} 章"
+            )
 
         effective_model = model_name or getattr(self.ai_service, "default_model", None) or ""
-
-        # 装配 chapter_outline 场景的 prompt（不带具体章纲 ID）
-        ctx = AssemblyContext(
-            scene="chapter_outline",
-            model_name=effective_model,
-            project_id=bridge.project_id,
-        )
+        ctx = AssemblyContext(scene="chapter_outline", model_name=effective_model, project_id=bridge.project_id)
         prompt = await self.assembler.assemble(db, ctx)
-
-        # V4.1 方案 C：注入桥段所属节点上下文（未绑节点 / free 模式 → 返回空，自然兼容）
         beat_block = await _load_beat_context_for_bridge(db, bridge)
 
-        # 拼任务 prompt
         task = CHAPTER_EXPANSION_TASK_PROMPT.format(
             title=bridge.title,
             goal=bridge.goal,
@@ -569,77 +600,89 @@ class BridgePlanningService:
             c2_build=bridge.c2_build or "",
             c3_payoff=bridge.c3_payoff or "",
             c4_aftermath=bridge.c4_aftermath or "",
-            start_chapter=start_chapter_number,
-            c2_num=start_chapter_number + 1,
-            c3_num=start_chapter_number + 2,
-            c4_num=start_chapter_number + 3,
+            start_chapter=c_start,
+            c2_num=c_start + 1,
+            c3_num=c_start + 2,
+            c4_num=c_start + 3,
         )
-        # 顺序：项目骨架 / 拆书参考 → 节点上下文 → 桥段展开任务
         prompt_parts = [prompt.user_prompt]
         if beat_block:
             prompt_parts.append(beat_block)
         prompt_parts.append(task)
         user_prompt = "\n\n".join(prompt_parts)
 
-        # 调 LLM（流式累积 → 与 plan_bridges 同样免疫中转代理 timeout）
-        # 输出格式升级：每个章纲对象内嵌 3-5 个 scenes 子卡，跟原本
-        # plot_generation_service.generate_chapter_outlines 的产物对齐
-        try:
-            resp = await self.ai_service.generate_text_stream_collect(
-                prompt=user_prompt,
-                system_prompt=prompt.system_prompt,
-                model=effective_model or None,
-                temperature=0.6,
-                max_tokens=8000,  # 提升到 8000：4 章 × 5 场景 卡片描述更费 token
-                context=f"BridgeExpansion-{effective_model or 'default'}",
-            )
-            content = (resp or {}).get("content", "") if isinstance(resp, dict) else ""
-        except Exception as exc:
-            logger.error("[BridgeExpansion] LLM 调用失败: %s", exc)
-            raise
-
-        chapters_data = safe_parse_json(
-            content,
-            default=[],
-            expected_type="array",
-            log_prefix="[BridgeExpansion]",
+        resp = await self.ai_service.generate_text_stream_collect(
+            prompt=user_prompt,
+            system_prompt=prompt.system_prompt,
+            model=effective_model or None,
+            temperature=0.6,
+            max_tokens=8000,
+            context=f"BridgeExpansion-{effective_model or 'default'}",
         )
-        if not isinstance(chapters_data, list) or len(chapters_data) < 4:
+        content = (resp or {}).get("content", "") if isinstance(resp, dict) else ""
+        chapters_data = safe_parse_json(content, default=[], expected_type="array", log_prefix="[BridgeExpansion]")
+        if not isinstance(chapters_data, list) or len(chapters_data) < CHAPTERS_PER_BRIDGE:
             raise ValueError("展开的章纲少于 4 个或格式错误")
 
-        # 保存 4 个 ChapterOutline + 每章的场景卡片（PlotCard + Link）
-        # 与 plot_generation_service.generate_chapter_outlines:473-495 的产物对齐
+        try:
+            secondary = json.loads(bridge.secondary_beats) if bridge.secondary_beats else []
+        except (json.JSONDecodeError, TypeError):
+            secondary = []
+        main_cov_per_chapter = (
+            (bridge.beat_coverage_end or 0.0) - (bridge.beat_coverage_start or 0.0)
+        ) / CHAPTERS_PER_BRIDGE
+
         positions = ("intro", "build", "payoff", "aftermath")
         created: list[ChapterOutline] = []
         plot_card_count = 0
-        for i, data in enumerate(chapters_data[:4]):
+        for i, data in enumerate(chapters_data[:CHAPTERS_PER_BRIDGE]):
             if not isinstance(data, dict):
-                continue
-            actual_chapter_number = data.get("chapter_number") or (start_chapter_number + i)
+                raise ValueError(f"第 {i + 1} 个章纲不是对象")
+            chapter_number = c_start + i
             co = ChapterOutline(
                 project_id=bridge.project_id,
-                chapter_number=actual_chapter_number,
-                title=(data.get("title") or f"第{actual_chapter_number}章")[:200],
+                chapter_number=chapter_number,
+                title=(data.get("title") or f"第{chapter_number}章")[:200],
                 scene=data.get("scene"),
                 pov=data.get("pov"),
                 plot_points=data.get("plot_points"),
                 key_events=json.dumps(data.get("key_events", []), ensure_ascii=False),
-                characters_involved=json.dumps(
-                    data.get("characters_involved", []), ensure_ascii=False
-                ),
+                characters_involved=json.dumps(data.get("characters_involved", []), ensure_ascii=False),
                 target_word_count=data.get("target_word_count") or 3000,
-                # K2 桥段四章字段
+                order_index=chapter_number,
                 bridge_id=bridge.id,
                 bridge_position=positions[i],
             )
             db.add(co)
-            await db.flush()  # 拿到 co.id 给后续 PlotCardChapterOutlineLink 用
+            await db.flush()
             created.append(co)
 
-            # 入库场景卡片（向后兼容：scenes 缺失或非 list 时跳过，不破坏老 prompt 路径）
+            db.add(ChapterOutlinePlotLineLink(
+                chapter_outline_id=co.id,
+                plot_line_id=bridge.plot_line_id,
+                role="main",
+                order_index=0,
+                timeline_coverage=json.dumps(
+                    {"beats_covered": [{"beat_index": bridge.beat_index, "coverage": main_cov_per_chapter}]},
+                    ensure_ascii=False,
+                ),
+            ))
+            for order, t in enumerate(secondary, start=1):
+                cov = (float(t.get("coverage_end", 0)) - float(t.get("coverage_start", 0))) / CHAPTERS_PER_BRIDGE
+                db.add(ChapterOutlinePlotLineLink(
+                    chapter_outline_id=co.id,
+                    plot_line_id=t["plot_line_id"],
+                    role=t.get("line_type") or "sub",
+                    order_index=order,
+                    timeline_coverage=json.dumps(
+                        {"beats_covered": [{"beat_index": int(t["beat_index"]), "coverage": cov}]},
+                        ensure_ascii=False,
+                    ),
+                ))
+
             scenes = data.get("scenes")
             if isinstance(scenes, list):
-                for card_idx, scene_data in enumerate(scenes[:8]):  # 与原路径一致：最多 8 张
+                for card_idx, scene_data in enumerate(scenes[:8]):
                     if not isinstance(scene_data, dict) or not scene_data.get("title"):
                         continue
                     plot_card = PlotCard(
@@ -650,12 +693,7 @@ class BridgePlanningService:
                         card_type=scene_data.get("card_type", "scene"),
                         order_index=scene_data.get("scene_order", card_idx),
                         tags=json.dumps(
-                            [
-                                f"第{actual_chapter_number}章",
-                                "桥段展开",
-                                positions[i],
-                                scene_data.get("card_type", "scene"),
-                            ],
+                            [f"第{chapter_number}章", "桥段展开", positions[i], scene_data.get("card_type", "scene")],
                             ensure_ascii=False,
                         ),
                         word_count_target=scene_data.get("word_count_target", 500),
@@ -663,11 +701,8 @@ class BridgePlanningService:
                     )
                     db.add(plot_card)
                     await db.flush()
-
                     db.add(PlotCardChapterOutlineLink(
-                        plot_card_id=plot_card.id,
-                        chapter_outline_id=co.id,
-                        usage_type="planned",
+                        plot_card_id=plot_card.id, chapter_outline_id=co.id, usage_type="planned",
                     ))
                     plot_card_count += 1
 
@@ -675,10 +710,9 @@ class BridgePlanningService:
         await db.commit()
         for c in created:
             await db.refresh(c)
-
         logger.info(
-            "[BridgeExpansion] 桥段 %s 展开为 %d 个章纲 + %d 张场景卡片",
-            bridge.title, len(created), plot_card_count,
+            "[BridgeExpansion] 桥段 %d《%s》→ 第 %d-%d 章，%d 张场景卡，副线任务 %d 条",
+            bridge.bridge_number, bridge.title, c_start, c_end, plot_card_count, len(secondary),
         )
         return created
 
@@ -687,80 +721,31 @@ class BridgePlanningService:
         db: AsyncSession,
         project_id: str,
         model_name: Optional[str] = None,
-        chapters_per_bridge: int = 4,
-        start_chapter_number: Optional[int] = None,
     ) -> dict[str, Any]:
-        """T2.1 便利方法：批量展开项目下所有 status='ready' 的桥段为章纲。
-
-        前端在桥段规划页用户编辑确认后，一次性调用此方法把所有桥段铺平为章纲。
-        单个桥段失败不阻塞其他桥段，最终回报每个桥段的成功/失败状态。
-
-        Args:
-            project_id: 项目 ID
-            model_name: 推理模型（None 时回退默认）
-            chapters_per_bridge: 每个桥段展开的章节数（当前固定 4）
-            start_chapter_number: 起始章号；None 时从当前项目章纲最大 chapter_number+1 推算
-
-        Returns:
-            {
-                "total": int,
-                "succeeded": list[bridge_id],
-                "failed": list[{bridge_id, error}],
-                "created_chapter_count": int,
-            }
-        """
+        """按 bridge_number 顺序展开全部 ready 桥段；首个失败即停止（后续桥段依赖前序 completed）。"""
         bridges = await self.list_bridges(db, project_id)
-        ready = [b for b in bridges if b.status == "ready"]
-
+        ready = sorted((b for b in bridges if b.status == "ready"), key=lambda b: b.bridge_number)
         if not ready:
-            logger.info(
-                "[BridgeExpansion-Batch] project=%s 无 ready 状态桥段可展开", project_id
-            )
-            return {
-                "total": 0,
-                "succeeded": [],
-                "failed": [],
-                "created_chapter_count": 0,
-            }
-
-        # 推算起始章号
-        if start_chapter_number is None:
-            existing = await db.execute(
-                select(ChapterOutline.chapter_number)
-                .where(ChapterOutline.project_id == project_id)
-                .order_by(ChapterOutline.chapter_number.desc())
-                .limit(1)
-            )
-            row = existing.scalar_one_or_none()
-            start_chapter_number = (row or 0) + 1
+            return {"total": 0, "succeeded": [], "failed": [], "created_chapter_count": 0}
 
         succeeded: list[str] = []
         failed: list[dict[str, Any]] = []
         created_count = 0
-        current_start = start_chapter_number
-
-        for bridge in ready:
+        # 先取出标识：失败后 rollback 会让 ORM 对象过期，再访问属性会触发同步 IO
+        targets = [(b.id, b.bridge_number) for b in ready]
+        for bridge_id, bridge_number in targets:
             try:
-                created = await self.expand_bridge_to_chapters(
-                    db,
-                    bridge_id=bridge.id,
-                    model_name=model_name,
-                    start_chapter_number=current_start,
-                )
-                succeeded.append(bridge.id)
-                created_count += len(created)
-                current_start += chapters_per_bridge
-            except Exception as exc:
+                created = await self.expand_bridge_to_chapters(db, bridge_id=bridge_id, model_name=model_name)
+            except Exception as exc:  # noqa: BLE001 - 记录后终止批量
+                await db.rollback()
                 logger.error(
-                    "[BridgeExpansion-Batch] bridge=%s 展开失败: %s",
-                    bridge.id, exc,
+                    "[BridgeExpansion-Batch] 桥段 %d (%s) 展开失败，终止批量: %s", bridge_number, bridge_id, exc
                 )
-                failed.append({"bridge_id": bridge.id, "error": str(exc)})
+                failed.append({"bridge_id": bridge_id, "error": str(exc)})
+                break
+            succeeded.append(bridge_id)
+            created_count += len(created)
 
-        logger.info(
-            "[BridgeExpansion-Batch] project=%s 完成: %d/%d 成功, 创建 %d 章纲",
-            project_id, len(succeeded), len(ready), created_count,
-        )
         return {
             "total": len(ready),
             "succeeded": succeeded,

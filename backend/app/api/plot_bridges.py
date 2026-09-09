@@ -76,19 +76,13 @@ class FillBridgesRequest(BaseModel):
 
 
 class ExpandBridgeRequest(BaseModel):
-    """展开桥段请求。"""
-    start_chapter_number: int = Field(..., ge=1)
-    model: Optional[str] = Field(default=None)
+    """展开桥段请求。章号由桥段序号决定（第 4(n-1)+1…4n 章），不接受外部指定。"""
+    model: Optional[str] = Field(default=None, description="覆盖默认模型")
 
 
 class ExpandAllRequest(BaseModel):
-    """T2.1：批量展开项目下所有 ready 桥段为章纲。"""
+    """批量展开项目下所有 ready 桥段为章纲（按 bridge_number 顺序，首个失败即停止）。"""
     model: Optional[str] = Field(default=None, description="覆盖默认模型")
-    start_chapter_number: Optional[int] = Field(
-        default=None,
-        ge=1,
-        description="起始章号；不传则从当前章纲表最大 chapter_number+1 推算",
-    )
 
 
 class UpdateBridgeRequest(BaseModel):
@@ -326,7 +320,7 @@ async def expand_bridge_endpoint(
     db: AsyncSession = Depends(get_db),
     service: BridgePlanningService = Depends(get_bridge_service),
 ):
-    """把单个桥段展开为 4 个 ChapterOutline（自动赋 bridge_id + bridge_position）。"""
+    """把一个 ready 桥段展开为第 4(n-1)+1…4n 章（自动赋 bridge_id + bridge_position，回写节点覆盖账本）。"""
     bridge = await service.get_bridge(db, bridge_id)
     if not bridge:
         raise HTTPException(status_code=404, detail="桥段不存在")
@@ -336,12 +330,9 @@ async def expand_bridge_endpoint(
 
     # payload.model 为 None 时，由 service 内部回退到 user_ai_service.default_model
     try:
-        chapters = await service.expand_bridge_to_chapters(
-            db,
-            bridge_id=bridge_id,
-            model_name=payload.model,
-            start_chapter_number=payload.start_chapter_number,
-        )
+        chapters = await service.expand_bridge_to_chapters(db, bridge_id=bridge_id, model_name=payload.model)
+    except (BridgePlanningPreconditionError, BridgePlanningConflictError) as exc:
+        _raise_http(exc)
     except Exception as exc:
         logger.error("[plot_bridges] 展开失败: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=f"桥段展开失败: {exc}")
@@ -362,20 +353,15 @@ async def expand_all_bridges_endpoint(
     db: AsyncSession = Depends(get_db),
     service: BridgePlanningService = Depends(get_bridge_service),
 ):
-    """T2.1 便利端点：批量展开项目下所有 status='ready' 的桥段。
+    """批量展开项目下所有 status='ready' 的桥段（按 bridge_number 顺序）。
 
-    返回每个桥段的成功/失败状态。单桥段失败不阻塞其他桥段。
+    首个失败即停止：后续桥段依赖前序 completed。返回成功/失败明细。
     """
     user_id = getattr(request.state, "user_id", None)
     await verify_project_access(project_id, user_id, db)
 
     try:
-        result = await service.expand_all_ready_bridges(
-            db,
-            project_id=project_id,
-            model_name=payload.model,
-            start_chapter_number=payload.start_chapter_number,
-        )
+        result = await service.expand_all_ready_bridges(db, project_id=project_id, model_name=payload.model)
     except Exception as exc:
         logger.error("[plot_bridges] 批量展开失败: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=f"批量展开失败: {exc}")
