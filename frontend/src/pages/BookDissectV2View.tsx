@@ -237,13 +237,16 @@ function ApplyToCreationBar({ taskId }: { taskId: string }) {
     )
   }
 
-  // 拆书完成但参考包还在生成中（status=generating/failed）
-  if (!packId) {
+  // 参考包缺失或生成失败：不提供"去项目挂载"CTA（后端会 409 拒绝挂载 failed 包）
+  if (!packId || packStatus === 'failed') {
     return (
       <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-2.5 text-xs text-amber-700">
         <Sparkles className="h-3.5 w-3.5 shrink-0" />
         <span>
-          参考包尚未生成或已失败。如需用于仿写，请重新触发拆书；现有数据仍可在下方 6 个 tab 中浏览。
+          {packStatus === 'failed'
+            ? '参考包生成失败（核心维度缺失或章节抽取覆盖率过低），暂不可挂载/仿写。可点击上方「重新抽取」重跑本书；'
+            : '参考包尚未生成。可点击上方「重新抽取」重新触发；'}
+          现有数据仍可在下方 6 个 tab 中浏览。
         </span>
       </div>
     )

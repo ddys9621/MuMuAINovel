@@ -14,7 +14,7 @@ import {
   Wand2,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { bookDissectApi } from '@/services/api'
+import { bookDissectApi, referencePackApi } from '@/services/api'
 import type {
   BookDissectStage,
   BookDissectStatus,
@@ -190,7 +190,9 @@ export default function BookDissect() {
     if (!selectedTask) return
     const chCount = selectedTask.chapter_count || 0
     const estimate = `约 ${1 + chCount + 1} 次 LLM 调用（1 字典分类 + ${chCount} 章节抽取 + 1 概览）`
-    if (!confirm(`将使用 V2 引擎逐章抽取 + 全书聚合。${estimate}\n\n是否继续？`)) {
+    const isRerun = selectedTask.stage === 'done'
+    const rerunHint = isRerun ? '\n\n⚠️ 本任务已抽取过：重新抽取会覆盖现有抽取数据并更新参考包。' : ''
+    if (!confirm(`将使用 V2 引擎逐章抽取 + 全书聚合。${estimate}${rerunHint}\n\n是否继续？`)) {
       return
     }
     try {
@@ -412,6 +414,33 @@ function TaskDetail({
   onStartExtraction,
   onDelete,
 }: TaskDetailProps) {
+  // 注意：所有 hooks 必须在任何 early-return 之前（task 可能为 null）
+  const isReadyForImitation = task?.status === 'completed' && task?.stage === 'done'
+  const taskId = task?.id
+
+  // CTA 需参考包真实状态：任务完成 ≠ 参考包可用（可能 generating/failed/覆盖率不足被判 failed）
+  const [ctaPackStatus, setCtaPackStatus] = useState<string | null>(null)
+  useEffect(() => {
+    if (!taskId || !isReadyForImitation) {
+      setCtaPackStatus(null)
+      return
+    }
+    let cancelled = false
+    referencePackApi
+      .list()
+      .then((packs) => {
+        if (cancelled) return
+        const pack = (packs ?? []).find((p) => p.task_id === taskId) ?? null
+        setCtaPackStatus(pack?.status ?? 'missing')
+      })
+      .catch(() => {
+        if (!cancelled) setCtaPackStatus(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isReadyForImitation, taskId])
+
   if (!task) {
     return (
       <div className="flex h-72 flex-col items-center justify-center gap-3 rounded-card border border-dashed border-white/10 bg-card text-content-secondary">
@@ -421,8 +450,9 @@ function TaskDetail({
     )
   }
 
-  const canStart = task.status !== 'running' && task.stage !== 'done'
-  const isReadyForImitation = task.status === 'completed' && task.stage === 'done'
+  // 与后端对齐：仅 running 期间禁用；已完成任务允许重新抽取（幂等覆盖旧数据）
+  const canStart = task.status !== 'running'
+  const packUsable = ctaPackStatus === 'ready' || ctaPackStatus === 'partial'
 
   return (
     <div className="space-y-4 rounded-card border border-white/5 bg-card p-5">
@@ -434,12 +464,19 @@ function TaskDetail({
         onDelete={() => onDelete(task)}
       />
 
-      {/* V3 R6 迁移提示 + V3.2-A 跳转创建项目 CTA */}
-      {isReadyForImitation && (
+      {/* V3 R6 迁移提示 + V3.2-A 跳转创建项目 CTA（仅参考包就绪时展示，failed 不诱导挂载） */}
+      {isReadyForImitation && packUsable && (
         <div className="flex flex-col gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100 sm:flex-row sm:items-start">
           <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
           <div className="min-w-0 flex-1 space-y-1">
-            <p className="font-medium">抽取完成 · 可使用本书作为参考创建项目、或去项目中一键仿写</p>
+            <p className="font-medium">
+              抽取完成 · 可使用本书作为参考创建项目、或去项目中一键仿写
+              {ctaPackStatus === 'partial' && (
+                <span className="ml-2 rounded-pill border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-300">
+                  部分维度未生成
+                </span>
+              )}
+            </p>
             <p className="text-xs text-emerald-200/80">
               拆书产物已赋能为参考包（ReferencePack）。下面“创建新项目”会跳转项目创建向导，预选本书参考包，
               项目创建后会自动挂载该参考包；也可去《参考库》手动挂载到其他已有项目。
@@ -453,6 +490,15 @@ function TaskDetail({
             <Wand2 className="h-3.5 w-3.5" />
             以本书作参考创建项目
           </Link>
+        </div>
+      )}
+      {isReadyForImitation && ctaPackStatus === 'failed' && (
+        <div className="flex items-start gap-2 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <p className="min-w-0 text-xs leading-6">
+            抽取流程已结束，但参考包生成失败（核心维度缺失或章节抽取覆盖率过低），
+            <strong>暂不可用于挂载/仿写</strong>。可点击右上角「重新抽取」重跑本书。
+          </p>
         </div>
       )}
 
@@ -536,7 +582,7 @@ function DetailHeader({
           className="inline-flex items-center gap-1.5 rounded-btn bg-brand px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {extracting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-          {task.stage === 'done' ? '已完成' : task.status === 'running' ? '抽取中…' : '启动抽取'}
+          {task.status === 'running' ? '抽取中…' : task.stage === 'done' ? '重新抽取' : '启动抽取'}
         </button>
         <button
           type="button"

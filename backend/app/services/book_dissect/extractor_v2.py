@@ -851,6 +851,26 @@ async def _write_reference_pack(
         status = "failed"
         error_message = "全部核心维度生成失败"
 
+    # 2.5 抽取覆盖率闸门：generator 成功 ≠ 数据可靠。
+    # 逐章事实是聚合/语料/模式维度的底座，大面积失败时手法总结会建立在残缺样本上。
+    # 规则：覆盖率 <30% → failed（禁止挂载）；30%-80% → 最多 partial 并附警告。
+    # 仅当 chapters_total>0 时启用（单测直造 task 默认 0，不受影响）。
+    total_ch = task.chapters_total or 0
+    if total_ch > 0:
+        coverage = (task.chapters_extracted or 0) / total_ch
+        if coverage < 0.3 and status != "failed":
+            status = "failed"
+            error_message = (
+                f"章节抽取覆盖率过低（{task.chapters_extracted}/{total_ch}"
+                f"={coverage:.0%}），参考包数据不可靠；请重新抽取"
+            )
+        elif coverage < 0.8 and status == "ready":
+            status = "partial"
+            error_message = (
+                f"章节抽取覆盖率 {coverage:.0%}（{task.chapters_extracted}/{total_ch}），"
+                "部分章节事实缺失，手法总结可能有偏差"
+            )
+
     # 3. 序列化 5 个 JSON 字段
     def _dump(key: str) -> Optional[str]:
         v = payload.get(key)

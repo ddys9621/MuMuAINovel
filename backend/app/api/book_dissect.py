@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.settings import get_user_ai_service
@@ -29,6 +29,8 @@ from app.models.book_dissect_entity import BookDissectEntity
 from app.models.book_dissect_event import BookDissectEvent
 from app.models.book_dissect_relation import BookDissectRelation
 from app.models.book_dissect_task import BookDissectTask
+from app.models.project_reference_pack import ProjectReferencePack
+from app.models.reference_pack import ReferencePack
 from app.schemas.book_dissect import (
     BookDissectTaskResponse,
     BookDissectUploadResponse,
@@ -321,11 +323,11 @@ async def start_extraction(
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在或无权访问")
 
-    # 幂等校验：避免对正在跑的任务重复触发
+    # 幂等校验：避免对正在跑的任务重复触发。
+    # 已完成的任务允许重新抽取：流水线各阶段写库前都会先 delete 本 task 旧数据，
+    # ReferencePack 走 upsert，重抽是幂等的（此前 409 强迫用户删任务重传全书）。
     if task.status == "running":
         raise HTTPException(status_code=409, detail="任务正在运行中，请勿重复触发")
-    if task.status == "completed" and task.stage == "done":
-        raise HTTPException(status_code=409, detail="任务已完成，如需重新抽取请先删除再上传")
 
     # 校验全文文件仍然存在
     if not task.storage_path or not Path(task.storage_path).exists():
@@ -666,7 +668,12 @@ async def delete_task(
     user: User = Depends(require_login),
     db: AsyncSession = Depends(get_db),
 ):
-    """删除拆书任务并清理磁盘上的全文文件。"""
+    """删除拆书任务并清理磁盘全文 + 所有派生数据。
+
+    SQLite 未启用 PRAGMA foreign_keys=ON，外键 ondelete=CASCADE 不生效，
+    必须显式清理：ReferencePack（及其项目挂载）+ 5 张抽取数据表，
+    否则会留下仍可被项目引用的孤儿参考包与孤儿抽取数据。
+    """
     result = await db.execute(
         select(BookDissectTask).where(
             BookDissectTask.id == task_id,
@@ -686,9 +693,31 @@ async def delete_task(
             except OSError as e:
                 logger.warning("拆书：删除磁盘文件失败 path=%s err=%s", path, e)
 
+    # 1. 参考包及其项目挂载（pack 与 task 1:1）
+    pack_result = await db.execute(
+        select(ReferencePack.id).where(ReferencePack.task_id == task_id)
+    )
+    pack_id = pack_result.scalar_one_or_none()
+    if pack_id:
+        await db.execute(
+            delete(ProjectReferencePack).where(ProjectReferencePack.pack_id == pack_id)
+        )
+        await db.execute(delete(ReferencePack).where(ReferencePack.id == pack_id))
+
+    # 2. 抽取数据表（relation 先于 entity，避免悬挂引用语义混乱）
+    await db.execute(delete(BookDissectRelation).where(BookDissectRelation.task_id == task_id))
+    await db.execute(delete(BookDissectEvent).where(BookDissectEvent.task_id == task_id))
+    await db.execute(delete(BookDissectEntity).where(BookDissectEntity.task_id == task_id))
+    await db.execute(delete(BookDissectChapterFact).where(BookDissectChapterFact.task_id == task_id))
+    await db.execute(delete(BookDissectDictionary).where(BookDissectDictionary.task_id == task_id))
+
+    # 3. 任务本体
     await db.delete(task)
     await db.commit()
-    logger.info("拆书任务已删除: user=%s task=%s", user.user_id, task_id)
+    logger.info(
+        "拆书任务已删除: user=%s task=%s pack=%s（含派生数据）",
+        user.user_id, task_id, pack_id or "-",
+    )
     return {"message": "任务已删除", "task_id": task_id}
 
 
