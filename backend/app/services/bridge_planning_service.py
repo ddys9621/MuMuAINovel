@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from typing import Any, AsyncIterator, Optional
 
 from sqlalchemy import select
@@ -24,7 +24,17 @@ from app.models.plot_bridge import PlotBridge
 from app.models.plot_card import PlotCard
 from app.models.plot_card_chapter_outline_link import PlotCardChapterOutlineLink
 from app.models.plot_line import PlotLine
+from app.models.project import Project
 from app.models.story_outline import StoryOutline
+from app.services.bridge_prompt_context import (
+    build_fill_provenance,
+    filled_ledger_block,
+    next_bridge_block,
+    opening_block,
+    pov_line,
+    prev_bridge_last_chapter_block,
+    story_core_lines,
+)
 from app.services.bridge_slot_planner import (
     CHAPTERS_PER_BRIDGE,
     BridgePlanningConflictError,
@@ -35,10 +45,13 @@ from app.services.bridge_slot_planner import (
     compute_bridge_slots,
     parse_plot_line,
 )
+from app.services.bridge_templates import BridgeTemplate, resolve_template
 from app.services.reference_pack import (
     AssemblyContext,
     PromptAssembler,
 )
+from app.services.reference_pack.policy_tables import get_policy
+from app.services.reference_pack.slot_builders import get_first_attached_pack
 from app.utils.json_cleaner import safe_parse_json
 from app.utils.story_outline_fields import parse_story_outline_fields
 
@@ -203,24 +216,25 @@ async def _load_beat_context_for_bridge(
     return "\n".join(lines)
 
 
+# 每次 LLM 调用最多填几个桥段：推理模型一次输出 10+ 桥段（7-9K tokens）必被 max_tokens 截断
+FILL_BATCH_MAX = 4
+
 BRIDGE_FILL_TASK_PROMPT = """请为下面 {count} 个桥段槽位填写内容。槽位的编号、所属节点、覆盖区间、章号已由系统确定，**只填创意内容**。
 
-# 桥段四章方法论
-每个桥段 4 章，结构固定：
-- **C1 代入+信息差**（5:5）：上半日常代入，下半亮出对方困境
-- **C2 拉扯+开装**（9:1）：配角拉扯加强期待，**章尾让主角开始装**
-- **C3 兑现爽点**（10:0）：装到底，**不留钩子**
-- **C4 善后+下一目标**：本桥段收尾 + 引下个桥段
+# 桥段四章方法论（{template_name}）
+{methodology}
 
-# 本批槽位
+# 本节点全部槽位（标 ★ 的 {count} 个为本批要填的，其余仅供衔接参考）
 {slot_table}
 
 # 约束
-- 严格按槽位顺序输出 {count} 个对象，`bridge_number` 必须与槽位一致
+- 只输出标 ★ 的 {count} 个对象，严格按槽位顺序，`bridge_number` 必须与槽位一致
 - 每个桥段的 goal 必须落在所属节点主题内，进度按覆盖区间推进（区间末尾对应节点完成度）
-- 有副线任务的桥段，须在 c1-c4 中安排该副线的推进（不得抢占主线爽点）
+- 有副线任务的桥段，须在 c1-c4 中安排该副线的推进（不得抢占主线{payoff_label}）
 - 金手指使用方式在相邻桥段间不得重复
+- 人名、地名、势力名只能使用【本书角色】【世界规则表】里已有的；确需新角色时在 goal 里用“新角色：身份”标注
 - 最后一个桥段的 next_bridge_hook 要为下一节点开头留引子
+{extra_constraints}
 
 # 输出格式（纯 JSON 数组，不要 markdown）
 [
@@ -228,16 +242,44 @@ BRIDGE_FILL_TASK_PROMPT = """请为下面 {count} 个桥段槽位填写内容。
     "bridge_number": <槽位编号>,
     "title": "桥段简洁标题（8-15 字）",
     "goal": "本桥段要解决的具体问题（30-60 字）",
-    "showoff_point": "装逼/爽点设计（40-80 字）",
-    "golden_finger_usage": "本桥段如何使用金手指（20-40 字）",
-    "c1_intro": "C1 上半代入素材 + 下半信息差（80-120 字）",
-    "c2_build": "C2 拉扯素材 + 章尾开装动作（80-120 字）",
-    "c3_payoff": "C3 装逼完整展开 + 配角反应（80-120 字）",
-    "c4_aftermath": "C4 本桥段收尾事件 + 下桥段引子（60-100 字）",
+    "showoff_point": "{payoff_hint}（40-80 字）",
+    "golden_finger_usage": "{golden_finger_hint}（20-40 字）",
+    "c1_intro": "{c1_hint}（80-120 字）",
+    "c2_build": "{c2_hint}（80-120 字）",
+    "c3_payoff": "{c3_hint}（80-120 字）",
+    "c4_aftermath": "{c4_hint}（60-100 字）",
     "next_bridge_hook": "给下一桥段的钩子（20-40 字）"
   }}
 ]
 """
+
+
+def render_fill_task(template: BridgeTemplate, count: int, slot_table: str) -> str:
+    """按题材模板渲染填充任务段。"""
+    return BRIDGE_FILL_TASK_PROMPT.format(
+        count=count,
+        template_name=template.name,
+        methodology=template.methodology,
+        slot_table=slot_table,
+        payoff_label=template.payoff_label,
+        extra_constraints="\n".join(f"- {c}" for c in template.extra_constraints),
+        payoff_hint=template.payoff_hint,
+        golden_finger_hint=template.golden_finger_hint,
+        c1_hint=template.card_hints["c1_intro"],
+        c2_hint=template.card_hints["c2_build"],
+        c3_hint=template.card_hints["c3_payoff"],
+        c4_hint=template.card_hints["c4_aftermath"],
+    )
+
+
+@dataclass
+class FillContext:
+    text: str
+    story_fields: list[str]
+    next_beat_title: str | None
+    prev_bridge_number: int | None
+    ledger_numbers: list[int]
+    opening: bool
 
 _FILL_FIELDS = (
     "title", "goal", "showoff_point", "golden_finger_usage",
@@ -399,29 +441,21 @@ class BridgePlanningService:
         project_id: str,
         main: PlotLineData,
         beat_index: int,
-        drafts: list[PlotBridge],
-    ) -> str:
-        """故事大纲核心字段 + 所属节点（含前后节点）+ 上一桥段钩子。"""
-        outline_result = await db.execute(
-            select(StoryOutline)
-            .where(StoryOutline.project_id == project_id, StoryOutline.is_active == True)  # noqa: E712
-            .order_by(StoryOutline.version.desc())
-            .limit(1)
-        )
-        outline = outline_result.scalar_one_or_none()
-        fields = parse_story_outline_fields(outline.content if outline else None)
+        chunk: list[PlotBridge],
+        template: BridgeTemplate,
+        fields: dict[str, Any],
+    ) -> FillContext:
+        """故事前提（含终极目标）+ 开篇规则（仅桥段 1）+ 所属节点（含前后节点描述）+ 已填桥段账本。"""
+        parts: list[str] = story_core_lines(fields)
+        story_fields = [
+            k for k in ("premise", "golden_finger", "selling_points", "main_tropes", "power_system", "ultimate_goal")
+            if fields.get(k)
+        ]
 
-        parts: list[str] = ["【📖 故事前提】"]
-        if fields["premise"]:
-            parts.append(f"- 梗概：{fields['premise'][:400]}")
-        if fields["golden_finger"]:
-            parts.append(f"- 金手指：{fields['golden_finger'][:200]}")
-        if fields["selling_points"]:
-            parts.append(f"- 核心卖点：{'、'.join(str(x) for x in fields['selling_points'][:6])}")
-        if fields["main_tropes"]:
-            parts.append(f"- 主要套路：{'、'.join(str(x) for x in fields['main_tropes'][:6])}")
-        if fields["power_system"]:
-            parts.append(f"- 升级路线：{fields['power_system'][:200]}")
+        opening = any(b.bridge_number == 1 for b in chunk)
+        if opening:
+            parts.append("")
+            parts.append(opening_block(fields, template))
 
         beats = list(main.beats)
         cur = next(b for b in beats if b.index == beat_index)
@@ -435,36 +469,37 @@ class BridgePlanningService:
         if pos > 0:
             p = beats[pos - 1]
             parts.append(f"- 上一节点：[节点 {p.index}] {p.title}（已收尾）")
+        next_beat_title: str | None = None
         if pos + 1 < len(beats):
             nx = beats[pos + 1]
-            parts.append(f"- 下一节点：[节点 {nx.index}] {nx.title}（待开启）")
+            next_beat_title = nx.title
+            desc = f"｜{nx.description[:150]}" if nx.description else ""
+            parts.append(f"- 下一节点：[节点 {nx.index}] {nx.title}（待开启）{desc}")
 
-        prev_result = await db.execute(
-            select(PlotBridge).where(
-                PlotBridge.project_id == project_id,
-                PlotBridge.bridge_number == drafts[0].bridge_number - 1,
-            )
-        )
-        prev = prev_result.scalar_one_or_none()
-        if prev is not None and prev.status != "draft":
+        ledger, ledger_numbers = await filled_ledger_block(db, project_id, before_number=chunk[0].bridge_number)
+        if ledger:
             parts.append("")
-            parts.append("【⛓ 上一桥段】")
-            parts.append(f"- 桥段 {prev.bridge_number}《{prev.title}》")
-            if prev.c4_aftermath:
-                parts.append(f"- C4 收尾：{prev.c4_aftermath[:200]}")
-            if prev.next_bridge_hook:
-                parts.append(f"- 留给本批的钩子：{prev.next_bridge_hook}")
+            parts.append(ledger)
 
-        return "\n".join(parts)
+        return FillContext(
+            text="\n".join(parts),
+            story_fields=story_fields,
+            next_beat_title=next_beat_title,
+            prev_bridge_number=ledger_numbers[-1] if ledger_numbers else None,
+            ledger_numbers=ledger_numbers,
+            opening=opening,
+        )
 
     @staticmethod
-    def _slot_table(drafts: list[PlotBridge]) -> str:
+    def _slot_table(beat_bridges: list[PlotBridge], target_numbers: list[int]) -> str:
+        """节点全部槽位；本批要填的前缀 ★，其余仅供衔接参考。"""
         rows: list[str] = []
-        for b in drafts:
+        for b in beat_bridges:
             c_start, c_end = chapter_range(b.bridge_number)
             cs = (b.beat_coverage_start or 0.0) * 100
             ce = (b.beat_coverage_end or 0.0) * 100
-            row = f"- 桥段 {b.bridge_number}：第 {c_start}-{c_end} 章，节点进度 {cs:.0f}% → {ce:.0f}%"
+            mark = "★ " if b.bridge_number in target_numbers else "- "
+            row = f"{mark}桥段 {b.bridge_number}：第 {c_start}-{c_end} 章，节点进度 {cs:.0f}% → {ce:.0f}%"
             try:
                 secondary = json.loads(b.secondary_beats) if b.secondary_beats else []
             except (json.JSONDecodeError, TypeError):
@@ -490,7 +525,9 @@ class BridgePlanningService:
         """按主线节点顺序，把 status=draft 的桥段分批交给 LLM 填内容 → ready。
 
         可续跑：只处理 draft；beat_index 指定时只填该节点。
+        同节点桥段每 FILL_BATCH_MAX 个一次 LLM 调用（子批之间靠账本衔接）。
         LLM 返回条目与槽位不一致 → ValueError（该批保持 draft，调用方终止流）。
+        事件：beat_start → batch_done（每子批，含 provenance）→ beat_done → … → done
         """
         effective_model = model_name or getattr(self.ai_service, "default_model", None) or ""
         drafts_result = await db.execute(
@@ -511,54 +548,102 @@ class BridgePlanningService:
         for b in drafts:
             by_beat.setdefault(b.beat_index, []).append(b)
 
+        project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
+        template = resolve_template(getattr(project, "genre", None))
+        outline = (await db.execute(
+            select(StoryOutline)
+            .where(StoryOutline.project_id == project_id, StoryOutline.is_active == True)  # noqa: E712
+            .order_by(StoryOutline.version.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+        fields = parse_story_outline_fields(outline.content if outline else None)
+
         ctx = AssemblyContext(scene="bridge_planning", model_name=effective_model, project_id=project_id)
         prompt = await self.assembler.assemble(db, ctx)
+        pack = await get_first_attached_pack(db, project_id)
+        pack_title = (getattr(pack, "source_book_title", None) or "") if pack else None
+        dimensions = {
+            dim: strength
+            for dim, strength in get_policy("bridge_planning", effective_model).items()
+            if f"dissect_{dim}" in prompt.slots_filled
+        }
 
         filled = 0
         for b_idx in sorted(by_beat):
-            batch = by_beat[b_idx]
-            numbers = [b.bridge_number for b in batch]
+            beat_bridges = by_beat[b_idx]
+            numbers = [b.bridge_number for b in beat_bridges]
             yield {"type": "beat_start", "beat_index": b_idx, "bridge_numbers": numbers}
+            beat_title = next((b.title for b in main.beats if b.index == b_idx), f"节点{b_idx}")
 
-            context_block = await self._build_fill_context(db, project_id, main, b_idx, batch)
-            user_prompt = "\n\n".join([
-                prompt.user_prompt,
-                context_block,
-                BRIDGE_FILL_TASK_PROMPT.format(count=len(batch), slot_table=self._slot_table(batch)),
-            ])
-            resp = await self.ai_service.generate_text_stream_collect(
-                prompt=user_prompt,
-                system_prompt=prompt.system_prompt,
-                model=effective_model or None,
-                temperature=0.6,
-                context=f"BridgeFill-{effective_model or 'default'}",
-            )
-            content = _collected_json_text(resp, what=f"节点 {b_idx} 桥段填充")
-            data = safe_parse_json(content, default=[], expected_type="array", log_prefix="[BridgeFill]")
-            items = {
-                int(d["bridge_number"]): d
-                for d in data
-                if isinstance(d, dict) and str(d.get("bridge_number", "")).isdigit()
-            }
-            if set(items) != set(numbers):
-                raise ValueError(
-                    f"节点 {b_idx} 的桥段数量不符：期望 {numbers}，LLM 返回 {sorted(items)}"
+            for start in range(0, len(beat_bridges), FILL_BATCH_MAX):
+                chunk = beat_bridges[start:start + FILL_BATCH_MAX]
+                chunk_numbers = [b.bridge_number for b in chunk]
+                fill_ctx = await self._build_fill_context(db, project_id, main, b_idx, chunk, template, fields)
+                user_prompt = "\n\n".join([
+                    prompt.user_prompt,
+                    fill_ctx.text,
+                    render_fill_task(template, len(chunk), self._slot_table(beat_bridges, chunk_numbers)),
+                ])
+                resp = await self.ai_service.generate_text_stream_collect(
+                    prompt=user_prompt,
+                    system_prompt=prompt.system_prompt,
+                    model=effective_model or None,
+                    temperature=0.6,
+                    context=f"BridgeFill-{effective_model or 'default'}",
                 )
-            for b in batch:
-                item = items[b.bridge_number]
-                for field_name in _FILL_FIELDS:
-                    value = item.get(field_name)
-                    if not isinstance(value, str) or not value.strip():
-                        continue
-                    value = value.strip()
-                    limit = _FILL_SHORT_FIELDS.get(field_name)
-                    setattr(b, field_name, value[:limit] if limit else value)
-                b.status = "ready"
-            await db.commit()
-            for b in batch:
-                await db.refresh(b)
-            filled += len(batch)
-            yield {"type": "beat_done", "beat_index": b_idx, "bridges": [bridge_to_dict(b) for b in batch]}
+                what = f"节点 {b_idx} 桥段 {chunk_numbers[0]}-{chunk_numbers[-1]} 填充"
+                content = _collected_json_text(resp, what=what)
+                data = safe_parse_json(content, default=[], expected_type="array", log_prefix="[BridgeFill]")
+                items = {
+                    int(d["bridge_number"]): d
+                    for d in data
+                    if isinstance(d, dict) and str(d.get("bridge_number", "")).isdigit()
+                }
+                if set(items) != set(chunk_numbers):
+                    raise ValueError(
+                        f"节点 {b_idx} 的桥段数量不符：期望 {chunk_numbers}，LLM 返回 {sorted(items)}"
+                    )
+
+                provenance = build_fill_provenance(
+                    prompt,
+                    model=effective_model,
+                    template_key=template.key,
+                    beat_index=b_idx,
+                    beat_title=beat_title,
+                    bridge_numbers=chunk_numbers,
+                    next_beat_title=fill_ctx.next_beat_title,
+                    prev_bridge_number=fill_ctx.prev_bridge_number,
+                    ledger_numbers=fill_ctx.ledger_numbers,
+                    opening=fill_ctx.opening,
+                    story_fields=fill_ctx.story_fields,
+                    pack_title=pack_title or None,
+                    dimensions=dimensions,
+                )
+                meta_json = json.dumps(provenance, ensure_ascii=False)
+                for b in chunk:
+                    item = items[b.bridge_number]
+                    for field_name in _FILL_FIELDS:
+                        value = item.get(field_name)
+                        if not isinstance(value, str) or not value.strip():
+                            continue
+                        value = value.strip()
+                        limit = _FILL_SHORT_FIELDS.get(field_name)
+                        setattr(b, field_name, value[:limit] if limit else value)
+                    b.generation_meta = meta_json
+                    b.status = "ready"
+                await db.commit()
+                for b in chunk:
+                    await db.refresh(b)
+                filled += len(chunk)
+                yield {
+                    "type": "batch_done",
+                    "beat_index": b_idx,
+                    "bridge_numbers": chunk_numbers,
+                    "bridges": [bridge_to_dict(b) for b in chunk],
+                    "provenance": provenance,
+                }
+
+            yield {"type": "beat_done", "beat_index": b_idx, "bridges": [bridge_to_dict(b) for b in beat_bridges]}
 
         remaining = await db.execute(
             select(PlotBridge.id).where(PlotBridge.project_id == project_id, PlotBridge.status == "draft")
