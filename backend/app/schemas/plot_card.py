@@ -1,5 +1,5 @@
 """剧情卡片相关的 Pydantic 模型"""
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Dict
 from datetime import datetime
 
@@ -51,9 +51,7 @@ class PlotCardResponse(PlotCardBase):
     word_count_actual: Optional[int] = Field(0, description="实际生成字数")
     generation_order: Optional[int] = Field(0, description="在章节中的生成顺序")
 
-    class Config:
-        from_attributes = True
-        extra = "allow"  # 允许额外字段
+    model_config = ConfigDict(from_attributes=True, extra="allow")  # 允许额外字段
 
 
 class PlotCardGenerateRequest(BaseModel):

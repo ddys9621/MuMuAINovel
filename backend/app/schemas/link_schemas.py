@@ -1,5 +1,5 @@
 """关联关系相关的 Pydantic 模型"""
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, ConfigDict
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
@@ -68,8 +68,7 @@ class ChapterOutlinePlotLineLinkResponse(BaseModel):
     timeline_coverage: Optional[Dict[str, Any]] = Field(None, description="时间线覆盖数据：记录该章节对该剧情线各节点的覆盖情况")
     created_at: datetime = Field(..., description="创建时间")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================
@@ -93,8 +92,7 @@ class PlotCardPlotLineLinkResponse(BaseModel):
     plot_line_id: str = Field(..., description="剧情线ID")
     created_at: datetime = Field(..., description="创建时间")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================
@@ -129,8 +127,7 @@ class PlotCardChapterOutlineLinkResponse(BaseModel):
     created_at: datetime = Field(..., description="创建时间")
     updated_at: datetime = Field(..., description="更新时间")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================
@@ -149,8 +146,7 @@ class PlotLineWithLinks(BaseModel):
     timeline_data: Optional[dict] = Field(None, description="时间线数据（JSON格式）")
     timeline_coverage: Optional[dict] = Field(None, description="节点覆盖度数据（JSON格式）")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ChapterOutlineWithLinks(BaseModel):
@@ -162,8 +158,7 @@ class ChapterOutlineWithLinks(BaseModel):
     plot_line_count: int = Field(..., description="关联的剧情线数量")
     card_count: int = Field(..., description="关联的剧情卡片数量")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PlotCardWithLinks(BaseModel):
@@ -175,8 +170,7 @@ class PlotCardWithLinks(BaseModel):
     plot_line_count: int = Field(..., description="关联的剧情线数量")
     chapter_count: int = Field(..., description="关联的章纲数量")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================

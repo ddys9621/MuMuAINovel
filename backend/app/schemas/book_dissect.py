@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional, Any, Dict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 # ============================================================
@@ -66,8 +66,7 @@ class BookDissectTaskResponse(BaseModel):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================================
@@ -126,8 +125,7 @@ class V2DictionaryEntrySchema(BaseModel):
     sample_context: Optional[str] = None
     source: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class V2ChapterFactSummarySchema(BaseModel):
@@ -139,8 +137,7 @@ class V2ChapterFactSummarySchema(BaseModel):
     extraction_status: str = "pending"
     extraction_error: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class V2ChapterFactDetailSchema(V2ChapterFactSummarySchema):
@@ -162,8 +159,7 @@ class V2EntitySchema(BaseModel):
     role_type: Optional[str] = None
     parent_entity_id: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class V2RelationSchema(BaseModel):
@@ -176,8 +172,7 @@ class V2RelationSchema(BaseModel):
     first_chapter: Optional[int] = None
     evidence: List[Dict[str, Any]] = Field(default_factory=list)
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class V2EventSchema(BaseModel):
@@ -191,8 +186,7 @@ class V2EventSchema(BaseModel):
     importance: str = "medium"
     evidence: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class V2OverviewResponse(BaseModel):

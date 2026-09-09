@@ -1,5 +1,5 @@
 """剧情线相关的 Pydantic 模型"""
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, ConfigDict
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
@@ -46,9 +46,7 @@ class PlotLineResponse(PlotLineBase):
     chapter_outline_count: int = Field(0, description="关联的章纲数量")
     plot_card_count: int = Field(0, description="关联的剧情卡片数量")
 
-    class Config:
-        from_attributes = True
-        extra = "allow"  # 允许额外字段
+    model_config = ConfigDict(from_attributes=True, extra="allow")  # 允许额外字段
 
 
 class PlotLineGenerateRequest(BaseModel):
