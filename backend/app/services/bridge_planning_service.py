@@ -281,6 +281,30 @@ class FillContext:
     ledger_numbers: list[int]
     opening: bool
 
+
+def render_expansion_task(template: BridgeTemplate, bridge: PlotBridge, c_start: int, pov_rule: str) -> str:
+    """按题材模板渲染章纲展开任务段。"""
+    return CHAPTER_EXPANSION_TASK_PROMPT.format(
+        title=bridge.title,
+        goal=bridge.goal,
+        showoff_point=bridge.showoff_point,
+        golden_finger_usage=bridge.golden_finger_usage or "",
+        c1_intro=bridge.c1_intro or "",
+        c2_build=bridge.c2_build or "",
+        c3_payoff=bridge.c3_payoff or "",
+        c4_aftermath=bridge.c4_aftermath or "",
+        start_chapter=c_start,
+        c2_num=c_start + 1,
+        c3_num=c_start + 2,
+        c4_num=c_start + 3,
+        template_name=template.name,
+        intro_label=template.position_labels["intro"],
+        build_label=template.position_labels["build"],
+        payoff_label=template.position_labels["payoff"],
+        aftermath_label=template.position_labels["aftermath"],
+        pov_rule=pov_rule,
+    )
+
 _FILL_FIELDS = (
     "title", "goal", "showoff_point", "golden_finger_usage",
     "c1_intro", "c2_build", "c3_payoff", "c4_aftermath", "next_bridge_hook",
@@ -320,6 +344,14 @@ CHAPTER_EXPANSION_TASK_PROMPT = """请把下面这个桥段展开为 4 个详细
 - C3 提示：{c3_payoff}
 - C4 提示：{c4_aftermath}
 - 起始章号：第 {start_chapter} 章
+
+# 四章位置语义（{template_name}）
+- C1 intro：{intro_label}
+- C2 build：{build_label}
+- C3 payoff：{payoff_label}（章末不留钩子）
+- C4 aftermath：{aftermath_label}
+- {pov_rule}
+- 人名只能使用【本书角色】里的名字；`characters_involved` / `pov` 不得出现新名字
 
 # 场景卡片设计要求
 - 每章 3-5 张，按章内时间顺序排列
@@ -698,28 +730,26 @@ class BridgePlanningService:
             )
 
         effective_model = model_name or getattr(self.ai_service, "default_model", None) or ""
+        project = (await db.execute(select(Project).where(Project.id == bridge.project_id))).scalar_one_or_none()
+        try:
+            recorded = (json.loads(bridge.generation_meta) or {}).get("template") if bridge.generation_meta else None
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            recorded = None
+        template = resolve_template(getattr(project, "genre", None), explicit_key=recorded)
+
         ctx = AssemblyContext(scene="chapter_outline", model_name=effective_model, project_id=bridge.project_id)
         prompt = await self.assembler.assemble(db, ctx)
         beat_block = await _load_beat_context_for_bridge(db, bridge)
+        prev_block = await prev_bridge_last_chapter_block(db, bridge.project_id, bridge.bridge_number)
+        next_block = await next_bridge_block(db, bridge.project_id, bridge.bridge_number)
 
-        task = CHAPTER_EXPANSION_TASK_PROMPT.format(
-            title=bridge.title,
-            goal=bridge.goal,
-            showoff_point=bridge.showoff_point,
-            golden_finger_usage=bridge.golden_finger_usage or "",
-            c1_intro=bridge.c1_intro or "",
-            c2_build=bridge.c2_build or "",
-            c3_payoff=bridge.c3_payoff or "",
-            c4_aftermath=bridge.c4_aftermath or "",
-            start_chapter=c_start,
-            c2_num=c_start + 1,
-            c3_num=c_start + 2,
-            c4_num=c_start + 3,
-        )
         prompt_parts = [prompt.user_prompt]
-        if beat_block:
-            prompt_parts.append(beat_block)
-        prompt_parts.append(task)
+        for block in (beat_block, prev_block, next_block):
+            if block:
+                prompt_parts.append(block)
+        prompt_parts.append(render_expansion_task(
+            template, bridge, c_start, pov_line(getattr(project, "narrative_perspective", None)),
+        ))
         user_prompt = "\n\n".join(prompt_parts)
 
         resp = await self.ai_service.generate_text_stream_collect(
