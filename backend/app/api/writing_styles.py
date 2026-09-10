@@ -397,23 +397,3 @@ async def set_default_style(
         "style_id": style_id,
         "style_name": style.name
     }
-
-
-@router.post("/project/{project_id}/init-defaults", response_model=WritingStyleListResponse)
-async def initialize_default_styles(
-    project_id: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    【已废弃】为项目初始化默认风格
-    
-    新架构下，预设风格是全局的，不需要为每个项目单独初始化
-    该接口保留用于兼容性，直接返回项目可用的所有风格
-    """
-    # 验证用户权限
-    user_id = getattr(request.state, 'user_id', None)
-    await verify_project_access(project_id, user_id, db)
-    
-    # 直接返回项目可用的所有风格（全局预设 + 项目自定义）
-    return await get_project_styles(project_id, request, db)

@@ -12,7 +12,6 @@ from app.schemas.mcp_plugin import (
     MCPPluginSimpleCreate,
     MCPPluginUpdate,
     MCPPluginResponse,
-    MCPToolCall,
     MCPTestResult
 )
 import json
@@ -21,7 +20,6 @@ from app.mcp.registry import mcp_registry
 from app.mcp.server_config import ServerConfigError, parse_server_config
 from app.services.mcp_plugin_service import upsert_plugin
 from app.services.mcp_test_service import mcp_test_service
-from app.services.mcp_tool_service import mcp_tool_service
 from app.logger import get_logger
 
 logger = get_logger(__name__)
@@ -396,101 +394,6 @@ async def _ensure_plugin_loaded(
     return True
 
 
-@router.get("/metrics")
-async def get_metrics(
-    tool_name: Optional[str] = Query(None, description="工具名称（可选，获取特定工具的指标）"),
-    user: User = Depends(require_login)
-):
-    """
-    获取MCP工具调用指标
-    
-    Query参数:
-        - tool_name: 可选，指定工具名称获取特定工具的指标
-        
-    Returns:
-        工具调用指标字典，包含：
-        - total_calls: 总调用次数
-        - success_calls: 成功调用次数
-        - failed_calls: 失败调用次数
-        - success_rate: 成功率
-        - avg_duration_ms: 平均耗时（毫秒）
-        - last_call_time: 最后调用时间
-    """
-    metrics = mcp_tool_service.get_metrics(tool_name)
-    
-    return {
-        "metrics": metrics,
-        "tool_name": tool_name,
-        "timestamp": datetime.now().isoformat()
-    }
-
-
-@router.get("/cache/stats")
-async def get_cache_stats(
-    user: User = Depends(require_login)
-):
-    """
-    获取工具缓存统计信息
-    
-    Returns:
-        缓存统计信息，包含：
-        - total_entries: 缓存条目总数
-        - total_hits: 缓存总命中次数
-        - cache_ttl_minutes: 缓存TTL（分钟）
-        - entries: 各缓存条目详情
-    """
-    stats = mcp_tool_service.get_cache_stats()
-    
-    return {
-        "cache_stats": stats,
-        "timestamp": datetime.now().isoformat()
-    }
-
-
-@router.post("/cache/clear")
-async def clear_cache(
-    user_id: Optional[str] = Query(None, description="用户ID（可选）"),
-    plugin_name: Optional[str] = Query(None, description="插件名称（可选）"),
-    user: User = Depends(require_login)
-):
-    """
-    清理工具缓存
-    
-    Query参数:
-        - user_id: 可选，清理特定用户的缓存
-        - plugin_name: 可选，清理特定插件的缓存
-        
-    说明:
-        - 不提供任何参数：清理所有缓存
-        - 只提供user_id：清理该用户的所有缓存
-        - 提供user_id和plugin_name：清理特定插件的缓存
-    """
-    # 非管理员只能清理自己的缓存
-    if user_id and user_id != user.user_id:
-        raise HTTPException(status_code=403, detail="无权清理其他用户的缓存")
-    
-    # 如果没有指定user_id，使用当前用户
-    target_user_id = user_id or user.user_id
-    
-    mcp_tool_service.clear_cache(target_user_id, plugin_name)
-    
-    message = "已清理"
-    if plugin_name:
-        message += f"插件 {plugin_name} 的缓存"
-    elif target_user_id:
-        message += f"用户 {target_user_id} 的所有缓存"
-    else:
-        message += "所有缓存"
-    
-    logger.info(f"用户 {user.user_id} {message}")
-    
-    return {
-        "success": True,
-        "message": message,
-        "timestamp": datetime.now().isoformat()
-    }
-
-
 @router.get("/{plugin_id}/tools")
 async def get_plugin_tools(
     plugin_id: str,
@@ -534,52 +437,3 @@ async def get_plugin_tools(
     except Exception as e:
         logger.error(f"获取工具列表失败: {plugin.plugin_name}, 错误: {e}")
         raise HTTPException(status_code=500, detail=f"获取工具列表失败: {str(e)}")
-
-
-@router.post("/call")
-async def call_mcp_tool(
-    data: MCPToolCall,
-    user: User = Depends(require_login),
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    调用MCP工具
-    """
-    # 获取插件
-    result = await db.execute(
-        select(MCPPlugin).where(
-            MCPPlugin.id == data.plugin_id,
-            MCPPlugin.user_id == user.user_id
-        )
-    )
-    plugin = result.scalar_one_or_none()
-    
-    if not plugin:
-        raise HTTPException(status_code=404, detail="插件不存在")
-    
-    if not plugin.enabled:
-        raise HTTPException(status_code=400, detail="插件未启用")
-    
-    try:
-        # 确保插件已加载
-        await _ensure_plugin_loaded(plugin, user.user_id)
-        
-        # 调用工具
-        result = await mcp_registry.call_tool(
-            user.user_id,
-            plugin.plugin_name,
-            data.tool_name,
-            data.arguments
-        )
-        
-        return {
-            "success": True,
-            "plugin_name": plugin.plugin_name,
-            "tool_name": data.tool_name,
-            "result": result
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"调用工具失败: {plugin.plugin_name}.{data.tool_name}, 错误: {e}")
-        raise HTTPException(status_code=500, detail=f"工具调用失败: {str(e)}")

@@ -1,6 +1,6 @@
 """关系管理相关的Pydantic模型"""
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime
 
 
@@ -62,30 +62,6 @@ class CharacterRelationshipResponse(CharacterRelationshipBase):
     updated_at: datetime
     
     model_config = ConfigDict(from_attributes=True)
-
-
-class RelationshipGraphNode(BaseModel):
-    """关系图谱节点"""
-    id: str
-    name: str
-    type: str  # character / organization
-    role_type: Optional[str] = None
-    avatar: Optional[str] = None
-
-
-class RelationshipGraphLink(BaseModel):
-    """关系图谱连线"""
-    source: str
-    target: str
-    relationship: str
-    intimacy: int
-    status: str
-
-
-class RelationshipGraphData(BaseModel):
-    """关系图谱数据"""
-    nodes: List[RelationshipGraphNode]
-    links: List[RelationshipGraphLink]
 
 
 # ============ 组织相关 ============

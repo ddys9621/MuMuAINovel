@@ -1,15 +1,13 @@
 """关系管理API"""
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, and_
+from sqlalchemy import select, or_
 from typing import List, Optional
 
 from app.database import get_db
 from app.models.relationship import (
     RelationshipType,
-    CharacterRelationship,
-    Organization,
-    OrganizationMember
+    CharacterRelationship
 )
 from app.models.character import Character
 from app.models.project import Project
@@ -18,9 +16,6 @@ from app.schemas.relationship import (
     CharacterRelationshipCreate,
     CharacterRelationshipUpdate,
     CharacterRelationshipResponse,
-    RelationshipGraphData,
-    RelationshipGraphNode,
-    RelationshipGraphLink
 )
 from app.logger import get_logger
 
@@ -91,63 +86,6 @@ async def get_project_relationships(
     
     logger.info(f"获取项目 {project_id} 的关系列表，共 {len(relationships)} 条")
     return relationships
-
-
-@router.get("/graph/{project_id}", response_model=RelationshipGraphData, summary="获取关系图谱数据")
-async def get_relationship_graph(
-    project_id: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db)
-):
-    # 验证用户权限
-    user_id = getattr(request.state, 'user_id', None)
-    await verify_project_access(project_id, user_id, db)
-    
-    """
-    获取用于可视化的关系图谱数据
-    
-    返回格式：
-    - nodes: 角色节点列表
-    - links: 关系连线列表
-    """
-    # 获取所有角色（节点）
-    chars_result = await db.execute(
-        select(Character).where(Character.project_id == project_id)
-    )
-    characters = chars_result.scalars().all()
-    
-    nodes = [
-        RelationshipGraphNode(
-            id=c.id,
-            name=c.name,
-            type="organization" if c.is_organization else "character",
-            role_type=c.role_type,
-            avatar=c.avatar_url
-        )
-        for c in characters
-    ]
-    
-    # 获取所有关系（边）
-    rels_result = await db.execute(
-        select(CharacterRelationship).where(
-            CharacterRelationship.project_id == project_id
-        )
-    )
-    relationships = rels_result.scalars().all()
-    
-    links = [
-        RelationshipGraphLink(
-            source=r.character_from_id,
-            target=r.character_to_id,
-            relationship=r.relationship_name or "未知关系",
-            intimacy=r.intimacy_level,
-            status=r.status
-        )
-        for r in relationships
-    ]
-    
-    logger.info(f"获取项目 {project_id} 的关系图谱：{len(nodes)} 个节点，{len(links)} 条关系")
-    return RelationshipGraphData(nodes=nodes, links=links)
 
 
 @router.post("/", response_model=CharacterRelationshipResponse, summary="创建角色关系")

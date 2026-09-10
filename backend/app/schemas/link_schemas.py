@@ -1,5 +1,5 @@
 """关联关系相关的 Pydantic 模型"""
-from pydantic import BaseModel, Field, validator, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
@@ -176,21 +176,3 @@ class PlotCardWithLinks(BaseModel):
 # ============================================
 # 时间线覆盖度相关模型
 # ============================================
-
-class BeatCoverage(BaseModel):
-    """节点覆盖度模型（章节贡献度）"""
-    beat_index: int = Field(..., ge=1, description="节点索引")
-    coverage: float = Field(..., ge=0, le=1, description="本章对该节点的贡献度(0-1,表示0%-100%)")
-
-    @validator('coverage')
-    def validate_coverage(cls, v):
-        """校验coverage值只能是0, 0.5或1.0"""
-        # 允许0-1之间的任意值,表示贡献度百分比
-        if not (0 <= v <= 1):
-            raise ValueError("coverage 必须在 0 到 1 之间")
-        return v
-
-
-class TimelineCoverageUpdate(BaseModel):
-    """时间线覆盖度更新模型"""
-    beats_covered: List[BeatCoverage] = Field(..., description="节点覆盖度列表")

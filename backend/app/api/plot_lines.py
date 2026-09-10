@@ -12,11 +12,9 @@ from app.models import (
 )
 from app.schemas.plot_line import (
     PlotLineCreate, PlotLineUpdate, PlotLineResponse,
-    PlotLineGenerateRequest, PlotLineReorderRequest, PlotLineListResponse,
-    TimelineDataUpdate
+    PlotLineGenerateRequest, PlotLineReorderRequest, PlotLineListResponse
 )
 from app.schemas.link_schemas import (
-    ChapterOutlinePlotLineLinkResponse, PlotCardPlotLineLinkResponse,
     ChapterOutlineWithLinks, PlotCardWithLinks,
     LinkChapterOutlinesRequest, LinkPlotCardsToLineRequest, UnlinkRequest
 )
@@ -912,49 +910,3 @@ async def get_plot_line_progress(
 # ============================================
 # 时间线编辑 API
 # ============================================
-
-@router.put("/{line_id}/timeline", response_model=PlotLineResponse)
-async def update_plot_line_timeline(
-    line_id: str,
-    timeline_data: TimelineDataUpdate,
-    db: AsyncSession = Depends(get_db)
-):
-    """更新剧情线的时间线数据
-
-    更新剧情线的 timeline_data 字段，包括结构(structure)和节点(beats)。
-
-    Args:
-        line_id: 剧情线ID
-        timeline_data: 时间线数据，包含 structure 和 beats
-
-    Returns:
-        更新后的剧情线完整信息
-
-    Raises:
-        404: 剧情线不存在
-        400: beats 权重总和不为 1.0
-        400: beat index 重复
-    """
-    # 检查剧情线是否存在
-    result = await db.execute(select(PlotLine).where(PlotLine.id == line_id))
-    line = result.scalar_one_or_none()
-
-    if not line:
-        raise HTTPException(status_code=404, detail="剧情线不存在")
-
-    # 将 TimelineDataUpdate 转为 JSON 字符串
-    timeline_json = json.dumps(timeline_data.model_dump(), ensure_ascii=False)
-
-    # 更新 timeline_data 字段
-    await db.execute(
-        update(PlotLine)
-        .where(PlotLine.id == line_id)
-        .values(timeline_data=timeline_json)
-    )
-    await db.commit()
-    await db.refresh(line)
-
-    logger.info(f"✅ 剧情线 {line.title} 的时间线数据已更新")
-
-    # 返回更新后的剧情线
-    return await _serialize_plot_line(db, line)

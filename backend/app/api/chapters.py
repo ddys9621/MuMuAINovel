@@ -4,15 +4,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 import json
 import asyncio
-from typing import Optional
 from datetime import datetime
-from asyncio import Queue, Lock
+from asyncio import Lock
 
 from app.database import get_db
 from app.models.chapter import Chapter
 from app.models.chapter_outline import ChapterOutline
 from app.models.project import Project
-from app.models.story_outline import StoryOutline
 from app.models.character import Character
 from app.models.relationship import Organization, OrganizationMember
 from app.models.generation_history import GenerationHistory
@@ -31,9 +29,7 @@ from app.schemas.chapter import (
 )
 from app.schemas.regeneration import (
     ApplyRegenerationRequest,
-    ChapterRegenerateRequest,
-    RegenerationTaskResponse,
-    RegenerationTaskStatus
+    ChapterRegenerateRequest
 )
 from app.services.ai_service import AIService
 from app.services.prompt_service import prompt_service
@@ -42,7 +38,6 @@ from app.services.chapter_consistency_service import chapter_consistency_service
 from app.services.memory_service import memory_service
 from app.services.narrative_state_service import narrative_state_service
 from app.services.chapter_regenerator import ChapterRegenerator
-from app.services.world_rule_service import WorldRuleService
 from app.logger import get_logger
 from app.api.settings import get_user_ai_service
 from app.config import settings as config_settings
@@ -419,60 +414,6 @@ async def _auto_create_entities(
     return created + enriched + affiliation_count
 
 
-async def get_or_create_chapter_from_outline(
-    db: AsyncSession,
-    chapter_outline_id: str
-) -> Chapter:
-    """
-    根据章纲ID查找或创建对应的章节
-    
-    Args:
-        db: 数据库会话
-        chapter_outline_id: 章纲ID
-        
-    Returns:
-        Chapter: 章节对象
-        
-    Raises:
-        HTTPException: 章纲不存在时抛出404错误
-    """
-    # 1. 查找是否已有关联的 Chapter
-    chapter_result = await db.execute(
-        select(Chapter).where(Chapter.chapter_outline_id == chapter_outline_id)
-    )
-    chapter = chapter_result.scalar_one_or_none()
-    
-    if chapter:
-        logger.info(f"✅ 找到已存在的章节: {chapter.id} (章纲: {chapter_outline_id})")
-        return chapter
-    
-    # 2. 获取章纲信息
-    outline_result = await db.execute(
-        select(ChapterOutline).where(ChapterOutline.id == chapter_outline_id)
-    )
-    outline = outline_result.scalar_one_or_none()
-    if not outline:
-        logger.error(f"❌ 章纲不存在: {chapter_outline_id}")
-        raise HTTPException(status_code=404, detail="章纲不存在")
-    
-    # 3. 创建新的 Chapter
-    chapter = Chapter(
-        project_id=outline.project_id,
-        chapter_outline_id=outline.id,
-        chapter_number=outline.chapter_number,
-        title=outline.title,
-        summary=outline.summary,
-        status="draft",
-        word_count=0
-    )
-    db.add(chapter)
-    await db.commit()
-    await db.refresh(chapter)
-    
-    logger.info(f"✨ 创建新章节: {chapter.id} 关联章纲: {chapter_outline_id}")
-    return chapter
-
-
 @router.post("", response_model=ChapterResponse, summary="创建章节")
 async def create_chapter(
     chapter: ChapterCreate,
@@ -499,44 +440,6 @@ async def create_chapter(
     await db.commit()
     await db.refresh(db_chapter)
     return db_chapter
-
-
-@router.post("/chapter-outlines/{outline_id}/chapter", 
-             response_model=ChapterResponse,
-             summary="根据章纲获取或创建章节")
-async def get_or_create_chapter_endpoint(
-    outline_id: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    根据章纲ID查找或创建对应的章节
-    用于前端在生成内容前获取chapter_id
-    
-    Args:
-        outline_id: 章纲ID
-        request: 请求对象
-        db: 数据库会话
-        
-    Returns:
-        ChapterResponse: 章节对象
-    """
-    user_id = getattr(request.state, 'user_id', None)
-    
-    # 验证章纲存在且有权限
-    outline_result = await db.execute(
-        select(ChapterOutline).where(ChapterOutline.id == outline_id)
-    )
-    outline = outline_result.scalar_one_or_none()
-    if not outline:
-        raise HTTPException(status_code=404, detail="章纲不存在")
-    
-    await verify_project_access(outline.project_id, user_id, db)
-    
-    # 查找或创建 Chapter
-    chapter = await get_or_create_chapter_from_outline(db, outline_id)
-    
-    return chapter
 
 
 @router.post("/project/{project_id}/sync-from-outlines", summary="从章纲批量同步章节")
@@ -2960,35 +2863,6 @@ async def _get_owned_regeneration_task(
     if not task:
         raise HTTPException(status_code=404, detail="重新生成任务不存在")
     return chapter, task
-
-
-@router.get("/{chapter_id}/regeneration/tasks/{task_id}", summary="获取重新生成任务详情（含新旧稿全文）")
-async def get_regeneration_task_detail(
-    chapter_id: str,
-    task_id: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db)
-):
-    """返回单个版本的完整信息，供前端做新旧稿对比 / 应用前预览。"""
-    _, task = await _get_owned_regeneration_task(chapter_id, task_id, request, db)
-
-    return {
-        "task_id": task.id,
-        "chapter_id": task.chapter_id,
-        "status": task.status,
-        "version_number": task.version_number,
-        "version_note": task.version_note,
-        "modification_instructions": task.modification_instructions,
-        "custom_instructions": task.custom_instructions,
-        "selected_suggestion_indices": task.selected_suggestion_indices,
-        "original_word_count": task.original_word_count,
-        "regenerated_word_count": task.regenerated_word_count,
-        "original_content": task.original_content,
-        "regenerated_content": task.regenerated_content,
-        "error_message": task.error_message,
-        "created_at": task.created_at.isoformat() if task.created_at else None,
-        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
-    }
 
 
 @router.post("/{chapter_id}/regeneration/tasks/{task_id}/apply", summary="应用版本内容到章节正文")
