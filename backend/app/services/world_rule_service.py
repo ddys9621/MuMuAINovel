@@ -4,8 +4,9 @@ import os
 # 配置模型缓存目录（与 memory_service 保持一致）
 # ⚠️ 必须在 import sentence_transformers / huggingface_hub 之前设置，
 # 否则 offline 开关不生效，无本地模型时会发起无超时的 HF 网络请求（详见 memory_service 头部说明）
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-EMBEDDING_PATH = os.path.join(BASE_DIR, 'embedding')
+from app.utils.runtime_paths import embedding_dir
+
+EMBEDDING_PATH = embedding_dir()
 
 if 'SENTENCE_TRANSFORMERS_HOME' not in os.environ:
     os.environ['SENTENCE_TRANSFORMERS_HOME'] = EMBEDDING_PATH

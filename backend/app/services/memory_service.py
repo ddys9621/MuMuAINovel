@@ -6,8 +6,9 @@ import os
 # huggingface_hub 在 import 时就把 HF_HUB_OFFLINE 固化为常量，
 # 先 import 再设环境变量等于没设——无本地模型时会发起**无超时**的
 # HF 网络请求，在 HF 不可达的环境（如国内直连）下进程永久挂死。
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))  # 从 app/services 回到 backend
-EMBEDDING_PATH = os.path.join(BASE_DIR, 'embedding')
+from app.utils.runtime_paths import embedding_dir  # 源码/容器 = backend/embedding；exe = {app}\embedding（不在 _internal 内）
+
+EMBEDDING_PATH = embedding_dir()
 
 if 'SENTENCE_TRANSFORMERS_HOME' not in os.environ:
     os.environ['SENTENCE_TRANSFORMERS_HOME'] = EMBEDDING_PATH

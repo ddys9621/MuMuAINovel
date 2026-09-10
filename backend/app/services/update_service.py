@@ -374,6 +374,11 @@ class UpdateService:
                 if has_update:
                     if git.dirty:
                         hint = "工作区有未提交的修改，一键更新已禁用：请先提交或还原改动（git stash），再重新检查。"
+                    elif git.ahead > 0:
+                        hint = (
+                            f"本地有 {git.ahead} 个领先远端的提交，与远端已分叉，无法快进合并；"
+                            f"请手动执行 git pull --rebase origin {git.branch}（或先推送本地提交）后重新检查。"
+                        )
                     else:
                         can_apply = True
                         hint = _source_apply_hint(git)

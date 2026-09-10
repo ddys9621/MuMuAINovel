@@ -19,9 +19,11 @@ from typing import Callable
 MODEL_REPO = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_HF_MIRROR = "https://hf-mirror.com"
 
-# 与 memory_service 保持一致的目录计算：app/services → backend（或 exe 的 _internal）
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-EMBEDDING_PATH = os.path.join(BASE_DIR, "embedding")
+# 与 memory_service 保持一致：源码/容器 = backend/embedding；exe = {app}\embedding（不放 _internal，升级会被整目录替换）
+from app.utils.runtime_paths import embedding_dir, runtime_base_dir
+
+BASE_DIR = runtime_base_dir()
+EMBEDDING_PATH = embedding_dir()
 
 _WEIGHT_PATTERNS = ("model.safetensors", "pytorch_model.bin")
 

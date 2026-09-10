@@ -46,6 +46,31 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
+[InstallDelete]
+; 升级前整目录清掉上一版的 PyInstaller 包体（_internal = python 运行时/依赖/前端 static/资源），
+; 否则被新版删掉的库文件、旧前端 chunk 会残留在安装目录里（Inno 默认只覆盖不删除）。
+; data\ / config.ini / embedding\ / logs\ 都在 {app} 根下、不在 _internal 内，不受影响
+; （1.1.0 及更早把模型放在 _internal\embedding，由下方 [Code] 在删除前先挪到 {app}\embedding）。
+Type: filesandordirs; Name: "{app}\_internal"
+
+[Code]
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  OldDir, NewDir: string;
+begin
+  if CurStep = ssInstall then
+  begin
+    { ssInstall 在 [InstallDelete] 之前触发：把旧版下载在 _internal\embedding 的 470MB 模型挪出来，避免升级后重新下载 }
+    OldDir := ExpandConstant('{app}\_internal\embedding');
+    NewDir := ExpandConstant('{app}\embedding');
+    if DirExists(OldDir) and (not DirExists(NewDir)) then
+    begin
+      if not RenameFile(OldDir, NewDir) then
+        Log('迁移 embedding 目录失败，模型将随 _internal 一起清理，首次启动需重新下载: ' + OldDir);
+    end;
+  end;
+end;
+
 [Files]
 Source: "{#MyDistDir}\\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
