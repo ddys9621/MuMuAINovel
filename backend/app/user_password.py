@@ -1,13 +1,11 @@
 """
 用户密码管理模块 - 使用数据库存储
 """
-import asyncio
 import hashlib
 from typing import Optional
 from datetime import datetime
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from app.config import settings
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 class UserPasswordManager:

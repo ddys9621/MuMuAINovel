@@ -1,12 +1,11 @@
 """
 用户管理模块 - 使用数据库存储
 """
-import asyncio
 import hashlib
 from datetime import datetime
 from typing import Optional, List
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from pydantic import BaseModel
 
 
@@ -216,85 +215,6 @@ class UserManager:
             users = result.scalars().all()
             
             return [User(**user.to_dict()) for user in users]
-    
-    async def set_admin(self, user_id: str, is_admin: bool) -> bool:
-        """
-        设置用户的管理员权限
-        
-        Args:
-            user_id: 用户 ID
-            is_admin: 是否为管理员
-            
-        Returns:
-            是否成功
-        """
-        from app.models.user import User as UserModel
-        
-        async with await self._get_session() as session:
-            result = await session.execute(
-                select(UserModel).where(UserModel.user_id == user_id)
-            )
-            user = result.scalar_one_or_none()
-            
-            if not user:
-                return False
-            
-            if not is_admin:
-                # 撤销管理员权限时，确保至少保留一个管理员
-                admin_result = await session.execute(
-                    select(UserModel).where(UserModel.is_admin == True)
-                )
-                admin_count = len(admin_result.scalars().all())
-                
-                if admin_count <= 1:
-                    return False
-            
-            user.is_admin = is_admin
-            await session.commit()
-            
-            return True
-    
-    async def delete_user(self, user_id: str) -> bool:
-        """
-        删除用户
-        
-        Args:
-            user_id: 用户 ID
-            
-        Returns:
-            是否成功
-        """
-        from app.models.user import User as UserModel
-        
-        async with await self._get_session() as session:
-            result = await session.execute(
-                select(UserModel).where(UserModel.user_id == user_id)
-            )
-            user = result.scalar_one_or_none()
-            
-            if not user:
-                return False
-            
-            # 不能删除管理员
-            if user.is_admin:
-                return False
-            
-            await session.delete(user)
-            await session.commit()
-            
-            return True
-    
-    async def is_admin(self, user_id: str) -> bool:
-        """检查用户是否为管理员"""
-        from app.models.user import User as UserModel
-        
-        async with await self._get_session() as session:
-            result = await session.execute(
-                select(UserModel).where(UserModel.user_id == user_id)
-            )
-            user = result.scalar_one_or_none()
-            
-            return user.is_admin if user else False
 
 
 # 全局用户管理器实例

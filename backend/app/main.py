@@ -223,7 +223,7 @@ async def db_session_stats():
 from app.api import (
     projects, characters, chapters,
     wizard_stream, relationships, organizations,
-    auth, users, settings, writing_styles, memories,
+    auth, settings, writing_styles, memories,
     mcp_plugins, mcp_marketplace, admin, inspiration,
     plot_cards, plot_lines, chapter_outlines, story_outlines,
     world_rules, scene_generation, book_dissect,
@@ -231,7 +231,6 @@ from app.api import (
 )
 
 app.include_router(auth.router, prefix="/api")
-app.include_router(users.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 

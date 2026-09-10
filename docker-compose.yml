@@ -42,11 +42,7 @@ services:
       DEFAULT_TEMPERATURE: ${DEFAULT_TEMPERATURE:-0.7}
       DEFAULT_MAX_TOKENS: ${DEFAULT_MAX_TOKENS:-2000}
 
-      LINUXDO_CLIENT_ID: ${LINUXDO_CLIENT_ID:-}
-      LINUXDO_CLIENT_SECRET: ${LINUXDO_CLIENT_SECRET:-}
-      LINUXDO_REDIRECT_URI: ${LINUXDO_REDIRECT_URI:-http://localhost:8000/api/auth/linuxdo/callback}
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8000}
-
+      # Linux.do / 邮箱登录不走环境变量，在管理台「用户管理 → 登录方式设置」里配置（存数据卷里的 SQLite）
       LOCAL_AUTH_ENABLED: ${LOCAL_AUTH_ENABLED:-true}
       LOCAL_AUTH_USERNAME: ${LOCAL_AUTH_USERNAME:-admin}
       LOCAL_AUTH_DISPLAY_NAME: ${LOCAL_AUTH_DISPLAY_NAME:-本地管理员}
