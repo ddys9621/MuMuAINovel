@@ -49,6 +49,8 @@ import type { SSEClientOptions, SSEMessage } from '@/utils/sseClient';
 import {
   BRIDGE_STATUS_LABEL,
   BRIDGE_TEMPLATE_UI,
+  LINE_MODE_LABEL,
+  isPrimaryTask,
   resolveTemplateKey,
   type BridgeGenerationMeta,
   type BridgeSlotPreview,
@@ -649,6 +651,35 @@ export default function PlotBridgesPage() {
                 );
               })}
             </ul>
+            {preview.line_budgets.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-content-secondary">
+                  支线预算：主推 = 作为该桥段主 B 线推进；保温 = 一句话带过。每个桥段只主推一条支线。
+                </p>
+                <ul className="hh-subpanel divide-y divide-surface-border/80 text-sm">
+                  {preview.line_budgets.map((lb) => {
+                    const short = lb.anchored && lb.primary_bridges < lb.primary_quota;
+                    return (
+                      <li key={lb.plot_line_id} className="flex items-center justify-between gap-3 px-4 py-2">
+                        <span className="min-w-0 truncate text-content">
+                          《{lb.line_title}》
+                          <span className="ml-1 text-xs text-content-tertiary">
+                            {lb.anchored && lb.mode
+                              ? `${LINE_MODE_LABEL[lb.mode]} · 主线节点 ${lb.anchor_start_beat}-${lb.anchor_end_beat}`
+                              : '未锚定 · 按进度均匀挂载'}
+                          </span>
+                        </span>
+                        <span className={cn('shrink-0 tabular-nums', short ? 'text-amber-600' : 'text-content-tertiary')}>
+                          {lb.anchored ? `预算 ${lb.estimated_chapters ?? '?'} 章 ≈ ${lb.primary_quota} 桥段 · ` : ''}
+                          主推 {lb.primary_bridges} · 保温 {lb.mention_bridges}
+                          {short ? ' · 主推不足' : ''}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
             <div className="flex justify-end gap-2">
               <Button onClick={() => setPreviewOpen(false)}>取消</Button>
               <Button type="primary" loading={planning} onClick={handlePlan} icon={<ThunderboltOutlined />}>
@@ -934,7 +965,9 @@ type GhostKey = Exclude<keyof PartialBridge, 'bridge_number'>;
 function BridgeCard({ bridge, partial = null, generating = false, onEdit, onExpand, onDelete }: BridgeCardProps) {
   const isCompleted = bridge.status === 'completed';
   const isDraft = bridge.status === 'draft';
-  const secondaryCount = bridge.secondary_beats?.length ?? 0;
+  const secondary = bridge.secondary_beats ?? [];
+  const primaryCount = secondary.filter(isPrimaryTask).length;
+  const mentionCount = secondary.length - primaryCount;
   // 填充时记录的题材模板决定卡片标签（装逼点 / 反转点 …，C1-C4 语义）
   const ui = BRIDGE_TEMPLATE_UI[resolveTemplateKey(bridge.template)];
   // 幽灵文本：真值为空时用打字机快照顶上
@@ -980,14 +1013,19 @@ function BridgeCard({ bridge, partial = null, generating = false, onEdit, onExpa
               </span>
             </Tooltip>
           )}
-          {secondaryCount > 0 && (
+          {secondary.length > 0 && (
             <Tooltip
-              title={bridge.secondary_beats
-                .map((t) => `${t.line_type === 'character' ? '角色线' : '支线'}《${t.line_title}》[节点 ${t.beat_index}] ${t.beat_title}`)
+              title={secondary
+                .map(
+                  (t) =>
+                    `${isPrimaryTask(t) ? '主B线' : '保温'} · ${t.line_type === 'character' ? '角色线' : '支线'}《${t.line_title}》[节点 ${t.beat_index}] ${t.beat_title}`,
+                )
                 .join('；')}
             >
               <span className="inline-flex items-center border border-surface-border px-2 py-0.5 text-[11px] text-content-secondary tabular-nums">
-                副线任务 {secondaryCount}
+                {primaryCount > 0 ? `主B线 ${primaryCount}` : ''}
+                {primaryCount > 0 && mentionCount > 0 ? ' · ' : ''}
+                {mentionCount > 0 ? `保温 ${mentionCount}` : ''}
               </span>
             </Tooltip>
           )}

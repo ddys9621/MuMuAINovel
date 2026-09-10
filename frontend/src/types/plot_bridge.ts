@@ -159,7 +159,7 @@ export const BRIDGE_STATUS_COLOR: Record<BridgeStatus, string> = {
   completed: 'success',
 };
 
-/** 副线任务：支线/角色线节点按进度比例挂到主线桥段（由后端 bridge_slot_planner 计算） */
+/** 副线任务：支线/角色线节点挂到主线桥段（由后端 bridge_slot_planner 计算） */
 export interface SecondaryBeatTask {
   plot_line_id: string;
   line_title: string;
@@ -169,7 +169,37 @@ export interface SecondaryBeatTask {
   beat_description: string;
   coverage_start: number;
   coverage_end: number;
+  /** primary = 本桥段主 B 线（须推进）；mention = 保温提及一句。旧数据缺省按 primary */
+  role?: 'primary' | 'mention';
+  /** offset = 与主线错峰；merge = 汇入主线节点兑现桥段 */
+  relation?: 'offset' | 'merge';
 }
+
+export type LineMode = 'companion' | 'inserted' | 'converge';
+
+export const LINE_MODE_LABEL: Record<LineMode, string> = {
+  companion: '伴生',
+  inserted: '插入',
+  converge: '汇流',
+};
+
+/** 一条副线在本次规划中的预算账（plan-preview.line_budgets） */
+export interface LineBudget {
+  plot_line_id: string;
+  line_title: string;
+  line_type: string;
+  anchored: boolean;
+  mode: LineMode | null;
+  anchor_start_beat: number | null;
+  anchor_end_beat: number | null;
+  estimated_chapters: number | null;
+  /** 锚定线：round(预算章数/4)；未锚定线：0（不限） */
+  primary_quota: number;
+  primary_bridges: number;
+  mention_bridges: number;
+}
+
+export const isPrimaryTask = (t: SecondaryBeatTask) => (t.role ?? 'primary') !== 'mention';
 
 export interface PlotBridge {
   id: string;
@@ -222,6 +252,8 @@ export interface BridgeSlotPreview {
     chapter_end: number;
     secondary: SecondaryBeatTask[];
   }>;
+  /** 每条副线的预算账 */
+  line_budgets: LineBudget[];
 }
 
 /** POST /projects/{id}/bridges/fill-stream 请求体 */

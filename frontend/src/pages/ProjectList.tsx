@@ -1494,7 +1494,7 @@ function WizardModal({
                         className="hh-field"
                       />
                       <p className="mt-1 text-xs text-content-tertiary">
-                        主线固定 1 条并覆盖全书 {form.chapter_count} 章；支线按进度比例挂到桥段。大纲完成后自动生成剧情线，再进入桥段规划。
+                        主线固定 1 条并覆盖全书 {form.chapter_count} 章；支线锚定主线节点、按篇幅预算挂到桥段（每桥段只主推一条）。大纲完成后自动生成剧情线，再进入桥段规划。
                       </p>
                     </div>
 
