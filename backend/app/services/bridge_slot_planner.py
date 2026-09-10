@@ -233,6 +233,43 @@ def _secondary_tasks(
     return tasks
 
 
+def _task(line: PlotLineData, beat: BeatData) -> SecondaryBeatTask:
+    return SecondaryBeatTask(
+        plot_line_id=line.id, line_title=line.title, line_type=line.line_type,
+        beat_index=beat.index, beat_title=beat.title, beat_description=beat.description,
+        coverage_start=0.0, coverage_end=1.0, role="primary", relation=beat.relation,
+    )
+
+
+def _anchored_tasks(line: PlotLineData, bridges_by_beat: dict[int, list[int]]) -> dict[int, list[SecondaryBeatTask]]:
+    """锚定支线落位：每个支线节点整体进一个桥段（coverage 0→1），锚定区间外的桥段休眠。
+
+    - merge：进所锚定主线节点的最后一个桥段（该节点的兑现桥段）
+    - offset：在该节点的桥段里均匀散开；节点有 ≥2 个桥段时避开最后一个（兑现桥段留给主线）
+    - anchor_beat 不是主线节点 index 时夹到最近的主线节点（容错，不抛错）
+    """
+    main_indices = sorted(bridges_by_beat)
+    grouped: dict[int, list[BeatData]] = {}
+    for b in line.beats:
+        anchor = b.anchor_beat if b.anchor_beat in bridges_by_beat else min(
+            main_indices, key=lambda m: (abs(m - b.anchor_beat), m)
+        )
+        grouped.setdefault(anchor, []).append(b)
+
+    out: dict[int, list[SecondaryBeatTask]] = {}
+    for anchor in sorted(grouped):
+        numbers = bridges_by_beat[anchor]
+        offsets = [b for b in grouped[anchor] if b.relation != "merge"]
+        candidates = numbers[:-1] if len(numbers) > 1 else numbers
+        for k, b in enumerate(offsets):
+            target = candidates[int((k + 0.5) * len(candidates) / len(offsets))]
+            out.setdefault(target, []).append(_task(line, b))
+        for b in grouped[anchor]:
+            if b.relation == "merge":
+                out.setdefault(numbers[-1], []).append(_task(line, b))
+    return out
+
+
 def compute_bridge_slots(lines: list[PlotLineData]) -> BridgeSlotPlan:
     main = select_main_line(lines)
     total = max(1, round(main.estimated_chapters / CHAPTERS_PER_BRIDGE))
@@ -240,25 +277,42 @@ def compute_bridge_slots(lines: list[PlotLineData]) -> BridgeSlotPlan:
     total = sum(quotas)
     secondaries = [l for l in lines if l.line_type != "main" and l.beats]
 
-    slots: list[BridgeSlot] = []
+    # 主线槽位骨架（先不挂副线）
+    skeleton: list[tuple[int, BeatData, int, int]] = []   # (bridge_number, beat, quota, j)
+    bridges_by_beat: dict[int, list[int]] = {}
     number = 0
     for beat, quota in zip(main.beats, quotas):
         for j in range(quota):
             number += 1
-            c_start, c_end = chapter_range(number)
-            slots.append(BridgeSlot(
-                bridge_number=number,
-                plot_line_id=main.id,
-                beat_index=beat.index,
-                beat_title=beat.title,
-                beat_description=beat.description,
-                beat_weight=beat.weight,
-                coverage_start=j / quota,
-                coverage_end=(j + 1) / quota,
-                chapter_start=c_start,
-                chapter_end=c_end,
-                secondary=tuple(_secondary_tasks(secondaries, (number - 1) / total, number / total)),
-            ))
+            skeleton.append((number, beat, quota, j))
+            bridges_by_beat.setdefault(beat.index, []).append(number)
+
+    # 副线落位：锚定线按节点落位；未锚定线沿用全书进度求交
+    tasks_by_bridge: dict[int, list[SecondaryBeatTask]] = {n: [] for n in range(1, total + 1)}
+    for line in secondaries:
+        if is_anchored(line):
+            for n, ts in _anchored_tasks(line, bridges_by_beat).items():
+                tasks_by_bridge[n].extend(ts)
+        else:
+            for n in range(1, total + 1):
+                tasks_by_bridge[n].extend(_secondary_tasks([line], (n - 1) / total, n / total))
+
+    slots = [
+        BridgeSlot(
+            bridge_number=n,
+            plot_line_id=main.id,
+            beat_index=beat.index,
+            beat_title=beat.title,
+            beat_description=beat.description,
+            beat_weight=beat.weight,
+            coverage_start=j / quota,
+            coverage_end=(j + 1) / quota,
+            chapter_start=chapter_range(n)[0],
+            chapter_end=chapter_range(n)[1],
+            secondary=tuple(tasks_by_bridge[n]),
+        )
+        for n, beat, quota, j in skeleton
+    ]
     return BridgeSlotPlan(
         main_line_id=main.id,
         total_bridges=total,
