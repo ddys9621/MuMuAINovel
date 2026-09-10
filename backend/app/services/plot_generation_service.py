@@ -10,6 +10,8 @@ from app.models.character import Character
 from app.models.relationship import Organization
 from app.services.plot_prompts import PlotPromptService
 from app.services.ai_service import AIService
+from app.services.bridge_slot_planner import VALID_MODES, primary_quota
+from app.services.sub_line_anchors import normalize_sub_line_anchors
 from app.services.world_rule_service import WorldRuleService
 from app.services.prompt_service import prompt_service as project_prompt_service
 from app.logger import get_logger
@@ -645,6 +647,49 @@ class PlotGenerationService:
         
         return historical_context, previous_line_summary
 
+    async def _load_main_timeline(self, db: AsyncSession, project_id: str) -> Optional[Dict[str, Any]]:
+        """主线时间轴（供支线 prompt）：节点 index/标题/权重/描述 + 槽位规划器算出的章区间 + 最大高潮节点。
+
+        无主线或主线无节点 → None（调用方回退到旧 prompt）。章区间算不出（主线缺 estimated_chapters）→ None 字段。
+        """
+        from app.services.bridge_slot_planner import (
+            BridgePlanningPreconditionError,
+            compute_bridge_slots,
+            parse_plot_line,
+        )
+        result = await db.execute(
+            select(PlotLine).where(PlotLine.project_id == project_id, PlotLine.line_type == "main")
+            .order_by(PlotLine.order_index)
+        )
+        main = next((m for m in (parse_plot_line(l) for l in result.scalars().all()) if m.beats), None)
+        if main is None:
+            return None
+        ranges: Dict[int, tuple] = {}
+        total_bridges: Optional[int] = None
+        try:
+            plan = compute_bridge_slots([main])
+            total_bridges = plan.total_bridges
+            for s in plan.slots:
+                lo, hi = ranges.get(s.beat_index, (s.chapter_start, s.chapter_end))
+                ranges[s.beat_index] = (min(lo, s.chapter_start), max(hi, s.chapter_end))
+        except BridgePlanningPreconditionError:
+            pass
+        return {
+            "id": main.id,
+            "title": main.title,
+            "estimated_chapters": main.estimated_chapters,
+            "total_bridges": total_bridges,
+            "climax_beat": max(main.beats, key=lambda b: b.weight).index,
+            "beats": [
+                {
+                    "index": b.index, "title": b.title, "weight": b.weight, "description": b.description,
+                    "chapter_start": ranges.get(b.index, (None, None))[0],
+                    "chapter_end": ranges.get(b.index, (None, None))[1],
+                }
+                for b in main.beats
+            ],
+        }
+
     async def _calculate_beats_coverage(
         self,
         db: AsyncSession,
@@ -722,6 +767,7 @@ class PlotGenerationService:
         provider: Optional[str] = None,
         model: Optional[str] = None,
         dissect_ref_block: str = "",
+        main_ctx: Optional[Dict[str, Any]] = None,
     ) -> Dict[int, List[Dict[str, Any]]]:
         """
         逐条生成剧情线的节点（beats）- 避免API超时
@@ -733,6 +779,8 @@ class PlotGenerationService:
             model: AI 模型
             dissect_ref_block: R6 拆书参考包 user_segment（由调用方一次性算好后透传，
                 避免每条 beat 重复查库）。空串=不注入。
+            main_ctx: 主线时间轴（_load_main_timeline）；非空且该线带锚点区间时走支线节点 prompt，
+                节点校验失败会就地清掉该线的 mode / anchor 字段（退化为均匀铺满）。
 
         Returns:
             index -> beats 的映射字典
@@ -753,11 +801,25 @@ class PlotGenerationService:
             logger.info(f"  📝 生成剧情线 {line_index} 的节点: {line_title}")
 
             try:
-                # 构建单条剧情线的 Prompt
-                prompt = self.prompt_service.generate_single_line_beats_prompt(
-                    project_data=project_data,
-                    line=line
+                # 构建单条剧情线的 Prompt（支线锚定：有主线时间轴且本线带锚点区间 → 支线节点 prompt）
+                anchored_request = (
+                    main_ctx is not None
+                    and line.get("mode") in VALID_MODES
+                    and line.get("anchor_start_beat") is not None
                 )
+                if anchored_request:
+                    quota = primary_quota(
+                        line.get("estimated_chapters"),
+                        main_ctx.get("total_bridges") or len(main_ctx["beats"]) * 4,
+                    )
+                    prompt = self.prompt_service.generate_sub_line_beats_prompt(
+                        project_data=project_data, line=line, main_ctx=main_ctx, quota=quota,
+                    )
+                else:
+                    prompt = self.prompt_service.generate_single_line_beats_prompt(
+                        project_data=project_data,
+                        line=line
+                    )
 
                 # R6：拼拆书参考包 user_segment（节点生成主要受益于 structure / synopsis 维度）
                 if dissect_ref_block:
@@ -804,6 +866,19 @@ class PlotGenerationService:
                 normalized_beats = self._validate_and_normalize_beats(
                     beats_data, line_index=line_index
                 )
+                if normalized_beats and anchored_request:
+                    ok = normalize_sub_line_anchors(
+                        normalized_beats,
+                        mode=line.get("mode"),
+                        anchor_start_beat=line.get("anchor_start_beat"),
+                        anchor_end_beat=line.get("anchor_end_beat"),
+                        main_beat_indices=[int(r["index"]) for r in main_ctx["beats"]],
+                    )
+                    if not ok:
+                        logger.warning(f"    ⚠️ 支线锚点校验失败，剥掉锚点退化为均匀铺满: {line_title}")
+                        line["mode"] = None
+                        line["anchor_start_beat"] = None
+                        line["anchor_end_beat"] = None
                 if normalized_beats:
                     index_to_beats[line_index] = normalized_beats
                     logger.info(f"    ✅ 成功生成 {len(normalized_beats)} 个节点")
@@ -895,6 +970,8 @@ class PlotGenerationService:
         pack_ids: Optional[List[str]] = None,
         dimensions: Optional[List[str]] = None,
         strength: Optional[str] = None,
+        # 支线篇幅预算上限（章）：向导按全书 40% 均分下发；None = 不夹紧
+        sub_budget_cap: Optional[int] = None,
     ) -> List[PlotLine]:
         """生成剧情线"""
         
@@ -985,6 +1062,24 @@ class PlotGenerationService:
         historical_context, previous_line_summary = await self._prepare_plot_line_context(
             db, project_id, based_on_lines
         )
+
+        # 支线锚定：项目已有带节点的主线时 → 支线在主线时间轴上生成（不再"承接"主线）
+        main_ctx: Optional[Dict[str, Any]] = None
+        existing_subs: List[Dict[str, Any]] = []
+        if line_type != "main":
+            main_ctx = await self._load_main_timeline(db, project_id)
+            if main_ctx is not None:
+                from app.services.bridge_slot_planner import parse_plot_line
+                subs_result = await db.execute(
+                    select(PlotLine).where(PlotLine.project_id == project_id, PlotLine.line_type != "main")
+                    .order_by(PlotLine.order_index)
+                )
+                for s in subs_result.scalars().all():
+                    sd = parse_plot_line(s)
+                    existing_subs.append({
+                        "title": sd.title, "description": s.description or "", "mode": sd.mode,
+                        "anchor_start_beat": sd.anchor_start_beat, "anchor_end_beat": sd.anchor_end_beat,
+                    })
         
         logger.info(f"📋 [剧情线生成] 开始两阶段生成流程")
         logger.info(f"  - 项目ID: {project_id}")
@@ -1045,18 +1140,31 @@ class PlotGenerationService:
             for i in range(count):
                 logger.info(f"📝 [阶段 1] 生成第 {i+1}/{count} 条结构")
 
-                # 生成当前条的 Prompt（只要求结构）
-                current_prompt = self.prompt_service.generate_plot_line_prompt(
-                    project_data=project_data,
-                    outline_content=outline_content,
-                    plot_cards=plot_cards,
-                    line_type=line_type,
-                    custom_prompt=custom_prompt,
-                    count=1,  # 每次只生成一条
-                    historical_context=historical_context,
-                    previous_line_summary=current_previous_line,
-                    sequence_index=i + 1
-                )
+                # 生成当前条的 Prompt（只要求结构）；支线锚定路径用主线时间轴代替"承接上一条"
+                if main_ctx is not None:
+                    current_prompt = self.prompt_service.generate_sub_line_prompt(
+                        project_data=project_data,
+                        outline_content=outline_content,
+                        main_ctx=main_ctx,
+                        existing_subs=existing_subs,
+                        line_type=line_type,
+                        custom_prompt=custom_prompt,
+                        sequence_index=i + 1,
+                        total=count,
+                        budget_cap=sub_budget_cap,
+                    )
+                else:
+                    current_prompt = self.prompt_service.generate_plot_line_prompt(
+                        project_data=project_data,
+                        outline_content=outline_content,
+                        plot_cards=plot_cards,
+                        line_type=line_type,
+                        custom_prompt=custom_prompt,
+                        count=1,  # 每次只生成一条
+                        historical_context=historical_context,
+                        previous_line_summary=current_previous_line,
+                        sequence_index=i + 1
+                    )
 
                 # MCP 增强处理
                 final_prompt = current_prompt
@@ -1140,6 +1248,10 @@ class PlotGenerationService:
                         "请重试或调整提示词，让 AI 明确给出本剧情线的预计章节数。"
                     )
 
+                # 支线篇幅预算夹紧（只在锚定路径下生效；主线不受影响）
+                if main_ctx is not None and sub_budget_cap:
+                    normalized_estimated = min(normalized_estimated, sub_budget_cap)
+
                 # 保存到阶段 1 结果列表
                 generated_lines_data.append({
                     "index": i + 1,
@@ -1151,9 +1263,20 @@ class PlotGenerationService:
                     ),
                     "plot_cards": line_data.get("plot_cards", []),
                     "estimated_chapters": normalized_estimated,
+                    "mode": line_data.get("mode") if main_ctx is not None else None,
+                    "anchor_start_beat": line_data.get("anchor_start_beat") if main_ctx is not None else None,
+                    "anchor_end_beat": line_data.get("anchor_end_beat") if main_ctx is not None else None,
                 })
 
                 logger.info(f"  - 第 {i+1} 条结构已生成: {line_data.get('title')}")
+
+                # 锚定路径：本条进入"已有支线"，后续支线避免重复
+                if main_ctx is not None:
+                    existing_subs.append({
+                        "title": line_data.get("title", ""), "description": line_data.get("description", ""),
+                        "mode": line_data.get("mode"), "anchor_start_beat": line_data.get("anchor_start_beat"),
+                        "anchor_end_beat": line_data.get("anchor_end_beat"),
+                    })
 
                 # 更新下一条的参考剧情线（用于承接）
                 current_previous_line = {
@@ -1181,6 +1304,7 @@ class PlotGenerationService:
                 provider=provider,
                 model=model,
                 dissect_ref_block=dissect_ref_block,
+                main_ctx=main_ctx,
             )
 
             stage2_time = time.time() - stage2_start_time
@@ -1219,8 +1343,18 @@ class PlotGenerationService:
                     for beat in beats:
                         beat["weight"] = beat["weight"] / total_weight
 
-                # 构建 timeline_data（简化版：只包含 beats）
-                timeline_data = {"beats": beats}
+                # 构建 timeline_data：beats + （锚定成功时）mode / anchor 区间
+                timeline_data: Dict[str, Any] = {"beats": beats}
+                if (
+                    line_data.get("mode")
+                    and line_data.get("anchor_start_beat") is not None
+                    and all(b.get("anchor_beat") is not None for b in beats)
+                ):
+                    timeline_data.update(
+                        mode=line_data["mode"],
+                        anchor_start_beat=line_data["anchor_start_beat"],
+                        anchor_end_beat=line_data["anchor_end_beat"],
+                    )
                 timeline_data_json = json.dumps(timeline_data, ensure_ascii=False)
 
                 # 处理 plot_cards
