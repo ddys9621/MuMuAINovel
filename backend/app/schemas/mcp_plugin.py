@@ -86,13 +86,6 @@ class MCPPluginResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class MCPToolCall(BaseModel):
-    """工具调用请求"""
-    plugin_id: str = Field(..., description="插件ID")
-    tool_name: str = Field(..., description="工具名称")
-    arguments: Dict[str, Any] = Field(default_factory=dict, description="工具参数")
-
-
 class MCPMarketplaceInputResponse(BaseModel):
     """商城条目安装时需要用户填写的一项"""
     key: str

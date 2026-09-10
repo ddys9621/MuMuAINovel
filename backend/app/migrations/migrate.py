@@ -9,7 +9,6 @@
 
 import asyncio
 import sys
-from pathlib import Path
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.database import get_engine

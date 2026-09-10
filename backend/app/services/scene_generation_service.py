@@ -401,7 +401,3 @@ class SceneGenerationService:
 
 
 # 创建服务实例的工厂函数
-def create_scene_generation_service(ai_service: AIService) -> SceneGenerationService:
-    """创建场景生成服务实例"""
-    return SceneGenerationService(ai_service)
-

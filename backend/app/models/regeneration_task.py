@@ -1,5 +1,5 @@
 """章节重新生成任务模型"""
-from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, JSON, Boolean
+from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, JSON
 from sqlalchemy.sql import func
 from app.db_base import Base
 import uuid

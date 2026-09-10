@@ -154,13 +154,6 @@ class _ResolvedPack:
     bridges: Optional[Dict[str, Any]] = None
     character_archive: Optional[Dict[str, Any]] = None
 
-    @property
-    def has_corpus(self) -> bool:
-        # corpus 维度来自 V2 抽数表，未挂载到 generated_dimensions 上；
-        # 实际是否有数据由 _format_corpus 检索时判定
-        return True
-
-
 @dataclass
 class ReferenceBlock:
     """一次组装的可注入参考资料块。

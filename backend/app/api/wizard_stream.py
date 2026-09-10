@@ -15,7 +15,7 @@ from app.models.chapter import Chapter
 from app.models.chapter_outline import ChapterOutline
 from app.models.plot_card import PlotCard
 from app.models.plot_line import PlotLine
-from app.models.relationship import CharacterRelationship, Organization, OrganizationMember, RelationshipType
+from app.models.relationship import CharacterRelationship, Organization, OrganizationMember
 from app.services.relationship_matcher import match_relationship_type
 from app.models.world_rule import WorldRule
 from app.models.writing_style import WritingStyle
@@ -23,9 +23,7 @@ from app.models.project_default_style import ProjectDefaultStyle
 from app.models.reference_pack import ReferencePack
 from app.models.project_reference_pack import ProjectReferencePack
 from app.services.ai_service import AIService
-from app.services.mcp_tool_service import MCPToolService
 from app.services.prompt_service import prompt_service
-from app.services.world_rule_service import WorldRuleService
 from app.logger import get_logger
 from app.utils.role_type import normalize_role_type, is_protagonist_role
 from app.utils.sse_response import SSEResponse, create_sse_response

@@ -3,8 +3,7 @@ import asyncio
 import time
 from typing import Dict, Optional, Any, List
 from dataclasses import dataclass
-from datetime import datetime
-from app.mcp.http_client import HTTPMCPClient, MCPError
+from app.mcp.http_client import HTTPMCPClient
 from app.mcp.config import mcp_config
 from app.mcp.server_config import TRANSPORT_STREAMABLE_HTTP
 from app.models.mcp_plugin import MCPPlugin
@@ -170,19 +169,7 @@ class MCPPluginRegistry:
             if user_id not in self._user_locks:
                 self._user_locks[user_id] = asyncio.Lock()
             return self._user_locks[user_id]
-    
-    def _touch_session(self, plugin_id: str):
-        """
-        更新会话的最后访问时间（需要在锁内调用）
-        
-        Args:
-            plugin_id: 插件ID
-        """
-        if plugin_id in self._sessions:
-            session = self._sessions[plugin_id]
-            session.last_access = time.time()
-            session.request_count += 1
-    
+
     async def _evict_lru_session(self):
         """驱逐最久未使用的会话（当达到max_clients限制时）"""
         if len(self._sessions) >= self._max_clients:
@@ -334,50 +321,7 @@ class MCPPluginRegistry:
             session.request_count += 1
             return session.client
         return None
-    
-    async def get_or_reconnect_client(
-        self,
-        user_id: str,
-        plugin_name: str,
-        plugin: MCPPlugin
-    ) -> HTTPMCPClient:
-        """
-        获取或重连客户端（自动处理错误状态）
-        
-        Args:
-            user_id: 用户ID
-            plugin_name: 插件名称
-            plugin: 插件配置对象
-            
-        Returns:
-            客户端实例
-            
-        Raises:
-            ValueError: 插件加载失败
-        """
-        plugin_id = f"{user_id}:{plugin_name}"
-        
-        # 获取用户锁
-        user_lock = await self._get_user_lock(user_id)
-        async with user_lock:
-            session = self._sessions.get(plugin_id)
-            
-            # 检查会话健康状态
-            if session and session.status == "error":
-                logger.warning(f"会话 {plugin_id} 处于错误状态，尝试重连")
-                async with self._sessions_lock:
-                    await self._unload_plugin_unsafe(plugin_id)
-                session = None
-            
-            # 如果没有会话，加载插件
-            if not session:
-                success = await self.load_plugin(plugin)
-                if not success:
-                    raise ValueError(f"插件加载失败: {plugin_name}")
-                session = self._sessions[plugin_id]
-            
-            return session.client
-    
+
     async def call_tool(
         self,
         user_id: str,

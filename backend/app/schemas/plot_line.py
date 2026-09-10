@@ -1,5 +1,5 @@
 """剧情线相关的 Pydantic 模型"""
-from pydantic import BaseModel, Field, validator, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
@@ -82,34 +82,3 @@ class PlotLineListResponse(BaseModel):
 # ============================================
 # 时间线相关模型
 # ============================================
-
-class TimelineBeat(BaseModel):
-    """时间线节点模型"""
-    index: int = Field(..., ge=1, description="节点索引，从1开始")
-    key: str = Field(..., max_length=50, description="节点唯一标识")
-    title: str = Field(..., max_length=200, description="节点标题")
-    description: Optional[str] = Field(None, description="节点描述")
-    weight: float = Field(..., ge=0, le=1, description="节点权重，范围0-1")
-
-
-class TimelineDataUpdate(BaseModel):
-    """时间线数据更新模型（简化版：只包含 beats）"""
-    beats: List[TimelineBeat] = Field(..., min_length=1, description="时间线节点列表，至少包含1个")
-
-    @validator('beats')
-    def validate_beats(cls, beats):
-        """校验beats的权重总和和index唯一性"""
-        # 权重总和校验（允许浮点误差）
-        total_weight = sum(beat.weight for beat in beats)
-        if not (0.99 <= total_weight <= 1.01):
-            raise ValueError(
-                f"beats 权重总和必须为 1.0，当前为 {total_weight:.4f}。"
-                f"请调整各节点权重，确保总和为 1.0"
-            )
-
-        # index 唯一性校验
-        indices = [beat.index for beat in beats]
-        if len(indices) != len(set(indices)):
-            raise ValueError("beats 的 index 必须唯一")
-
-        return beats

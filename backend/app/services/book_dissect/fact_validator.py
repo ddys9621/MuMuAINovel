@@ -21,7 +21,6 @@ from app.services.book_dissect.v2_types import (
     CharacterFact,
     DictionaryEntry,
     LocationFact,
-    RelationFact,
 )
 
 

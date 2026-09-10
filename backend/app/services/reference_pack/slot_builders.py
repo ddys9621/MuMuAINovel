@@ -15,7 +15,6 @@ Phase 1 骨架版本：
 """
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any, Awaitable, Callable
 

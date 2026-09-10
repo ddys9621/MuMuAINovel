@@ -3,7 +3,6 @@
 提供中英文混合文本的字数统计等功能
 """
 import re
-from typing import Tuple
 
 
 def count_words(text: str) -> int:
@@ -54,70 +53,3 @@ def count_words(text: str) -> int:
     count += len(numbers)
     
     return count
-
-
-def count_words_detailed(text: str) -> Tuple[int, int, int, int]:
-    """
-    详细统计文本字数
-    
-    Args:
-        text: 要统计的文本
-        
-    Returns:
-        (总字数, 中文字数, 英文单词数, 数字序列数)
-    """
-    if not text:
-        return (0, 0, 0, 0)
-    
-    # 统计中文字符
-    chinese_chars = re.findall(r'[\u4e00-\u9fff]', text)
-    chinese_count = len(chinese_chars)
-    
-    # 移除中文字符
-    text_without_chinese = re.sub(r'[\u4e00-\u9fff]', ' ', text)
-    
-    # 统计英文单词
-    english_words = re.findall(r'[a-zA-Z]+', text_without_chinese)
-    english_count = len(english_words)
-    
-    # 统计数字序列
-    numbers = re.findall(r'\d+', text_without_chinese)
-    number_count = len(numbers)
-    
-    total = chinese_count + english_count + number_count
-    
-    return (total, chinese_count, english_count, number_count)
-
-
-def count_characters(text: str) -> int:
-    """
-    统计字符数（不含空白字符）
-    
-    Args:
-        text: 要统计的文本
-        
-    Returns:
-        字符数（不含空白）
-    """
-    if not text:
-        return 0
-    
-    # 移除所有空白字符后计算长度
-    return len(re.sub(r'\s', '', text))
-
-
-def count_characters_with_spaces(text: str) -> int:
-    """
-    统计字符数（含空白字符）
-    
-    Args:
-        text: 要统计的文本
-        
-    Returns:
-        字符数（含空白）
-    """
-    if not text:
-        return 0
-    
-    return len(text)
-

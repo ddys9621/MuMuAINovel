@@ -26,7 +26,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.settings import get_user_ai_service
 from app.database import get_db, get_engine
-from app.models.plot_bridge import PlotBridge
 from app.models.project import Project
 from app.services.ai_service import AIService
 from app.utils.sse_response import SSEResponse, create_sse_response

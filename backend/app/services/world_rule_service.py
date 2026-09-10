@@ -14,7 +14,7 @@ if 'SENTENCE_TRANSFORMERS_HOME' not in os.environ:
 os.environ['TRANSFORMERS_OFFLINE'] = '1'
 os.environ['HF_HUB_OFFLINE'] = '1'
 
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func
 import chromadb
@@ -127,51 +127,7 @@ class WorldRuleService:
             .order_by(WorldRule.order_index.asc(), WorldRule.created_at.asc())
         )
         return result.scalars().all()
-    
-    @staticmethod
-    async def generate_world_background_text(
-        db: AsyncSession,
-        project_id: str
-    ) -> str:
-        """
-        生成项目的世界观背景文本（用于 prompt 顶部）
-        
-        Args:
-            db: 数据库会话
-            project_id: 项目ID
-            
-        Returns:
-            格式化的世界观背景文本
-        """
-        # 获取项目的世界设定字段
-        result = await db.execute(
-            select(Project).where(Project.id == project_id)
-        )
-        project = result.scalar_one_or_none()
-        
-        if not project:
-            return ""
-        
-        parts = []
-        
-        # 添加世界观总纲
-        if project.world_time_period:
-            parts.append(f"**时间背景：** {project.world_time_period}")
-        
-        if project.world_location:
-            parts.append(f"**地理位置：** {project.world_location}")
-        
-        if project.world_atmosphere:
-            parts.append(f"**氛围基调：** {project.world_atmosphere}")
-        
-        if project.world_rules:
-            parts.append(f"**世界规则：**\n{project.world_rules}")
-        
-        if not parts:
-            return ""
-        
-        return "## 世界观设定\n\n" + "\n\n".join(parts)
-    
+
     @staticmethod
     async def generate_rules_summary_text(
         db: AsyncSession,
@@ -246,38 +202,6 @@ class WorldRuleService:
         if rule.details:
             text += f"\n详细设定：{rule.details}"
         return text
-
-    @staticmethod
-    async def generate_full_world_context(
-        db: AsyncSession,
-        project_id: str
-    ) -> str:
-        """
-        生成完整的世界观上下文（世界设定 + 世界规则明细）
-
-        Args:
-            db: 数据库会话
-            project_id: 项目ID
-
-        Returns:
-            完整的世界观上下文文本，用于注入 prompt
-        """
-        parts = []
-
-        # 1. 世界观总纲（来自 Project 字段）
-        background = await WorldRuleService.generate_world_background_text(db, project_id)
-        if background:
-            parts.append(background)
-
-        # 2. 世界规则明细（来自 WorldRule 表）
-        rules_summary = await WorldRuleService.generate_rules_summary_text(db, project_id)
-        if rules_summary:
-            parts.append(rules_summary)
-
-        if not parts:
-            return ""
-
-        return "\n\n".join(parts)
 
     async def upsert_rule_to_vector_db(
         self,

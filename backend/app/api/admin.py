@@ -50,20 +50,6 @@ class ResetPasswordRequest(BaseModel):
     new_password: Optional[str] = Field(None, min_length=6, description="新密码，留空则重置为默认密码")
 
 
-class UserResponse(BaseModel):
-    """用户响应"""
-    user_id: str
-    username: str
-    display_name: str
-    avatar_url: Optional[str]
-    trust_level: int
-    is_admin: bool
-    is_active: bool
-    linuxdo_id: str
-    created_at: str
-    last_login: Optional[str]
-
-
 class CreateUserResponse(BaseModel):
     """创建用户响应"""
     success: bool

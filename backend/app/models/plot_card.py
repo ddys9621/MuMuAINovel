@@ -66,18 +66,8 @@ class PlotCard(Base):
     def __repr__(self):
         return f"<PlotCard(id={self.id}, title={self.title}, type={self.card_type})>"
 
-    def reset_generation(self):
-        """重置场景生成状态"""
-        self.generation_status = "pending"
-        self.generated_content = None
-        self.word_count_actual = 0
-
     def mark_completed(self, content: str, word_count: int):
         """标记场景生成完成"""
         self.generation_status = "completed"
         self.generated_content = content
         self.word_count_actual = word_count
-
-    def mark_rejected(self):
-        """标记场景被拒绝（需要重新生成）"""
-        self.generation_status = "rejected"

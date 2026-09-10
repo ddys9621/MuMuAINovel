@@ -1,7 +1,7 @@
 """
 认证中间件 - 从 Cookie 中提取用户信息并注入到 request.state
 """
-from fastapi import Request, HTTPException
+from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from app.user_manager import user_manager
 from app.logger import get_logger

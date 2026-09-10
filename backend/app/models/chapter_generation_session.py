@@ -1,5 +1,5 @@
 """章节生成会话模型 - 用于场景级创作循环"""
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, JSON
+from sqlalchemy import Column, String, DateTime, ForeignKey, JSON
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.db_base import Base

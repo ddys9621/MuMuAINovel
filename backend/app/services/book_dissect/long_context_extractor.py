@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from app.services.book_dissect.chapter_fact_extractor import (
     _get_str,

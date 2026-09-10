@@ -7,8 +7,7 @@ import asyncio
 import json
 import time
 from datetime import datetime, timedelta
-from dataclasses import dataclass, field
-from collections import defaultdict
+from dataclasses import dataclass
 
 from app.models.mcp_plugin import MCPPlugin
 from app.mcp.registry import mcp_registry
@@ -16,40 +15,6 @@ from app.mcp.config import mcp_config
 from app.logger import get_logger
 
 logger = get_logger(__name__)
-
-
-@dataclass
-class ToolMetrics:
-    """工具调用指标"""
-    total_calls: int = 0
-    success_calls: int = 0
-    failed_calls: int = 0
-    total_duration_ms: float = 0.0
-    avg_duration_ms: float = 0.0
-    last_call_time: Optional[datetime] = None
-    
-    def update_success(self, duration_ms: float):
-        """更新成功调用指标"""
-        self.total_calls += 1
-        self.success_calls += 1
-        self.total_duration_ms += duration_ms
-        self.avg_duration_ms = self.total_duration_ms / self.total_calls
-        self.last_call_time = datetime.now()
-    
-    def update_failure(self, duration_ms: float):
-        """更新失败调用指标"""
-        self.total_calls += 1
-        self.failed_calls += 1
-        self.total_duration_ms += duration_ms
-        self.avg_duration_ms = self.total_duration_ms / self.total_calls
-        self.last_call_time = datetime.now()
-    
-    @property
-    def success_rate(self) -> float:
-        """成功率"""
-        if self.total_calls == 0:
-            return 0.0
-        return self.success_calls / self.total_calls
 
 
 @dataclass
@@ -85,9 +50,6 @@ class MCPToolService:
         self._cache_ttl = timedelta(
             minutes=cache_ttl_minutes or mcp_config.TOOL_CACHE_TTL_MINUTES
         )
-
-        # 调用指标: {tool_key: ToolMetrics}
-        self._metrics: Dict[str, ToolMetrics] = defaultdict(ToolMetrics)
 
         # 重试配置（使用配置常量）
         self._max_retries = max_retries or mcp_config.MAX_RETRIES
@@ -456,10 +418,7 @@ class MCPToolService:
                     timeout=timeout
                 )
                 
-                # 记录成功指标
                 duration_ms = (time.time() - start_time) * 1000
-                self._metrics[tool_key].update_success(duration_ms)
-                
                 logger.info(
                     f"✅ 工具调用成功: {tool_key} "
                     f"(耗时: {duration_ms:.2f}ms)"
@@ -476,19 +435,11 @@ class MCPToolService:
                 }
                 
             except asyncio.TimeoutError:
-                # 记录失败指标
-                duration_ms = (time.time() - start_time) * 1000
-                self._metrics[tool_key].update_failure(duration_ms)
                 raise MCPToolServiceError(
                     f"工具调用超时（>{timeout}秒）"
                 )
         
         except Exception as e:
-            # 记录失败指标，使用已初始化的变量
-            tool_key = f"{plugin_name}.{tool_name}" if plugin_name and tool_name else function_name
-            duration_ms = (time.time() - start_time) * 1000
-            self._metrics[tool_key].update_failure(duration_ms)
-
             logger.error(
                 f"❌ 工具 {function_name} 调用失败: {e}",
                 exc_info=True
@@ -664,65 +615,7 @@ class MCPToolService:
 
         # 理论上不会到这里，但为了类型安全
         raise MCPToolServiceError(f"工具调用失败: {last_exception}")
-    
-    def get_metrics(self, tool_name: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
-        """
-        获取工具调用指标
-        
-        Args:
-            tool_name: 工具名称（可选，获取特定工具的指标）
-            
-        Returns:
-            指标字典
-        """
-        if tool_name:
-            if tool_name in self._metrics:
-                metric = self._metrics[tool_name]
-                return {
-                    tool_name: {
-                        "total_calls": metric.total_calls,
-                        "success_calls": metric.success_calls,
-                        "failed_calls": metric.failed_calls,
-                        "success_rate": metric.success_rate,
-                        "avg_duration_ms": round(metric.avg_duration_ms, 2),
-                        "last_call_time": metric.last_call_time.isoformat() if metric.last_call_time else None
-                    }
-                }
-            return {}
-        
-        # 返回所有工具的指标
-        result = {}
-        for tool_key, metric in self._metrics.items():
-            result[tool_key] = {
-                "total_calls": metric.total_calls,
-                "success_calls": metric.success_calls,
-                "failed_calls": metric.failed_calls,
-                "success_rate": round(metric.success_rate, 3),
-                "avg_duration_ms": round(metric.avg_duration_ms, 2),
-                "last_call_time": metric.last_call_time.isoformat() if metric.last_call_time else None
-            }
-        return result
-    
-    def get_cache_stats(self) -> Dict[str, Any]:
-        """获取缓存统计信息"""
-        total_entries = len(self._tool_cache)
-        total_hits = sum(entry.hit_count for entry in self._tool_cache.values())
-        
-        return {
-            "total_entries": total_entries,
-            "total_hits": total_hits,
-            "cache_ttl_minutes": self._cache_ttl.total_seconds() / 60,
-            "entries": [
-                {
-                    "key": key,
-                    "tools_count": len(entry.tools),
-                    "hit_count": entry.hit_count,
-                    "expire_time": entry.expire_time.isoformat()
-                }
-                for key, entry in self._tool_cache.items()
-            ]
-        }
-    
+
     async def build_tool_context(
         self,
         tool_results: List[Dict[str, Any]],

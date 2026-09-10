@@ -1,10 +1,10 @@
 """章节重新生成服务"""
-from typing import Dict, Any, AsyncGenerator, Optional, List
+from typing import Dict, Any, AsyncGenerator, Optional
 from app.services.ai_service import AIService
 from app.services.prompt_service import prompt_service
 from app.models.chapter import Chapter
 from app.models.memory import PlotAnalysis
-from app.schemas.regeneration import ChapterRegenerateRequest, PreserveElementsConfig
+from app.schemas.regeneration import ChapterRegenerateRequest
 from app.logger import get_logger
 import difflib
 
@@ -326,10 +326,3 @@ class ChapterRegenerator:
 
 # 全局实例
 _regenerator_instance = None
-
-def get_chapter_regenerator(ai_service: AIService) -> ChapterRegenerator:
-    """获取章节重新生成器实例"""
-    global _regenerator_instance
-    if _regenerator_instance is None:
-        _regenerator_instance = ChapterRegenerator(ai_service)
-    return _regenerator_instance

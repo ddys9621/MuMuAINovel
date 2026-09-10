@@ -4,17 +4,6 @@ from typing import Optional, List
 from datetime import datetime
 
 
-class ChapterBase(BaseModel):
-    """章节基础模型"""
-    title: str = Field(..., description="章节标题")
-    chapter_number: int = Field(..., description="章节序号")
-    chapter_outline_id: Optional[str] = Field(None, description="关联的章纲ID")
-    content: Optional[str] = Field(None, description="章节内容")
-    summary: Optional[str] = Field(None, description="章节摘要")
-    word_count: Optional[int] = Field(0, description="字数")
-    status: Optional[str] = Field("draft", description="章节状态")
-
-
 class ChapterCreate(BaseModel):
     """创建章节的请求模型"""
     project_id: str = Field(..., description="所属项目ID")

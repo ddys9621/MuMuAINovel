@@ -171,66 +171,6 @@ class PlotPromptTemplates:
 """
 
     @staticmethod
-    def get_story_outline_prompt(
-        project_data: Dict[str, Any],
-        requirements: Optional[str] = None
-    ) -> str:
-        """生成故事大纲的 Prompt"""
-        
-        base_prompt = f"""
-# 故事大纲生成任务
-
-## 项目信息
-- **项目标题**: {project_data.get('title', '未命名项目')}
-- **小说类型**: {project_data.get('genre', '通用')}
-- **主题**: {project_data.get('theme', '待定')}
-- **目标字数**: {project_data.get('target_words', 100000)}字
-- **叙事视角**: {project_data.get('narrative_perspective', '第三人称')}
-
-## 世界构建
-- **时间背景**: {project_data.get('world_time_period', '现代')}
-- **地理位置**: {project_data.get('world_location', '待定')}
-- **氛围基调**: {project_data.get('world_atmosphere', '待定')}
-- **世界规则**: {project_data.get('world_rules', '待定')}
-
-## 生成要求
-请生成一个**高层次的故事大纲**，包含以下内容：
-
-### 1. 故事核心
-- 核心冲突和主要矛盾
-- 故事的核心主题和价值观
-- 主角的核心目标和动机
-
-### 2. 故事结构
-- 开端：故事背景和起始事件
-- 发展：主要情节发展脉络
-- 高潮：核心冲突的爆发点
-- 结局：冲突解决和故事收尾
-
-### 3. 主要角色框架
-- 主角基本设定和成长弧线
-- 重要配角的作用和关系
-- 反派角色的动机和威胁
-
-### 4. 情节主线
-- 3-5个主要情节节点
-- 每个节点的核心事件和转折
-- 情节之间的逻辑关系
-
-## 注意事项
-- **只生成高层次大纲**，不要详细展开具体情节
-- 保持故事逻辑的完整性和连贯性
-- 确保符合指定的小说类型和主题
-- 为后续的剧情卡片和章纲留出发展空间
-- **所有文字内容必须使用简体中文撰写**，不得出现英文描述
-"""
-        
-        if requirements:
-            base_prompt += f"\n## 特殊要求\n{requirements}\n"
-        
-        return base_prompt.strip()
-    
-    @staticmethod
     def get_plot_card_prompt(
         project_data: Dict[str, Any],
         outline_content: Optional[str] = None,
@@ -558,149 +498,6 @@ class PlotPromptTemplates:
         return base_prompt.strip()
 
     @classmethod
-    def get_plot_line_beats_prompt(
-        cls,
-        project_data: Dict[str, Any],
-        lines: List[Dict[str, Any]]
-    ) -> str:
-        """
-        生成剧情线节点规划的 Prompt（网文风格优化版）
-        """
-        genre = project_data.get('genre', '通用')
-
-        # 获取类型对应的节点类型
-        genre_structure = None
-        for key in cls.GENRE_PLOT_STRUCTURES:
-            if key in genre or genre in key:
-                genre_structure = cls.GENRE_PLOT_STRUCTURES[key]
-                break
-
-        base_prompt = f"""
-# 剧情线节点规划任务
-
-## 项目背景
-| 项目 | 内容 |
-|------|------|
-| 书名 | {project_data.get('title', '未命名项目')} |
-| 类型 | {genre} |
-| 主题 | {project_data.get('theme', '待定')} |
-| 视角 | {project_data.get('narrative_perspective', '第三人称')} |
-"""
-
-        # 添加角色信息（简化版）
-        characters = project_data.get('characters', [])
-        if characters:
-            base_prompt += "\n## 主要角色\n"
-            for char in characters[:5]:
-                base_prompt += f"- **{char.get('name', '未知')}**: {char.get('role_type', '角色')}\n"
-
-        # 添加待规划的剧情线信息
-        base_prompt += "\n## 待规划节点的剧情线\n"
-        for line in lines:
-            base_prompt += f"""
-### 剧情线 {line.get('index')}
-- **标题**: {line.get('title', '未命名')}
-- **类型**: {line.get('line_type', 'main')}
-- **描述**: {line.get('description', '暂无描述')}
-"""
-
-        # 添加类型化节点引导
-        if genre_structure:
-            beat_types_text = "\n".join([f"   - **{k}**: {v}" for k, v in genre_structure['beat_types'].items()])
-            base_prompt += f"""
-
-## 【{genre}】节点类型参考
-根据{genre_structure['name']}的特点，推荐使用以下节点类型：
-
-{beat_types_text}
-
-### 节奏循环参考
-{' → '.join(genre_structure['beat_cycle'])}
-
-{genre_structure['rhythm_guide']}
-"""
-        else:
-            # 通用节点类型
-            base_prompt += """
-
-## 通用节点类型参考
-- **opening**: 开端 - 故事的起点，建立初始状态
-- **trigger**: 触发事件 - 打破日常的事件
-- **escalation**: 冲突升级 - 矛盾加剧
-- **twist**: 反转 - 出乎意料的发展
-- **climax**: 高潮 - 最激烈的对抗
-- **resolution**: 收尾 - 阶段性结局
-- **cliff_hanger**: 悬念钩子 - 为下一阶段埋伏笔
-"""
-
-        base_prompt += """
-## 节点设计要求
-
-### 核心原则
-1. **节点数量**: 5-10个节点，根据剧情复杂度调整
-2. **爽点分布**: 确保每2-3个节点有一个小爽点，每条剧情线有1-2个大爽点
-3. **钩子设计**: 每个节点结尾都要有悬念，吸引继续阅读
-
-### 权重分配
-- 所有节点权重之和应接近 1.0
-- 高潮/打脸节点权重较高（0.15-0.25）
-- 过渡/铺垫节点权重较低（0.08-0.12）
-
-### 节点描述要求（200-500字）
-每个节点的 description 必须包含：
-1. **核心事件**: 这个节点发生什么关键事件
-2. **爽点/虐点**: 这个节点的情感高点是什么
-3. **角色变化**: 主角的状态/实力/心态如何变化
-4. **冲突设置**: 面临什么困境或对抗
-5. **承上启下**: 如何承接上一节点，如何引出下一节点
-6. **钩子设计**: 这个节点结尾留下什么悬念
-
-**写作风格**: 用流畅的叙事语言，像讲故事梗概一样描述
-
-### 输出格式
-
-```json
-[
-    {{
-        "index": 1,
-        "beats": [
-            {{
-                "index": 1,
-                "key": "opening",
-                "title": "废材觉醒：被驱逐的天才",
-                "description": "故事开始，主角萧炎曾是家族天才，却因斗气消失被族人嘲笑为废物。未婚妻纳兰嫣然当众退婚，长老们提议剥夺他的少族长之位。萧炎在众人的嘲讽中咬牙隐忍，暗暗发誓三年后再见高下。就在他最绝望的时刻，沉睡在戒指中的药老苏醒，揭示了他斗气消失的真正原因——体内封印着一股恐怖的力量。这个节点建立了'扮猪吃虎'的基础设定，所有人都看不起主角，为后续的打脸做足铺垫。基调是压抑但暗藏希望，读者期待主角崛起复仇。钩子：药老究竟是什么来历？那股恐怖力量又是什么？",
-                "weight": 0.12
-            }},
-            {{
-                "index": 2,
-                "key": "power_up",
-                "title": "秘密修炼：逆天功法",
-                "description": "在药老的指导下，萧炎开始秘密修炼。药老传授他上古焚决，这是一门可以吞噬异火进化的逆天功法。萧炎白天装作废物，夜晚疯狂修炼，实力飞速提升。期间，他多次遭受族中纨绔子弟的欺辱，都默默忍受。三个月后，他已经恢复到斗者境界，但依然隐藏实力。与此同时，纳兰家派人来催促正式解除婚约，限期三年之约。这个节点展示了主角的隐忍和成长，同时不断积累'打脸能量'——欺负他的人越多，将来打脸越爽。钩子：三年之约能否兑现？第一把异火在哪里？",
-                "weight": 0.15
-            }},
-            {{
-                "index": 3,
-                "key": "face_slap",
-                "title": "宗门大比：废物逆袭震全场",
-                "description": "家族年度大比，所有人都等着看萧炎的笑话。曾经最嚣张的族弟萧宁公开挑衅，扬言要让废物萧炎跪着爬出比武台。萧炎平静应战，一招之内将萧宁击飞。全场哗然！接着他连战连胜，以碾压之势夺得第一。那些曾经嘲笑他的长老们面如土色，纳兰嫣然的贴身侍女也在场观战，目瞪口呆地看着这一切。萧炎在众人震惊的目光中淡淡说道：'三年之约，我会亲自去云岚宗，让纳兰嫣然知道，当初是她瞎了眼。'这是第一个大爽点节点，压抑许久的情绪在此爆发。钩子：云岚宗之行会发生什么？更强的对手已经在等待。",
-                "weight": 0.2
-            }}
-        ]
-    }}
-]
-```
-
-**严格要求**:
-1. 数组长度必须与输入的剧情线数量一致
-2. 每个节点必须包含：index、key、title、description、weight
-3. 权重之和应在 0.95-1.05 之间
-4. description 200-500字，包含：核心事件、爽点/虐点、承上启下、钩子设计
-5. 所有文字内容使用简体中文
-"""
-
-        return base_prompt.strip()
-
-    @classmethod
     def get_single_line_beats_prompt(
         cls,
         project_data: Dict[str, Any],
@@ -915,15 +712,7 @@ class PlotPromptService:
     
     def __init__(self):
         self.templates = PlotPromptTemplates()
-    
-    def generate_story_outline_prompt(
-        self, 
-        project_data: Dict[str, Any], 
-        requirements: Optional[str] = None
-    ) -> str:
-        """生成故事大纲 Prompt"""
-        return self.templates.get_story_outline_prompt(project_data, requirements)
-    
+
     def generate_plot_card_prompt(
         self,
         project_data: Dict[str, Any],
@@ -954,14 +743,6 @@ class PlotPromptService:
             project_data, outline_content, plot_cards, line_type, custom_prompt, count,
             historical_context, previous_line_summary, sequence_index
         )
-    
-    def generate_plot_line_beats_prompt(
-        self,
-        project_data: Dict[str, Any],
-        lines: List[Dict[str, Any]]
-    ) -> str:
-        """生成剧情线节点规划 Prompt（第二阶段）"""
-        return self.templates.get_plot_line_beats_prompt(project_data, lines)
 
     def generate_single_line_beats_prompt(
         self,

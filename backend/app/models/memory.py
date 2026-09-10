@@ -1,5 +1,5 @@
 """长期记忆数据模型 - 支持向量检索和剧情分析"""
-from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, Float, JSON, Boolean
+from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, Float, JSON
 from sqlalchemy.sql import func
 from app.db_base import Base
 import uuid

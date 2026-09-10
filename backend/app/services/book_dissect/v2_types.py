@@ -45,16 +45,6 @@ class EntityType(str, Enum):
     REJECTED = "rejected"
 
 
-class RoleType(str, Enum):
-    """角色叙事定位（仅 person 适用）。"""
-
-    PROTAGONIST = "protagonist"      # 主角
-    SUPPORTING = "supporting"        # 重要配角
-    ANTAGONIST = "antagonist"        # 反派
-    MINOR = "minor"                  # 路人
-    UNKNOWN = "unknown"
-
-
 class EventType(str, Enum):
     """事件类型枚举。"""
 

@@ -1,7 +1,6 @@
 """章节重新生成相关的Schema定义"""
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
-from datetime import datetime
+from typing import Optional, List
 
 
 class PreserveElementsConfig(BaseModel):
@@ -49,30 +48,3 @@ class ApplyRegenerationRequest(BaseModel):
         "regenerated",
         description="应用来源: regenerated(把该版本新稿写入正文)/original(回滚到该版本改稿前的原稿)",
     )
-
-
-class RegenerationTaskResponse(BaseModel):
-    """重新生成任务响应"""
-    task_id: str
-    chapter_id: str
-    status: str
-    message: str
-    estimated_time_seconds: int = 120
-
-
-class RegenerationTaskStatus(BaseModel):
-    """重新生成任务状态"""
-    task_id: str
-    chapter_id: str
-    status: str
-    progress: int
-    error_message: Optional[str] = None
-    created_at: Optional[datetime] = None
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    
-    # 结果信息
-    original_word_count: Optional[int] = None
-    regenerated_word_count: Optional[int] = None
-    version_number: Optional[int] = None
-

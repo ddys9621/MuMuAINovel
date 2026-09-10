@@ -1,11 +1,9 @@
 """灵感模式API - 通过对话引导创建项目"""
 from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Dict, Any, List
 import json
 import re
 
-from app.database import get_db
 from app.services.ai_service import AIService
 from app.api.settings import get_user_ai_service
 from app.logger import get_logger

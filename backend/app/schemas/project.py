@@ -67,22 +67,3 @@ class ProjectListResponse(BaseModel):
     """项目列表响应模型"""
     total: int
     items: list[ProjectResponse]
-
-
-class ProjectWizardRequest(BaseModel):
-    """项目创建向导请求模型"""
-    title: str = Field(..., description="书名")
-    theme: str = Field(..., description="主题")
-    genre: Optional[str] = Field(None, description="类型")
-    chapter_count: int = Field(..., ge=1, description="章节数量")
-    narrative_perspective: str = Field(..., description="叙事视角")
-    character_count: int = Field(5, ge=5, description="角色数量（至少5个）")
-    target_words: Optional[int] = Field(None, description="目标字数")
-
-
-class WorldBuildingResponse(BaseModel):
-    """世界构建响应模型"""
-    time_period: str = Field(..., description="时间背景")
-    location: str = Field(..., description="地理位置")
-    atmosphere: str = Field(..., description="氛围基调")
-    rules: str = Field(..., description="世界规则")

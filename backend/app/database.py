@@ -373,68 +373,6 @@ async def close_db():
         logger.error(f"关闭数据库连接失败: {str(e)}", exc_info=True)
         raise
 
-async def get_database_stats():
-    """获取数据库连接和会话统计信息
-    
-    Returns:
-        dict: 包含数据库统计信息的字典
-    """
-    from app.config import settings
-    
-    stats = {
-        "session_stats": {
-            "created": _session_stats["created"],
-            "closed": _session_stats["closed"],
-            "active": _session_stats["active"],
-            "errors": _session_stats["errors"],
-            "generator_exits": _session_stats["generator_exits"],
-            "last_check": _session_stats["last_check"],
-        },
-        "engine_cache": {
-            "total_engines": len(_engine_cache),
-            "engine_keys": list(_engine_cache.keys()),
-        },
-        "config": {
-            "database_type": "SQLite",
-            "pool_size": settings.database_pool_size,
-            "max_overflow": settings.database_max_overflow,
-            "total_connections": settings.database_pool_size + settings.database_max_overflow,
-            "pool_timeout": settings.database_pool_timeout,
-            "session_max_active_threshold": settings.database_session_max_active,
-            "session_leak_threshold": settings.database_session_leak_threshold,
-        },
-        "health": {
-            "status": "healthy",
-            "warnings": [],
-            "errors": [],
-        }
-    }
-    
-    # 健康检查
-    if _session_stats["active"] > settings.database_session_leak_threshold:
-        stats["health"]["status"] = "critical"
-        stats["health"]["errors"].append(
-            f"活跃会话数 {_session_stats['active']} 超过泄漏阈值 {settings.database_session_leak_threshold}"
-        )
-    elif _session_stats["active"] > settings.database_session_max_active:
-        stats["health"]["status"] = "warning"
-        stats["health"]["warnings"].append(
-            f"活跃会话数 {_session_stats['active']} 超过警告阈值 {settings.database_session_max_active}"
-        )
-    
-    if _session_stats["active"] < 0:
-        stats["health"]["status"] = "error"
-        stats["health"]["errors"].append(f"活跃会话数异常: {_session_stats['active']}")
-    
-    error_rate = (_session_stats["errors"] / max(_session_stats["created"], 1)) * 100
-    if error_rate > 5:
-        stats["health"]["status"] = "warning"
-        stats["health"]["warnings"].append(f"会话错误率过高: {error_rate:.2f}%")
-    
-    stats["health"]["error_rate"] = f"{error_rate:.2f}%"
-    
-    return stats
-
 
 async def check_database_health(user_id: str = None) -> dict:
     """检查数据库连接健康状态
@@ -502,18 +440,3 @@ async def check_database_health(user_id: str = None) -> dict:
         logger.error(f"数据库健康检查失败: {str(e)}", exc_info=True)
     
     return result
-
-
-async def reset_session_stats():
-    """重置会话统计信息（用于测试或维护）"""
-    global _session_stats
-    _session_stats = {
-        "created": 0,
-        "closed": 0,
-        "active": 0,
-        "errors": 0,
-        "generator_exits": 0,
-        "last_check": datetime.now().isoformat()
-    }
-    logger.info("✅ 会话统计信息已重置")
-    return _session_stats

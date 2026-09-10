@@ -1,6 +1,5 @@
 """Server-Sent Events (SSE) 响应工具类"""
 import json
-import asyncio
 from typing import AsyncGenerator, Dict, Any, Optional
 from fastapi.responses import StreamingResponse
 from app.logger import get_logger
@@ -102,50 +101,6 @@ class SSEResponse:
     async def send_heartbeat() -> str:
         """发送心跳消息(保持连接活跃)"""
         return ": heartbeat\n\n"
-
-
-async def create_sse_generator(
-    async_gen: AsyncGenerator[str, None],
-    show_progress: bool = True
-) -> AsyncGenerator[str, None]:
-    """
-    创建SSE生成器包装器
-    
-    Args:
-        async_gen: 异步生成器
-        show_progress: 是否显示进度
-        
-    Yields:
-        格式化的SSE消息
-    """
-    try:
-        if show_progress:
-            yield await SSEResponse.send_progress("开始生成...", 0)
-        
-        # 累积内容用于进度计算
-        accumulated_content = ""
-        chunk_count = 0
-        
-        async for chunk in async_gen:
-            chunk_count += 1
-            accumulated_content += chunk
-            
-            # 发送内容块
-            yield await SSEResponse.send_chunk(chunk)
-            
-            # 每10个块发送一次心跳
-            if chunk_count % 10 == 0:
-                yield await SSEResponse.send_heartbeat()
-        
-        if show_progress:
-            yield await SSEResponse.send_progress("生成完成", 100, "success")
-        
-        # 发送完成信号
-        yield await SSEResponse.send_done()
-        
-    except Exception as e:
-        logger.error(f"SSE生成器错误: {str(e)}")
-        yield await SSEResponse.send_error(str(e))
 
 
 def create_sse_response(generator: AsyncGenerator[str, None]) -> StreamingResponse:

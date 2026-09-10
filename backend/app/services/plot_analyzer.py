@@ -768,11 +768,3 @@ JSON 结构如下：
 
 
 _plot_analyzer_instance: Optional[PlotAnalyzer] = None
-
-
-def get_plot_analyzer(ai_service: AIService) -> PlotAnalyzer:
-    """Get singleton-style analyzer for compatibility."""
-    global _plot_analyzer_instance
-    if _plot_analyzer_instance is None:
-        _plot_analyzer_instance = PlotAnalyzer(ai_service)
-    return _plot_analyzer_instance

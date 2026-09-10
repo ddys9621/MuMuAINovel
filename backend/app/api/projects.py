@@ -3,7 +3,6 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete
-from typing import List
 import json
 from urllib.parse import quote
 from app.database import get_db
@@ -13,7 +12,6 @@ from app.models.story_outline import StoryOutline
 from app.models.chapter import Chapter
 from app.models.generation_history import GenerationHistory
 from app.models.relationship import CharacterRelationship, Organization, OrganizationMember
-from app.models.memory import StoryMemory, PlotAnalysis
 from app.schemas.project import (
     ProjectCreate,
     ProjectUpdate,

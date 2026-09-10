@@ -21,7 +21,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -183,7 +183,7 @@ async def run_extraction_v2_background(
                 task.storage_path or "",
                 ai_service=ai_service,
             )
-        except FileNotFoundError as exc:
+        except FileNotFoundError:
             await _mark_failed(db_session, task, "全文文件丢失，请重新上传")
             return
         if not chapters:

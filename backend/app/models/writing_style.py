@@ -1,5 +1,5 @@
 """写作风格数据模型"""
-from sqlalchemy import Column, String, Text, Boolean, DateTime, ForeignKey, Integer
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Integer
 from sqlalchemy.sql import func
 from app.db_base import Base
 

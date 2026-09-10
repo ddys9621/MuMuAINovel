@@ -1,6 +1,6 @@
 """故事大纲 Schema 定义"""
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime
 
 
@@ -37,13 +37,3 @@ class StoryOutlineResponse(StoryOutlineBase):
     updated_at: datetime
     
     model_config = ConfigDict(from_attributes=True)
-
-
-class StoryOutlineWithPlotLines(StoryOutlineResponse):
-    """包含剧情线的故事大纲"""
-    plot_lines: List[dict] = Field(default_factory=list, description="关联的剧情线列表")
-
-
-class StoryOutlineActivate(BaseModel):
-    """激活故事大纲版本"""
-    pass

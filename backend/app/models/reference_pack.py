@@ -219,14 +219,6 @@ class ReferencePack(Base):
             return None
         return getattr(self, f"{dimension}_{strength}", None)
 
-    def set_precompressed(self, dimension: str, strength: str, text: str | None) -> None:
-        """写入指定维度+档位的预压缩文本。"""
-        if dimension not in self.DIMENSIONS_WITH_PRECOMPRESSION:
-            raise ValueError(f"unknown dimension: {dimension}")
-        if strength not in self.STRENGTH_LEVELS:
-            raise ValueError(f"unknown strength: {strength}")
-        setattr(self, f"{dimension}_{strength}", text)
-
     # ---- 时间戳 ----
     created_at = Column(DateTime, server_default=func.now(), comment="创建时间")
     updated_at = Column(

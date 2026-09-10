@@ -1,13 +1,11 @@
 """剧情生成服务"""
-from typing import Dict, Any, List, Optional, AsyncGenerator
+from typing import Dict, Any, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import json
-import uuid
 
-from app.models import Project, StoryOutline, PlotCard, PlotLine, ChapterOutline
+from app.models import Project, StoryOutline, PlotCard, PlotLine
 from app.models.character import Character
-from app.models.relationship import Organization
 from app.services.plot_prompts import PlotPromptService
 from app.services.ai_service import AIService
 from app.services.bridge_slot_planner import VALID_MODES, primary_quota

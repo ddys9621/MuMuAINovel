@@ -4,8 +4,7 @@
 from fastapi import APIRouter, HTTPException, Request, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import Dict, Any, List, Optional
-from pathlib import Path
+from typing import Dict, Any, Optional
 from pydantic import BaseModel
 import httpx
 
@@ -14,7 +13,7 @@ from app.models.settings import Settings
 from app.schemas.settings import SettingsCreate, SettingsUpdate, SettingsResponse
 from app.user_manager import User
 from app.logger import get_logger
-from app.config import settings as app_settings, PROJECT_ROOT
+from app.config import settings as app_settings
 from app.services.ai_service import AIService, create_user_ai_service
 
 logger = get_logger(__name__)

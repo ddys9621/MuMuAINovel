@@ -1,5 +1,5 @@
 """角色关系和组织管理数据模型"""
-from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, Boolean
+from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey
 from sqlalchemy.sql import func
 from app.db_base import Base
 import uuid

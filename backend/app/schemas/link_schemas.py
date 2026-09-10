@@ -1,7 +1,6 @@
 """关联关系相关的 Pydantic 模型"""
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional, Dict, Any
-from datetime import datetime
+from typing import List, Optional
 
 
 # ============================================
@@ -45,54 +44,15 @@ class LinkPlotCardsToChapterRequest(BaseModel):
 # 章纲-剧情线关联
 # ============================================
 
-class ChapterOutlinePlotLineLinkCreate(BaseModel):
-    """创建章纲-剧情线关联请求"""
-    plot_line_id: str = Field(..., description="剧情线ID")
-    role: str = Field("main", description="角色类型: main(主线)/sub(支线)/character(角色线)")
-    order_index: Optional[int] = Field(None, description="优先级序号")
-    timeline_coverage: Optional[Dict[str, Any]] = Field(None, description="时间线覆盖数据：记录该章节对该剧情线各节点的覆盖情况")
-
-
-class ChapterOutlinePlotLineLinkBatch(BaseModel):
-    """批量关联章纲-剧情线请求"""
-    links: List[ChapterOutlinePlotLineLinkCreate] = Field(..., description="关联列表")
-
-
-class ChapterOutlinePlotLineLinkResponse(BaseModel):
-    """章纲-剧情线关联响应"""
-    id: str = Field(..., description="关联ID")
-    chapter_outline_id: str = Field(..., description="章纲ID")
-    plot_line_id: str = Field(..., description="剧情线ID")
-    role: str = Field(..., description="角色类型")
-    order_index: Optional[int] = Field(None, description="优先级序号")
-    timeline_coverage: Optional[Dict[str, Any]] = Field(None, description="时间线覆盖数据：记录该章节对该剧情线各节点的覆盖情况")
-    created_at: datetime = Field(..., description="创建时间")
-
-    model_config = ConfigDict(from_attributes=True)
-
 
 # ============================================
 # 剧情卡片-剧情线关联
 # ============================================
 
-class PlotCardPlotLineLinkCreate(BaseModel):
-    """创建剧情卡片-剧情线关联请求"""
-    plot_line_id: str = Field(..., description="剧情线ID")
-
 
 class PlotCardPlotLineLinkBatch(BaseModel):
     """批量关联剧情卡片-剧情线请求"""
     plot_line_ids: List[str] = Field(..., description="剧情线ID列表")
-
-
-class PlotCardPlotLineLinkResponse(BaseModel):
-    """剧情卡片-剧情线关联响应"""
-    id: str = Field(..., description="关联ID")
-    plot_card_id: str = Field(..., description="剧情卡片ID")
-    plot_line_id: str = Field(..., description="剧情线ID")
-    created_at: datetime = Field(..., description="创建时间")
-
-    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================
@@ -109,25 +69,6 @@ class PlotCardChapterOutlineLinkCreate(BaseModel):
 class PlotCardChapterOutlineLinkBatch(BaseModel):
     """批量关联剧情卡片-章纲请求"""
     links: List[PlotCardChapterOutlineLinkCreate] = Field(..., description="关联列表")
-
-
-class PlotCardChapterOutlineLinkUpdate(BaseModel):
-    """更新剧情卡片-章纲关联请求"""
-    usage_type: Optional[str] = Field(None, description="使用方式")
-    usage_notes: Optional[str] = Field(None, description="使用说明")
-
-
-class PlotCardChapterOutlineLinkResponse(BaseModel):
-    """剧情卡片-章纲关联响应"""
-    id: str = Field(..., description="关联ID")
-    plot_card_id: str = Field(..., description="剧情卡片ID")
-    chapter_outline_id: str = Field(..., description="章纲ID")
-    usage_type: str = Field(..., description="使用方式")
-    usage_notes: Optional[str] = Field(None, description="使用说明")
-    created_at: datetime = Field(..., description="创建时间")
-    updated_at: datetime = Field(..., description="更新时间")
-
-    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================

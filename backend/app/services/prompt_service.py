@@ -1,6 +1,5 @@
 """提示词管理服务"""
-from typing import Dict, Any, Optional
-import json
+from typing import Dict, Optional
 
 
 class WritingStyleManager:

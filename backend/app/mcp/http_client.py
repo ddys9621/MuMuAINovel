@@ -2,7 +2,6 @@
 import asyncio
 from datetime import timedelta
 from typing import Dict, Any, List, Optional
-from contextlib import asynccontextmanager
 
 from mcp import ClientSession, types
 from mcp.client.sse import sse_client
@@ -376,30 +375,3 @@ class HTTPMCPClient:
         logger.info(f"关闭MCP客户端: {self.url}")
         async with self._lock:
             await self._cleanup()
-
-
-@asynccontextmanager
-async def create_mcp_client(
-    url: str,
-    headers: Optional[Dict[str, str]] = None,
-    env: Optional[Dict[str, str]] = None,
-    timeout: float = 60.0
-):
-    """
-    创建MCP客户端的上下文管理器
-    
-    Args:
-        url: MCP服务器URL
-        headers: HTTP请求头
-        env: 环境变量
-        timeout: 超时时间
-        
-    Yields:
-        HTTPMCPClient实例
-    """
-    client = HTTPMCPClient(url, headers, env, timeout)
-    try:
-        await client.initialize()
-        yield client
-    finally:
-        await client.close()
