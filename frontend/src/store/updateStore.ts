@@ -15,6 +15,8 @@ export const AUTO_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
 interface UpdateInfo {
   current_version: string
   run_mode: RunMode
+  /** 当前用户是否有权检查/应用更新（仅管理员）；非管理员只看版本号 */
+  can_manage: boolean
 }
 
 function readAutoCheck(): boolean {

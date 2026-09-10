@@ -40,9 +40,9 @@ const navGroups = [
 export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   // 根路径 `/` 也渲染项目列表，需让「我的项目」保持高亮
   const isRootProjects = useLocation().pathname === '/'
-  // 有新版本时「设置」入口出红点（检查逻辑在 useUpdateAutoCheck / 设置页）
-  const hasUpdate = useUpdateStore((s) => s.hasUpdate)
+  // 有新版本时「设置」入口出红点（检查逻辑在 useUpdateAutoCheck / 设置页）；检查更新仅管理员可见
   const info = useUpdateStore((s) => s.info)
+  const hasUpdate = useUpdateStore((s) => s.hasUpdate) && !!info?.can_manage
   const result = useUpdateStore((s) => s.result)
   const currentVersion = info?.current_version ?? result?.current_version ?? null
   // 底部版本行的"新版本"文案：exe/docker 看 Release 版本，源码看落后提交数

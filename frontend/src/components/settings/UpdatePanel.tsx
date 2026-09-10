@@ -4,7 +4,7 @@
  * - exe：下载安装包 → 启动安装向导 → 应用自退出（进度条 + 退出提示）
  * - source：展示落后提交，一键 git pull（+ pip / npm）→ 分步进度 → 提示重启
  * - docker：容器内不能自更新，给出宿主机命令 + 一键复制
- * apply 仅管理员可点；非管理员看到发布页链接。
+ * 检查更新 / 一键更新仅管理员可用（后端同样限制）；非管理员只看到当前版本与运行方式。
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
@@ -25,7 +25,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 
-import { authApi, systemUpdateApi } from '@/services/api'
+import { systemUpdateApi } from '@/services/api'
 import { useUpdateStore } from '@/store/updateStore'
 import { RUN_MODE_LABEL, type UpdateJobStatus, type UpdateStep } from '@/types/system_update'
 import { cn } from '@/lib/utils'
@@ -91,25 +91,30 @@ function StepList({ steps }: { steps: UpdateStep[] }) {
 }
 
 export function UpdatePanel() {
+  const info = useUpdateStore((s) => s.info)
   const result = useUpdateStore((s) => s.result)
   const checking = useUpdateStore((s) => s.checking)
   const autoCheck = useUpdateStore((s) => s.autoCheck)
   const setAutoCheck = useUpdateStore((s) => s.setAutoCheck)
+  const loadInfo = useUpdateStore((s) => s.loadInfo)
   const runCheck = useUpdateStore((s) => s.runCheck)
+  const canManage = !!info?.can_manage
 
-  const [isAdmin, setIsAdmin] = useState(false)
   const [job, setJob] = useState<UpdateJobStatus | null>(null)
   const [applying, setApplying] = useState(false)
   const [notesOpen, setNotesOpen] = useState(false)
   const pollRef = useRef<number | null>(null)
 
   useEffect(() => {
-    authApi.getCurrentUser().then((u) => setIsAdmin(!!u?.is_admin)).catch(() => setIsAdmin(false))
-    if (!result) void runCheck(false)
-    systemUpdateApi.status().then(setJob).catch(() => { /* 未登录等：不展示任务 */ })
-    // 仅首次挂载执行
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    if (!info) void loadInfo()
+  }, [info, loadInfo])
+
+  // 只有管理员才拉检查结果与更新任务状态（后端对非管理员返回 403）
+  useEffect(() => {
+    if (!canManage) return
+    if (!useUpdateStore.getState().result) void runCheck(false)
+    systemUpdateApi.status().then(setJob).catch(() => { /* 服务重启中等：不展示任务 */ })
+  }, [canManage, runCheck])
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -179,13 +184,27 @@ export function UpdatePanel() {
   const progressPct =
     job?.progress && job.progress.total ? Math.min(100, Math.round((job.progress.downloaded / job.progress.total) * 100)) : null
 
+  if (!canManage) {
+    // 非管理员：只展示版本与运行方式，不联网、不显示检查/更新入口
+    return (
+      <section className="bg-white rounded-card shadow-card p-6">
+        <h2 className="text-lg font-semibold text-content">关于</h2>
+        <p className="mt-1 text-sm text-content-secondary">
+          当前版本 <span className="font-medium text-content">v{info?.current_version ?? '…'}</span>
+          {info?.run_mode && <> · {RUN_MODE_LABEL[info.run_mode]}</>}
+        </p>
+        <p className="mt-2 text-xs text-content-tertiary">检查更新与一键升级由管理员在此页面操作。</p>
+      </section>
+    )
+  }
+
   return (
     <section className="bg-white rounded-card shadow-card p-6">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-content">关于与更新</h2>
           <p className="mt-1 text-sm text-content-secondary">
-            当前版本 <span className="font-medium text-content">v{result?.current_version ?? '…'}</span>
+            当前版本 <span className="font-medium text-content">v{result?.current_version ?? info?.current_version ?? '…'}</span>
             {mode && <> · {RUN_MODE_LABEL[mode]}</>}
             {mode === 'source' && git?.branch && (
               <span className="ml-1 inline-flex items-center gap-1 text-content-tertiary">
@@ -332,21 +351,7 @@ export function UpdatePanel() {
                   <span className="whitespace-pre-wrap">{result.apply_hint}</span>
                 </p>
               )}
-              {result.can_apply && !isAdmin && (
-                <p className="text-sm text-content-tertiary">
-                  需要管理员账号才能执行一键更新
-                  {latest?.installer_url && mode === 'exe' && (
-                    <>
-                      ，或
-                      <a href={latest.installer_url} className="text-brand hover:underline" target="_blank" rel="noreferrer">
-                        手动下载安装包
-                      </a>
-                    </>
-                  )}
-                  。
-                </p>
-              )}
-              {result.can_apply && isAdmin && !jobBusy && job?.status !== 'success' && (
+              {result.can_apply && !jobBusy && job?.status !== 'success' && (
                 <div className="flex flex-wrap items-center gap-3">
                   <button
                     type="button"

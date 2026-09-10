@@ -21,6 +21,14 @@ def require_login(request: Request) -> User:
     return request.state.user
 
 
+def require_admin(request: Request) -> User:
+    """依赖：要求管理员（未登录 401，非管理员 403）"""
+    user = require_login(request)
+    if not getattr(user, "is_admin", False):
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    return user
+
+
 async def verify_project_access(project_id: str, user_id: str, db: AsyncSession) -> Project:
     """
     验证用户是否有权访问指定项目
