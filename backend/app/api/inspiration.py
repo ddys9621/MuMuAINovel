@@ -131,7 +131,7 @@ def validate_options_response(result: Dict[str, Any], step: str, max_retries: in
     # 根据不同步骤进行特定校验
     if step == "genre":
         # 类型标签应该比较短
-        for i, option in enumerate(options):
+        for option in options:
             if len(option) > 10:
                 return False, f"类型标签【{option}】过长，应该在2-10字之间"
     

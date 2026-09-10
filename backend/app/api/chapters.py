@@ -1405,23 +1405,11 @@ async def generate_chapter_content_stream(
         can_generate, error_msg, previous_chapters = await check_prerequisites(temp_db, chapter)
         if not can_generate:
             raise HTTPException(status_code=400, detail=error_msg)
-        
-        # 保存前置章节数据供生成器使用
-        previous_chapters_data = [
-            {
-                'id': ch.id,
-                'chapter_number': ch.chapter_number,
-                'title': ch.title,
-                'content': ch.content
-            }
-            for ch in previous_chapters
-        ]
         break
     
     async def event_generator():
         # 在生成器内部创建独立的数据库会话
         db_session = None
-        db_committed = False
         # 获取当前用户ID（在生成器外部就需要）
         current_user_id = getattr(request.state, "user_id", "system")
         
@@ -1896,7 +1884,6 @@ async def generate_chapter_content_stream(
                 db_session.add(history)
                 
                 await db_session.commit()
-                db_committed = True
                 await db_session.refresh(current_chapter)
 
                 logger.info(f"成功创作章节 {chapter_id}，共 {new_word_count} 字")

@@ -695,7 +695,7 @@ class MemoryService:
             chapter_counts = {}
             foreshadow_count = 0
             
-            for i, meta in enumerate(all_memories['metadatas']):
+            for meta in all_memories['metadatas']:
                 mem_type = meta.get('memory_type', 'unknown')
                 chapter_num = meta.get('chapter_number', 0)
                 is_foreshadow = meta.get('is_foreshadow', 0)

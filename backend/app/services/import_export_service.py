@@ -349,7 +349,7 @@ class ImportExportService:
         members = result.all()
         
         exported = []
-        for member, org, org_char in members:
+        for member, _org, org_char in members:
             # 获取成员角色名称
             char_result = await db.execute(
                 select(Character).where(Character.id == member.character_id)
@@ -617,7 +617,7 @@ class ImportExportService:
         links = result.all()
 
         exported = []
-        for link, card, plot_line in links:
+        for _link, card, plot_line in links:
             exported.append(PlotCardPlotLineLinkExportData(
                 card_title=card.title,
                 plot_line_name=plot_line.title

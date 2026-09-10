@@ -164,7 +164,7 @@ def _compress_generic_dim(data: dict, level: str, dimension: str) -> str:
                 lines.append(f"- {sub_label}：{first}")
             elif sub_val:
                 # 没 tips 取第一个有内容的字段
-                for k, v in sub_val.items():
+                for v in sub_val.values():
                     if isinstance(v, (str, int, float)) and str(v).strip():
                         lines.append(f"- {sub_label}：{str(v)[:60]}")
                         break

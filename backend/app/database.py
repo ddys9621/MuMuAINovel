@@ -223,7 +223,6 @@ async def _init_relationship_types(user_id: str):
     Args:
         user_id: 用户ID
     """
-    from app.models.relationship import RelationshipType
     
     relationship_types = [
         {"name": "父亲", "category": "family", "reverse_name": "子女", "intimacy_range": "high", "icon": "👨"},
@@ -291,7 +290,6 @@ async def _init_global_writing_styles(user_id: str):
     Args:
         user_id: 用户ID
     """
-    from app.models.writing_style import WritingStyle
     from app.services.prompt_service import WritingStyleManager
     
     try:

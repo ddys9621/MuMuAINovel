@@ -1355,11 +1355,6 @@ class PlotGenerationService:
                     )
                 timeline_data_json = json.dumps(timeline_data, ensure_ascii=False)
 
-                # 处理 plot_cards
-                plot_cards_json = None
-                if line_data.get("plot_cards"):
-                    plot_cards_json = json.dumps(line_data["plot_cards"], ensure_ascii=False)
-
                 # 提取预计章节数（严格模式：必须由 AI 提供合法的正整数）
                 estimated_chapters = line_data.get("estimated_chapters")
                 if not isinstance(estimated_chapters, int) or estimated_chapters < 1:

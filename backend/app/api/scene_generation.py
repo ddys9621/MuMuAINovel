@@ -68,7 +68,7 @@ async def get_chapter_outline_plot_cards(
     service: SceneGenerationService = Depends(get_scene_service)
 ):
     """获取章纲关联的剧情卡片列表"""
-    user_id = await get_user_id(request)
+    await get_user_id(request)
     
     try:
         plot_cards = await service.get_plot_cards_for_chapter(db, chapter_outline_id)

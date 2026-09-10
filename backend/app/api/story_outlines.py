@@ -192,7 +192,7 @@ async def get_story_outline_plot_lines(
 ):
     """获取故事大纲关联的剧情线"""
     user_id = getattr(request.state, 'user_id', None)
-    db_outline = await get_outline_with_access_check(outline_id, user_id, db)
+    await get_outline_with_access_check(outline_id, user_id, db)
 
     plot_lines_result = await db.execute(
         select(PlotLine).where(PlotLine.story_outline_id == outline_id)

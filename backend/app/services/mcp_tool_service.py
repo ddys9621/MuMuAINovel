@@ -113,8 +113,6 @@ class MCPToolService:
             # 2. 获取所有工具定义（使用缓存 + 失败重载机制）
             all_tools = []
             for plugin in plugins:
-                plugin_loaded = False
-
                 # 尝试获取工具列表，失败时自动重载插件（最多重试1次）
                 for attempt in range(2):
                     try:
@@ -144,7 +142,6 @@ class MCPToolService:
                             f"{len(formatted_tools)} 个工具"
                         )
 
-                        plugin_loaded = True
                         break  # 成功，跳出重试循环
 
                     except Exception as e:

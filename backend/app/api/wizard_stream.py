@@ -155,7 +155,6 @@ async def world_building_generator(
 ) -> AsyncGenerator[str, None]:
     """世界构建流式生成器 - 支持MCP工具增强"""
     # 标记数据库会话是否已提交
-    db_committed = False
     try:
         mode = data.get("mode", "create")
         project_id = data.get("project_id")
@@ -196,7 +195,6 @@ async def world_building_generator(
 
             await db.commit()
             await db.refresh(project)
-            db_committed = True
 
             yield await SSEResponse.send_result({
                 "project_id": project.id,
@@ -555,7 +553,6 @@ async def world_building_generator(
             except Exception as _attach_err:  # pragma: no cover
                 logger.warning(f"[V3.2-B] 自动挂载参考包失败（不影响项目创建）: {_attach_err}")
 
-            db_committed = True
 
             # 【新增】世界观生成后,立即生成详细世界规则
             from app.services.world_rule_service import world_rule_service
@@ -623,7 +620,6 @@ async def world_building_generator(
 
                 await db.commit()
                 await db.refresh(project)
-                db_committed = True
 
                 if generated_rules:
                     yield await SSEResponse.send_progress("🔄 正在向量化世界规则...", 90)
@@ -644,7 +640,6 @@ async def world_building_generator(
                 logger.warning(f"⚠️ 世界规则刷新失败（保留基础设定）: {str(rule_error)}")
                 await db.commit()
                 await db.refresh(project)
-                db_committed = True
                 yield await SSEResponse.send_progress("⚠️ 世界规则刷新失败,已保存基础设定", 95)
 
         # 发送最终结果
@@ -691,7 +686,6 @@ async def characters_generator(
     user_ai_service: AIService
 ) -> AsyncGenerator[str, None]:
     """角色批量生成流式生成器 - 优化版:分批+重试+MCP工具增强"""
-    db_committed = False
     try:
         yield await SSEResponse.send_progress("开始生成角色...", 5)
         
@@ -1302,7 +1296,6 @@ async def characters_generator(
         logger.info(f"✅ 更新项目角色数量: {project.character_count}")
         
         await db.commit()
-        db_committed = True
         
         # 重新提取character对象
         created_characters = [char for char, _ in created_characters]
@@ -1460,7 +1453,6 @@ async def outline_generator(
     user_ai_service: AIService
 ) -> AsyncGenerator[str, None]:
     """大纲生成流式生成器 - 生成高层故事大纲（不再生成章节）"""
-    db_committed = False
     try:
         yield await SSEResponse.send_progress("开始生成高层故事大纲...", 5)
         
@@ -1742,7 +1734,6 @@ async def outline_generator(
         await db.commit()
         await db.refresh(outline)
         await db.refresh(project)
-        db_committed = True
 
         logger.info(f"故事前提大纲生成完成 - 项目: {project_id}")
 
@@ -2025,7 +2016,6 @@ async def cleanup_wizard_generator(
     from app.services.memory_service import memory_service
     from app.models.memory import StoryMemory
     
-    db_committed = False
     try:
         yield await SSEResponse.send_progress("开始清理向导数据...", 10)
         
@@ -2193,7 +2183,6 @@ async def cleanup_wizard_generator(
         project.current_words = 0
         
         await db.commit()
-        db_committed = True
         
         yield await SSEResponse.send_progress("清理完成!", 100)
         

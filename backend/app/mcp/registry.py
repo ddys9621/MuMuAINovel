@@ -61,7 +61,7 @@ class MCPPluginRegistry:
         """启动后台任务（延迟到有事件循环时）"""
         try:
             # 检查是否有运行中的事件循环
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
 
             if self._cleanup_task is None:
                 self._cleanup_task = asyncio.create_task(self._cleanup_loop())
