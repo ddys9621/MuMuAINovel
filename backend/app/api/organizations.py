@@ -596,7 +596,7 @@ async def generate_organization(
             used_chars = len(used_reference)
             logger.info(
                 f"[MCP] context=organization_generation user_id={user_id} "
-                f"plugins={request.selected_plugins} tools_used=['search'] "
+                f"plugins={gen_request.selected_plugins} tools_used=['search'] "
                 f"raw_chars={raw_chars} used_chars={used_chars} tool_calls=1"
             )
 
@@ -910,7 +910,7 @@ async def generate_organization_stream(
                 used_chars = len(used_reference)
                 logger.info(
                     f"[MCP] context=organization_generation_stream user_id={user_id} "
-                    f"plugins={request.selected_plugins} tools_used=['search'] "
+                    f"plugins={gen_request.selected_plugins} tools_used=['search'] "
                     f"raw_chars={raw_chars} used_chars={used_chars} tool_calls=1"
                 )
 

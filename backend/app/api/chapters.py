@@ -3079,7 +3079,7 @@ async def generate_single_chapter_for_batch(
         character_names=[c.name for c in characters] if characters else None
     )
     state_context = await narrative_state_service.build_generation_context(
-        db=db,
+        db=db_session,
         project_id=project.id,
         current_chapter=chapter.chapter_number,
         pov_character_name=outline.pov if outline else None,
