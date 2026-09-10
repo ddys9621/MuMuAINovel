@@ -1835,6 +1835,7 @@ async def _plot_lines_pipeline(
         BridgePlanningPreconditionError,
         compute_bridge_slots,
         parse_plot_line,
+        sub_budget_cap,
     )
     from app.services.plot_generation_service import PlotGenerationService
 
@@ -1868,10 +1869,11 @@ async def _plot_lines_pipeline(
         emit(f"主线《{main.title}》完成，预计 {chapter_count} 章", 55)
 
         sub_lines = []
+        cap = sub_budget_cap(chapter_count, sub_line_count)
         if sub_line_count > 0:
-            emit(f"生成 {sub_line_count} 条支线...", 60)
+            emit(f"生成 {sub_line_count} 条支线（每条篇幅预算 ≤ {cap} 章，锚定主线节点）...", 60)
             sub_lines = await service.generate_plot_lines(
-                line_type="sub", count=sub_line_count, based_on_lines=[main.id], **common
+                line_type="sub", count=sub_line_count, based_on_lines=[main.id], sub_budget_cap=cap, **common
             )
 
         project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one()
@@ -1897,6 +1899,8 @@ async def _plot_lines_pipeline(
             },
             "sub_lines": [{"id": s.id, "title": s.title} for s in sub_lines],
             "plan_preview": {"total_bridges": plan.total_bridges, "total_chapters": plan.total_chapters},
+            "sub_budget_cap": cap,
+            "line_budgets": plan.to_dict()["line_budgets"],
         }
 
 
