@@ -17,7 +17,6 @@ logger = get_logger(__name__)
 # 注意：这里不能再走 app.models 聚合入口，否则会触发
 # database -> app.models -> model -> database 的循环导入。
 from app.models.analysis_task import AnalysisTask  # noqa: F401
-from app.models.batch_generation_task import BatchGenerationTask  # noqa: F401
 from app.models.book_dissect_task import BookDissectTask  # noqa: F401
 from app.models.book_dissect_chapter_fact import BookDissectChapterFact  # noqa: F401
 from app.models.book_dissect_dictionary import BookDissectDictionary  # noqa: F401

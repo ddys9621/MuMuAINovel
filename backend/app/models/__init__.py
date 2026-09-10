@@ -5,7 +5,6 @@ from app.models.character import Character
 from app.models.relationship import CharacterRelationship, Organization, OrganizationMember, RelationshipType
 from app.models.generation_history import GenerationHistory
 from app.models.analysis_task import AnalysisTask
-from app.models.batch_generation_task import BatchGenerationTask
 from app.models.book_dissect_task import BookDissectTask
 from app.models.book_dissect_chapter_fact import BookDissectChapterFact
 from app.models.book_dissect_dictionary import BookDissectDictionary
@@ -50,7 +49,6 @@ __all__ = [
     "RelationshipType",
     "GenerationHistory",
     "AnalysisTask",
-    "BatchGenerationTask",
     "BookDissectTask",
     "BookDissectChapterFact",
     "BookDissectDictionary",
