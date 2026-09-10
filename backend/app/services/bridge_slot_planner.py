@@ -12,12 +12,13 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
 from app.utils.plot_line_types import normalize_plot_line_type
 
 CHAPTERS_PER_BRIDGE = 4
+SUB_BUDGET_SHARE = 0.4   # 支线总篇幅预算占全书上限（网文 B 线占比经验 20-40%）
 
 
 class BridgePlanningPreconditionError(ValueError):
@@ -98,12 +99,29 @@ class BridgeSlot:
 
 
 @dataclass(frozen=True)
+class LineBudget:
+    """一条副线在本次规划中的预算账：配额 vs 实际主推 / 保温桥段数（供预览与 prompt 骨架显示）。"""
+    plot_line_id: str
+    line_title: str
+    line_type: str
+    anchored: bool
+    mode: str | None
+    anchor_start_beat: int | None
+    anchor_end_beat: int | None
+    estimated_chapters: int | None
+    primary_quota: int          # 锚定线：round(est/4) 夹 [1,T]；未锚定线：0（不限）
+    primary_bridges: int
+    mention_bridges: int
+
+
+@dataclass(frozen=True)
 class BridgeSlotPlan:
     main_line_id: str
     total_bridges: int
     total_chapters: int
     beat_quotas: dict[int, int]
     slots: tuple[BridgeSlot, ...]
+    line_budgets: tuple[LineBudget, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -115,12 +133,27 @@ class BridgeSlotPlan:
                 {**asdict(s), "secondary": [asdict(t) for t in s.secondary]}
                 for s in self.slots
             ],
+            "line_budgets": [asdict(b) for b in self.line_budgets],
         }
 
 
 def chapter_range(bridge_number: int) -> tuple[int, int]:
     start = CHAPTERS_PER_BRIDGE * (bridge_number - 1) + 1
     return start, start + CHAPTERS_PER_BRIDGE - 1
+
+
+def primary_quota(estimated_chapters: int | None, total_bridges: int) -> int:
+    """支线篇幅预算 → 主推桥段配额：round(章数 / 4)，夹在 [1, 桥段总数]。"""
+    if not estimated_chapters or estimated_chapters < 1:
+        return 1
+    return max(1, min(total_bridges, round(estimated_chapters / CHAPTERS_PER_BRIDGE)))
+
+
+def sub_budget_cap(chapter_count: int, sub_line_count: int) -> int:
+    """单条支线篇幅预算上限（章）：全书 SUB_BUDGET_SHARE 均分给各支线，最少 1 个桥段。"""
+    if sub_line_count <= 0:
+        return 0
+    return max(CHAPTERS_PER_BRIDGE, int(chapter_count * SUB_BUDGET_SHARE / sub_line_count))
 
 
 def apportion(weights: list[float], total: int, minimum: int = 1) -> list[int]:
@@ -270,6 +303,90 @@ def _anchored_tasks(line: PlotLineData, bridges_by_beat: dict[int, list[int]]) -
     return out
 
 
+def _resolve_roles(
+    tasks_by_bridge: dict[int, list[SecondaryBeatTask]], lines: list[PlotLineData]
+) -> dict[int, list[SecondaryBeatTask]]:
+    """每桥段只留一条主 B 线，其余降为 mention。
+
+    优先级：本桥段含 merge 节点 > 距上次主推最远（首次出现 = 桥段号）> estimated_chapters 大 > 剧情线顺序。
+    同线同桥段的多个任务同角色。
+    """
+    est = {l.id: l.estimated_chapters or 0 for l in lines}
+    order = {l.id: i for i, l in enumerate(lines)}
+    last_primary = {l.id: 0 for l in lines}
+    out: dict[int, list[SecondaryBeatTask]] = {}
+    for n in sorted(tasks_by_bridge):
+        tasks = tasks_by_bridge[n]
+        line_ids = list(dict.fromkeys(t.plot_line_id for t in tasks))
+        if not line_ids:
+            out[n] = []
+            continue
+        winner = min(line_ids, key=lambda lid: (
+            0 if any(t.plot_line_id == lid and t.relation == "merge" for t in tasks) else 1,
+            -(n - last_primary[lid]),
+            -est[lid],
+            order[lid],
+        ))
+        out[n] = [t if t.plot_line_id == winner else replace(t, role="mention") for t in tasks]
+        last_primary[winner] = n
+    return out
+
+
+def _apply_budget_caps(
+    tasks_by_bridge: dict[int, list[SecondaryBeatTask]], lines: list[PlotLineData], total: int
+) -> dict[int, list[SecondaryBeatTask]]:
+    """锚定支线主推桥段数超过预算配额时降级：节点权重低者先降、同权重桥段号大者先降；含 merge 的桥段永不降。"""
+    for line in lines:
+        if not is_anchored(line):
+            continue
+        quota = primary_quota(line.estimated_chapters, total)
+        weights = {b.index: b.weight for b in line.beats}
+        primary_bridges = [
+            n for n, ts in sorted(tasks_by_bridge.items())
+            if any(t.plot_line_id == line.id and t.role == "primary" for t in ts)
+        ]
+        excess = len(primary_bridges) - quota
+        if excess <= 0:
+            continue
+        demotable: list[tuple[float, int, int]] = []
+        for n in primary_bridges:
+            mine = [t for t in tasks_by_bridge[n] if t.plot_line_id == line.id]
+            if any(t.relation == "merge" for t in mine):
+                continue
+            demotable.append((max(weights.get(t.beat_index, 0.0) for t in mine), -n, n))
+        for _, _, n in sorted(demotable)[:excess]:
+            tasks_by_bridge[n] = [
+                replace(t, role="mention") if t.plot_line_id == line.id else t for t in tasks_by_bridge[n]
+            ]
+    return tasks_by_bridge
+
+
+def _line_budgets(
+    tasks_by_bridge: dict[int, list[SecondaryBeatTask]], lines: list[PlotLineData], total: int
+) -> tuple[LineBudget, ...]:
+    out: list[LineBudget] = []
+    for line in lines:
+        primary = mention = 0
+        for ts in tasks_by_bridge.values():
+            mine = [t for t in ts if t.plot_line_id == line.id]
+            if not mine:
+                continue
+            if any(t.role == "primary" for t in mine):
+                primary += 1
+            else:
+                mention += 1
+        anchored = is_anchored(line)
+        out.append(LineBudget(
+            plot_line_id=line.id, line_title=line.title, line_type=line.line_type,
+            anchored=anchored, mode=line.mode,
+            anchor_start_beat=line.anchor_start_beat, anchor_end_beat=line.anchor_end_beat,
+            estimated_chapters=line.estimated_chapters,
+            primary_quota=primary_quota(line.estimated_chapters, total) if anchored else 0,
+            primary_bridges=primary, mention_bridges=mention,
+        ))
+    return tuple(out)
+
+
 def compute_bridge_slots(lines: list[PlotLineData]) -> BridgeSlotPlan:
     main = select_main_line(lines)
     total = max(1, round(main.estimated_chapters / CHAPTERS_PER_BRIDGE))
@@ -296,6 +413,8 @@ def compute_bridge_slots(lines: list[PlotLineData]) -> BridgeSlotPlan:
         else:
             for n in range(1, total + 1):
                 tasks_by_bridge[n].extend(_secondary_tasks([line], (n - 1) / total, n / total))
+    tasks_by_bridge = _resolve_roles(tasks_by_bridge, secondaries)
+    tasks_by_bridge = _apply_budget_caps(tasks_by_bridge, secondaries, total)
 
     slots = [
         BridgeSlot(
@@ -319,4 +438,5 @@ def compute_bridge_slots(lines: list[PlotLineData]) -> BridgeSlotPlan:
         total_chapters=total * CHAPTERS_PER_BRIDGE,
         beat_quotas={b.index: q for b, q in zip(main.beats, quotas)},
         slots=tuple(slots),
+        line_budgets=_line_budgets(tasks_by_bridge, secondaries, total),
     )
