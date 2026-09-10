@@ -60,6 +60,24 @@ async def get_chapter_outlines(
     result = await db.execute(query)
     outlines = result.scalars().all()
     
+    # 关联计数一次 GROUP BY 取齐（此前每行各查 2 次 COUNT，100 章 = 200 条 SQL）
+    outline_ids = [o.id for o in outlines]
+    plot_line_counts: dict[str, int] = {}
+    plot_card_counts: dict[str, int] = {}
+    if outline_ids:
+        rows = await db.execute(
+            select(ChapterOutlinePlotLineLink.chapter_outline_id, func.count(ChapterOutlinePlotLineLink.id))
+            .where(ChapterOutlinePlotLineLink.chapter_outline_id.in_(outline_ids))
+            .group_by(ChapterOutlinePlotLineLink.chapter_outline_id)
+        )
+        plot_line_counts = dict(rows.all())
+        rows = await db.execute(
+            select(PlotCardChapterOutlineLink.chapter_outline_id, func.count(PlotCardChapterOutlineLink.id))
+            .where(PlotCardChapterOutlineLink.chapter_outline_id.in_(outline_ids))
+            .group_by(PlotCardChapterOutlineLink.chapter_outline_id)
+        )
+        plot_card_counts = dict(rows.all())
+    
     # 构建响应数据，添加关联统计信息
     response_outlines = []
     for outline in outlines:
@@ -104,21 +122,8 @@ async def get_chapter_outlines(
             except:
                 characters_involved = []
         
-        # 获取关联的剧情线数量
-        plot_line_count_result = await db.execute(
-            select(func.count(ChapterOutlinePlotLineLink.id)).where(
-                ChapterOutlinePlotLineLink.chapter_outline_id == outline.id
-            )
-        )
-        plot_line_count = plot_line_count_result.scalar() or 0
-        
-        # 获取关联的剧情卡片数量
-        plot_card_count_result = await db.execute(
-            select(func.count(PlotCardChapterOutlineLink.id)).where(
-                PlotCardChapterOutlineLink.chapter_outline_id == outline.id
-            )
-        )
-        plot_card_count = plot_card_count_result.scalar() or 0
+        plot_line_count = plot_line_counts.get(outline.id, 0)
+        plot_card_count = plot_card_counts.get(outline.id, 0)
         
         # 创建统一的响应对象
         response_outline = ChapterOutlineResponse(
@@ -138,8 +143,6 @@ async def get_chapter_outlines(
             created_at=outline.created_at,
             updated_at=outline.updated_at,
             # 统一的关联统计
-            plot_lines=[{"id": f"mock_{i}"} for i in range(plot_line_count)],
-            plot_cards=[{"id": f"mock_{i}"} for i in range(plot_card_count)],
             plot_line_count=plot_line_count,
             plot_card_count=plot_card_count
         )

@@ -48,41 +48,36 @@ async def get_project_organizations(
     request: Request,
     db: AsyncSession = Depends(get_db)
 ):
-    # 验证用户权限
-    user_id = getattr(request.state, 'user_id', None)
-    await verify_project_access(project_id, user_id, db)
-    
     """
     获取项目中的所有组织及其详情
     
     返回组织的基本信息和统计数据
     """
-    result = await db.execute(
-        select(Organization).where(Organization.project_id == project_id)
-    )
-    organizations = result.scalars().all()
+    # 验证用户权限
+    user_id = getattr(request.state, 'user_id', None)
+    await verify_project_access(project_id, user_id, db)
     
-    # 获取每个组织的角色信息
-    org_list = []
-    for org in organizations:
-        char_result = await db.execute(
-            select(Character).where(Character.id == org.character_id)
+    # 组织与其角色一次 JOIN 取齐（此前每个组织再查一次角色）；内连接即跳过无角色的组织
+    result = await db.execute(
+        select(Organization, Character)
+        .join(Character, Character.id == Organization.character_id)
+        .where(Organization.project_id == project_id)
+    )
+    org_list = [
+        OrganizationDetailResponse(
+            id=org.id,
+            character_id=org.character_id,
+            name=char.name,
+            type=char.organization_type,
+            purpose=char.organization_purpose,
+            member_count=org.member_count,
+            power_level=org.power_level,
+            location=org.location,
+            motto=org.motto,
+            color=org.color
         )
-        char = char_result.scalar_one_or_none()
-        
-        if char:
-            org_list.append(OrganizationDetailResponse(
-                id=org.id,
-                character_id=org.character_id,
-                name=char.name,
-                type=char.organization_type,
-                purpose=char.organization_purpose,
-                member_count=org.member_count,
-                power_level=org.power_level,
-                location=org.location,
-                motto=org.motto,
-                color=org.color
-            ))
+        for org, char in result.all()
+    ]
     
     logger.info(f"获取项目 {project_id} 的组织列表，共 {len(org_list)} 个")
     return org_list

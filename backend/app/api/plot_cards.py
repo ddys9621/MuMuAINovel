@@ -64,6 +64,24 @@ async def get_plot_cards(
     result = await db.execute(query)
     cards = result.scalars().all()
     
+    # 关联计数一次 GROUP BY 取齐（此前每行各查 2 次 COUNT）
+    card_ids = [c.id for c in cards]
+    plot_line_counts: dict[str, int] = {}
+    chapter_outline_counts: dict[str, int] = {}
+    if card_ids:
+        rows = await db.execute(
+            select(PlotCardPlotLineLink.plot_card_id, func.count(PlotCardPlotLineLink.id))
+            .where(PlotCardPlotLineLink.plot_card_id.in_(card_ids))
+            .group_by(PlotCardPlotLineLink.plot_card_id)
+        )
+        plot_line_counts = dict(rows.all())
+        rows = await db.execute(
+            select(PlotCardChapterOutlineLink.plot_card_id, func.count(PlotCardChapterOutlineLink.id))
+            .where(PlotCardChapterOutlineLink.plot_card_id.in_(card_ids))
+            .group_by(PlotCardChapterOutlineLink.plot_card_id)
+        )
+        chapter_outline_counts = dict(rows.all())
+    
     # 构建响应数据，添加关联统计信息
     response_cards = []
     for card in cards:
@@ -75,21 +93,8 @@ async def get_plot_cards(
             except:
                 tags = []
         
-        # 获取关联的剧情线数量
-        plot_line_count_result = await db.execute(
-            select(func.count(PlotCardPlotLineLink.id)).where(
-                PlotCardPlotLineLink.plot_card_id == card.id
-            )
-        )
-        plot_line_count = plot_line_count_result.scalar() or 0
-        
-        # 获取关联的章纲数量
-        chapter_outline_count_result = await db.execute(
-            select(func.count(PlotCardChapterOutlineLink.id)).where(
-                PlotCardChapterOutlineLink.plot_card_id == card.id
-            )
-        )
-        chapter_outline_count = chapter_outline_count_result.scalar() or 0
+        plot_line_count = plot_line_counts.get(card.id, 0)
+        chapter_outline_count = chapter_outline_counts.get(card.id, 0)
         
         # 创建统一的响应对象
         response_card = PlotCardResponse(
@@ -105,8 +110,6 @@ async def get_plot_cards(
             created_at=card.created_at,
             updated_at=card.updated_at,
             # 统一的关联统计
-            plot_lines=[{"id": f"mock_{i}"} for i in range(plot_line_count)],
-            chapter_outlines=[{"id": f"mock_{i}"} for i in range(chapter_outline_count)],
             plot_line_count=plot_line_count,
             chapter_outline_count=chapter_outline_count
         )
