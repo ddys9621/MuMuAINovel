@@ -1,30 +1,16 @@
 """世界规则服务 - 为生成流程提供世界观规则支持"""
-import os
-
-# 配置模型缓存目录（与 memory_service 保持一致）
-# ⚠️ 必须在 import sentence_transformers / huggingface_hub 之前设置，
-# 否则 offline 开关不生效，无本地模型时会发起无超时的 HF 网络请求（详见 memory_service 头部说明）
-from app.utils.runtime_paths import embedding_dir
-
-EMBEDDING_PATH = embedding_dir()
-
-if 'SENTENCE_TRANSFORMERS_HOME' not in os.environ:
-    os.environ['SENTENCE_TRANSFORMERS_HOME'] = EMBEDDING_PATH
-
-os.environ['TRANSFORMERS_OFFLINE'] = '1'
-os.environ['HF_HUB_OFFLINE'] = '1'
-
-from typing import List, Optional, Dict
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func
-import chromadb
-from sentence_transformers import SentenceTransformer
 import hashlib
 import uuid
+from typing import List, Optional, Dict
+
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, and_, func
+
 from app.models.world_rule import WorldRule
 from app.models.project import Project
 from app.logger import get_logger
 from app.services.ai_service import ai_service
+from app.services.embedding_runtime import get_chroma_client, get_embedding_model
 
 logger = get_logger(__name__)
 
@@ -42,31 +28,15 @@ class WorldRuleService:
         return cls._instance
 
     def __init__(self):
-        """初始化 ChromaDB 和 Embedding 模型"""
+        """接入共享的 ChromaDB 客户端与 Embedding 模型（见 embedding_runtime，与 MemoryService 同一份）"""
         if self._initialized:
             return
 
         try:
-            # 确保数据目录存在
-            chroma_dir = "data/chroma_db"
-            os.makedirs(chroma_dir, exist_ok=True)
-
-            # 初始化 ChromaDB 客户端
-            self.client = chromadb.PersistentClient(path=chroma_dir)
-
-            # 初始化 embedding 模型
-            logger.info("🔄 WorldRuleService: 正在加载 Embedding 模型...")
-            model_cache_dir = EMBEDDING_PATH
-            os.makedirs(model_cache_dir, exist_ok=True)
-
-            self.embedding_model = SentenceTransformer(
-                'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
-                cache_folder=model_cache_dir,
-                device='cpu',
-                trust_remote_code=False,
-                local_files_only=True,
-            )
-            logger.info("✅ WorldRuleService: Embedding 模型加载成功")
+            self.client = get_chroma_client()
+            self.embedding_model = get_embedding_model()
+            if self.embedding_model is None:
+                raise RuntimeError("Embedding 模型不可用")
 
             self._initialized = True
 

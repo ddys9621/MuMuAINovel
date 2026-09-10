@@ -1,29 +1,11 @@
 """向量记忆服务 - 基于ChromaDB实现长期记忆和语义检索"""
-import os
-
-# 配置模型缓存目录并强制使用本地模型
-# ⚠️ 必须在 import sentence_transformers / huggingface_hub 之前设置：
-# huggingface_hub 在 import 时就把 HF_HUB_OFFLINE 固化为常量，
-# 先 import 再设环境变量等于没设——无本地模型时会发起**无超时**的
-# HF 网络请求，在 HF 不可达的环境（如国内直连）下进程永久挂死。
-from app.utils.runtime_paths import embedding_dir  # 源码/容器 = backend/embedding；exe = {app}\embedding（不在 _internal 内）
-
-EMBEDDING_PATH = embedding_dir()
-
-if 'SENTENCE_TRANSFORMERS_HOME' not in os.environ:
-    os.environ['SENTENCE_TRANSFORMERS_HOME'] = EMBEDDING_PATH
-
-# 强制使用离线模式，避免重新下载
-os.environ['TRANSFORMERS_OFFLINE'] = '1'
-os.environ['HF_HUB_OFFLINE'] = '1'
-
-import chromadb
-from sentence_transformers import SentenceTransformer
-from typing import List, Dict, Any, Optional
+import hashlib
 import json
 from datetime import datetime
+from typing import List, Dict, Any, Optional
+
 from app.logger import get_logger
-import hashlib
+from app.services.embedding_runtime import EMBEDDING_PATH, get_chroma_client, get_embedding_model
 
 logger = get_logger(__name__)
 
@@ -41,99 +23,18 @@ class MemoryService:
         return cls._instance
     
     def __init__(self):
-        """初始化ChromaDB和Embedding模型"""
+        """接入共享的 ChromaDB 客户端与 Embedding 模型（见 embedding_runtime）"""
         if self._initialized:
             return
             
         try:
-            # 确保数据目录存在
-            chroma_dir = "data/chroma_db"
-            os.makedirs(chroma_dir, exist_ok=True)
-            
-            # 初始化ChromaDB客户端(使用新API - PersistentClient)
-            self.client = chromadb.PersistentClient(path=chroma_dir)
-            
-            # 初始化多语言embedding模型(支持中文)
-            logger.info("🔄 正在加载Embedding模型...")
-            
-            # 确保模型缓存目录存在
-            model_cache_dir = EMBEDDING_PATH
-            os.makedirs(model_cache_dir, exist_ok=True)
-            
-            # 调试信息：打印环境变量和路径
-            logger.info(f"📂 当前工作目录: {os.getcwd()}")
-            logger.info(f"📂 模型缓存目录: {os.path.abspath(model_cache_dir)}")
-            logger.info(f"🔧 SENTENCE_TRANSFORMERS_HOME: {os.environ.get('SENTENCE_TRANSFORMERS_HOME', '未设置')}")
-            logger.info(f"🔧 TRANSFORMERS_OFFLINE: {os.environ.get('TRANSFORMERS_OFFLINE', '未设置')}")
-            logger.info(f"🔧 HF_HUB_OFFLINE: {os.environ.get('HF_HUB_OFFLINE', '未设置')}")
-            
-            # 检查模型目录内容
-            if os.path.exists(model_cache_dir):
-                logger.info(f"📁 模型目录存在，检查内容...")
-                try:
-                    items = os.listdir(model_cache_dir)
-                    logger.info(f"📁 模型目录内容: {items}")
-                    
-                    # 检查是否有预期的模型文件夹
-                    expected_model_dir = os.path.join(model_cache_dir, 'models--sentence-transformers--paraphrase-multilingual-MiniLM-L12-v2')
-                    if os.path.exists(expected_model_dir):
-                        logger.info(f"✅ 找到本地模型目录: {expected_model_dir}")
-                        # 检查快照目录
-                        snapshots_dir = os.path.join(expected_model_dir, 'snapshots')
-                        if os.path.exists(snapshots_dir):
-                            snapshots = os.listdir(snapshots_dir)
-                            logger.info(f"📁 模型快照: {snapshots}")
-                    else:
-                        logger.warning(f"⚠️ 未找到本地模型目录: {expected_model_dir}")
-                except Exception as e:
-                    logger.error(f"❌ 检查模型目录失败: {str(e)}")
-            else:
-                logger.warning(f"⚠️ 模型目录不存在: {os.path.abspath(model_cache_dir)}")
-            
-            try:
-                logger.info("🔄 尝试加载主模型: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-                # 仅从本地 embedding 目录加载（local_files_only=True + 上方 offline 环境变量）；
-                # 缺模型时快速抛错并提示手动下载，绝不在运行时静默联网
-                self.embedding_model = SentenceTransformer(
-                    'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
-                    cache_folder=model_cache_dir,
-                    device='cpu',  # 明确指定使用CPU
-                    trust_remote_code=False,  # 安全起见
-                    local_files_only=True,  # 强制使用本地文件
-                )
-                logger.info("✅ Embedding模型加载成功 (paraphrase-multilingual-MiniLM-L12-v2)")
-            except Exception as e:
-                logger.warning(f"⚠️ 无法加载多语言模型: {str(e)}")
-                logger.error(f"❌ 详细错误: {repr(e)}")
-                import traceback
-                logger.error(f"❌ 错误堆栈:\n{traceback.format_exc()}")
-                logger.info("🔄 尝试使用备用模型: sentence-transformers/all-MiniLM-L6-v2")
-                try:
-                    # 降级到更小的模型作为备选
-                    # 同样强制本地：缺模型时应快速失败给出下载指引，而非无超时联网挂死
-                    self.embedding_model = SentenceTransformer(
-                        'sentence-transformers/all-MiniLM-L6-v2',
-                        cache_folder=model_cache_dir,
-                        device='cpu',
-                        trust_remote_code=False,
-                        local_files_only=True,
-                    )
-                    logger.info("✅ 使用备用Embedding模型 (all-MiniLM-L6-v2)")
-                except Exception as e2:
-                    logger.error(f"❌ 所有模型加载失败: {str(e2)}")
-                    logger.error(f"❌ 详细错误: {repr(e2)}")
-                    import traceback
-                    logger.error(f"❌ 错误堆栈:\n{traceback.format_exc()}")
-                    logger.error("💡 模型首次使用需要联网下载（约420MB）")
-                    logger.error("   或手动下载模型文件到 embedding 目录")
-                    logger.error(f"💡 期望的模型目录结构:")
-                    logger.error(f"   {os.path.abspath(model_cache_dir)}/models--sentence-transformers--paraphrase-multilingual-MiniLM-L12-v2/")
-                    raise RuntimeError("无法加载任何Embedding模型")
+            self.client = get_chroma_client()
+            self.embedding_model = get_embedding_model()
+            if self.embedding_model is None:
+                raise RuntimeError("无法加载任何Embedding模型")
             
             self._initialized = True
             logger.info("✅ MemoryService初始化成功")
-            logger.info(f"  - ChromaDB目录: {chroma_dir}")
-            logger.info(f"  - Embedding模型: paraphrase-multilingual-MiniLM-L12-v2")
             
         except Exception as e:
             # 降级而非崩溃：缺模型/向量库故障时应用仍可启动，
