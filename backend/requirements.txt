@@ -1,5 +1,5 @@
 # ==========================================
-# MuMuAINovel 依赖清单（Agent 架构重构版）
+# MuMuAINovel 依赖清单
 # ==========================================
 
 # Web框架
@@ -21,11 +21,6 @@ json-repair==0.59.10
 # AI服务（OpenAI 兼容接口，支持本地 Ollama）
 openai==2.7.0
 anthropic==0.72.0
-
-# LangGraph Multi-Agent 框架
-langgraph>=0.2.0
-langchain-core>=0.3.0
-langchain-openai>=0.2.0
 
 # 工具库
 httpx==0.28.1

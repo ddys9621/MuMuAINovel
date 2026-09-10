@@ -23,7 +23,7 @@ Write-Host "Installing Python dependencies..." -ForegroundColor Green
 
 if (-not (Test-Path $venvPython)) {
     Write-Host ""
-    Write-Host "[0/9] Create Python virtual environment" -ForegroundColor Cyan
+    Write-Host "[0/8] Create Python virtual environment" -ForegroundColor Cyan
     python -m venv $venvDir
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to create Python virtual environment"
@@ -31,52 +31,46 @@ if (-not (Test-Path $venvPython)) {
 }
 
 Write-Host ""
-Write-Host "[1/9] Upgrade pip" -ForegroundColor Cyan
+Write-Host "[1/8] Upgrade pip" -ForegroundColor Cyan
 & $venvPython -m pip install --upgrade pip
 if ($LASTEXITCODE -ne 0) {
     throw "Failed to upgrade pip"
 }
 
-Run-Step "[2/9] Install web framework" @(
+Run-Step "[2/8] Install web framework" @(
     "fastapi==0.121.0",
     "uvicorn[standard]==0.38.0",
     "python-multipart==0.0.20"
 ) 100
 
-Run-Step "[3/9] Install database drivers" @(
+Run-Step "[3/8] Install database drivers" @(
     "sqlalchemy==2.0.25",
     "aiosqlite==0.20.0"
 ) 100
 
-Run-Step "[4/9] Install validation and AI clients" @(
+Run-Step "[4/8] Install validation and AI clients" @(
     "pydantic==2.12.4",
     "pydantic-settings==2.11.0",
     "openai==2.7.0",
     "anthropic==0.72.0"
 ) 100
 
-Run-Step "[5/9] Install agent framework" @(
-    "langgraph>=0.2.0",
-    "langchain-core>=0.3.0",
-    "langchain-openai>=0.2.0"
-) 120
-
-Run-Step "[6/9] Install tools and desktop window" @(
+Run-Step "[5/8] Install tools and desktop window" @(
     "httpx==0.28.1",
     "python-dotenv==1.0.0",
     "mcp==1.21.0",
     "pywebview==5.3.2"
 ) 100
 
-Run-Step "[7/9] Install NumPy" @(
+Run-Step "[6/8] Install NumPy" @(
     "numpy==1.26.4"
 ) 100
 
-Run-Step "[8/9] Install ChromaDB" @(
+Run-Step "[7/8] Install ChromaDB" @(
     "chromadb==1.3.2"
 ) 200
 
-Run-Step "[9/9] Install Transformers" @(
+Run-Step "[8/8] Install Transformers" @(
     "transformers==4.57.1",
     "sentence-transformers==5.1.2"
 ) 200
