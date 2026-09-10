@@ -123,13 +123,6 @@ export function invalidateAttachmentsCache(projectId?: string): void {
   }
 }
 
-/**
- * V3.2-B：拆书生成任务刚完成时调，失效用户级 pack 列表缓存。 */
-// eslint-disable-next-line react-refresh/only-export-components
-export function invalidateUserPacksCache(): void {
-  _attachmentsCache.delete(USER_PACKS_CACHE_KEY);
-}
-
 interface Props {
   /**
    * V3.2-B：projectId 为可选。

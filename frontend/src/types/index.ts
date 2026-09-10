@@ -143,29 +143,6 @@ export interface ProjectUpdate {
   // current_words 由章节内容自动计算，不在此接口中
 }
 
-// 向导专用的项目更新接口，包含向导流程控制字段
-export interface ProjectWizardUpdate extends ProjectUpdate {
-  wizard_status?: 'incomplete' | 'completed';
-  wizard_step?: number;
-}
-
-// 项目创建向导
-export interface ProjectWizardRequest {
-  title: string;
-  theme: string;
-  genre?: string;
-  chapter_count: number;
-  narrative_perspective: string;
-  character_count?: number;
-  target_words?: number;
-  world_building?: {
-    time_period: string;
-    location: string;
-    atmosphere: string;
-    rules: string;
-  };
-}
-
 export interface WorldBuildingResponse {
   project_id: string;
   time_period: string;
@@ -313,36 +290,6 @@ export interface ChapterCanGenerateResponse {
   chapter_number: number;
 }
 
-// AI生成请求类型
-export interface GenerateOutlineRequest {
-  project_id: string;
-  genre?: string;
-  theme: string;
-  chapter_count: number;
-  narrative_perspective: string;
-  world_context?: Record<string, unknown>;
-  characters_context?: Character[];
-  target_words?: number;
-  requirements?: string;
-  provider?: string;
-  model?: string;
-  // 续写功能新增字段
-  mode?: 'auto' | 'new' | 'continue';
-  story_direction?: string;
-  plot_stage?: 'development' | 'climax' | 'ending';
-  keep_existing?: boolean;
-}
-
-// 大纲重排序请求类型
-export interface OutlineReorderItem {
-  id: string;
-  order_index: number;
-}
-
-export interface OutlineReorderRequest {
-  orders: OutlineReorderItem[];
-}
-
 export interface GenerateCharacterRequest {
   project_id: string;
   name?: string;
@@ -393,12 +340,6 @@ export interface WizardPlotLinesResponse {
   main_line: { id: string; title: string; estimated_chapters: number; beat_count: number };
   sub_lines: Array<{ id: string; title: string }>;
   plan_preview: { total_bridges: number; total_chapters: number };
-}
-
-// API响应类型
-export interface ApiResponse<T> {
-  data: T;
-  message?: string;
 }
 
 // 写作风格类型定义
@@ -453,18 +394,6 @@ export interface PaginationResponse<T> {
   total_pages: number;
 }
 
-// 向导表单数据类型
-export interface WizardBasicInfo {
-  title: string;
-  description: string;
-  theme: string;
-  genre: string | string[];
-  chapter_count: number;
-  narrative_perspective: string;
-  character_count?: number;
-  target_words?: number;
-}
-
 // API 错误响应类型
 export interface ApiError {
   response?: {
@@ -475,22 +404,8 @@ export interface ApiError {
   message?: string;
 }
 
-// 章节分析任务相关类型
-export interface AnalysisTask {
-  has_task: boolean;
-  task_id: string | null;
-  chapter_id: string;
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'none';
-  progress: number;
-  error_message?: string | null;
-  auto_recovered?: boolean;
-  created_at?: string | null;
-  started_at?: string | null;
-  completed_at?: string | null;
-}
-
 // 分析结果 - 钩子
-export interface AnalysisHook {
+interface AnalysisHook {
   type: string;
   content: string;
   strength: number;
@@ -498,7 +413,7 @@ export interface AnalysisHook {
 }
 
 // 分析结果 - 伏笔
-export interface AnalysisForeshadow {
+interface AnalysisForeshadow {
   content: string;
   type: 'planted' | 'resolved';
   strength: number;
@@ -506,25 +421,8 @@ export interface AnalysisForeshadow {
   reference_chapter?: number;
 }
 
-// 分析结果 - 冲突
-export interface AnalysisConflict {
-  types: string[];
-  parties: string[];
-  level: number;
-  description: string;
-  resolution_progress: number;
-}
-
-// 分析结果 - 情感曲线
-export interface AnalysisEmotionalArc {
-  primary_emotion: string;
-  intensity: number;
-  curve: string;
-  secondary_emotions: string[];
-}
-
 // 分析结果 - 角色状态
-export interface AnalysisCharacterState {
+interface AnalysisCharacterState {
   character_name: string;
   state_before: string;
   state_after: string;
@@ -534,7 +432,7 @@ export interface AnalysisCharacterState {
 }
 
 // 分析结果 - 情节点
-export interface AnalysisPlotPoint {
+interface AnalysisPlotPoint {
   content: string;
   type: 'revelation' | 'conflict' | 'resolution' | 'transition';
   importance: number;
@@ -542,18 +440,10 @@ export interface AnalysisPlotPoint {
 }
 
 // 分析结果 - 场景
-export interface AnalysisScene {
+interface AnalysisScene {
   location: string;
   atmosphere: string;
   duration: string;
-}
-
-// 分析结果 - 评分
-export interface AnalysisScores {
-  pacing: number;
-  engagement: number;
-  coherence: number;
-  overall: number;
 }
 
 // 完整分析数据 - 匹配后端PlotAnalysis模型
@@ -607,7 +497,7 @@ export interface ChapterAnalysisResponse {
   created_at: string;
 }
 
-export interface ChapterCausalLinkView {
+interface ChapterCausalLinkView {
   cause: string;
   event: string;
   effect: string;
@@ -619,7 +509,7 @@ export interface ChapterCausalLinkView {
   evidence?: string | null;
 }
 
-export interface NarrativePromiseView {
+interface NarrativePromiseView {
   id: string;
   promise_type: 'foreshadow' | 'promise' | 'mystery' | 'conflict' | string;
   title: string;
@@ -634,7 +524,7 @@ export interface NarrativePromiseView {
   resolution_note?: string | null;
 }
 
-export interface TimelineEventView {
+interface TimelineEventView {
   id: string;
   event_type: string;
   title: string;
@@ -646,12 +536,12 @@ export interface TimelineEventView {
   public_visibility?: 'public' | 'private' | 'secret' | string;
 }
 
-export interface RelationshipGraphNode {
+interface RelationshipGraphNode {
   id: string;
   label: string;
 }
 
-export interface RelationshipGraphEdge {
+interface RelationshipGraphEdge {
   source: string;
   target: string;
   delta: number;
@@ -660,12 +550,12 @@ export interface RelationshipGraphEdge {
   intimacy_level?: number | null;
 }
 
-export interface RelationshipGraphView {
+interface RelationshipGraphView {
   nodes: RelationshipGraphNode[];
   edges: RelationshipGraphEdge[];
 }
 
-export interface ConsistencyAuditIssue {
+interface ConsistencyAuditIssue {
   severity: 'critical' | 'high' | 'medium' | 'low' | string;
   issue_type: string;
   rule_code: string;
@@ -677,7 +567,7 @@ export interface ConsistencyAuditIssue {
   reference_chapter_number?: number | null;
 }
 
-export interface ConsistencyAuditSummary {
+interface ConsistencyAuditSummary {
   total: number;
   critical: number;
   high: number;
@@ -695,14 +585,6 @@ export interface ChapterNarrativeState {
   promises: NarrativePromiseView[];
   timeline_events: TimelineEventView[];
   relationship_graph: RelationshipGraphView;
-}
-
-// 手动触发分析响应
-export interface TriggerAnalysisResponse {
-  task_id: string;
-  chapter_id: string;
-  status: string;
-  message: string;
 }
 
 // MCP 插件类型定义 - 优化后只包含必要字段
@@ -773,18 +655,6 @@ export interface MCPTestResult {
   error?: string;
   error_type?: string;
   suggestions?: string[];
-}
-
-export interface MCPToolCallRequest {
-  plugin_id: string;
-  tool_name: string;
-  arguments: Record<string, unknown>;
-}
-
-export interface MCPToolCallResponse {
-  success: boolean;
-  result?: unknown;
-  error?: string;
 }
 
 // MCP 商城（内置精选目录 + 一键安装）
@@ -1008,27 +878,6 @@ export interface BeatCoverage {
   coverage: number;  // 本章对该节点的贡献度(0-1,表示0%-100%)
 }
 
-export interface TimelineCoverageUpdate {
-  beats_covered: BeatCoverage[];
-}
-
-// 节点贡献度分布
-export interface BeatContributionChapter {
-  chapter_id: string;
-  chapter_number: number;
-  chapter_title: string;
-  coverage: number;
-}
-
-export interface BeatContribution {
-  total_coverage: number;
-  chapters: BeatContributionChapter[];
-}
-
-export interface BeatContributionsMap {
-  [beat_index: number]: BeatContribution;
-}
-
 // 章纲类型定义
 // 章纲类型定义 - 专业网文版
 export interface ChapterOutline {
@@ -1119,65 +968,10 @@ export interface ChapterOutlineBatchCreateRequest {
 // ============================================
 
 // 章纲-剧情线关联
-export interface ChapterOutlinePlotLineLink {
-  id: string;
-  chapter_outline_id: string;
-  plot_line_id: string;
-  role: 'main' | 'sub' | 'character';
-  order_index?: number;
-  timeline_coverage?: {
-    beats_covered: BeatCoverage[];
-  };
-  created_at: string;
-}
-
-export interface ChapterOutlinePlotLineLinkCreate {
-  plot_line_id: string;
-  role: 'main' | 'sub' | 'character';
-  order_index?: number;
-}
-
-export interface ChapterOutlinePlotLineLinkBatch {
-  links: ChapterOutlinePlotLineLinkCreate[];
-}
 
 // 剧情卡片-剧情线关联
-export interface PlotCardPlotLineLink {
-  id: string;
-  plot_card_id: string;
-  plot_line_id: string;
-  created_at: string;
-}
-
-export interface PlotCardPlotLineLinkBatch {
-  plot_line_ids: string[];
-}
 
 // 剧情卡片-章纲关联
-export interface PlotCardChapterOutlineLink {
-  id: string;
-  plot_card_id: string;
-  chapter_outline_id: string;
-  usage_type: 'reference' | 'used' | 'planned';
-  usage_notes?: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface PlotCardChapterOutlineLinkCreate {
-  chapter_outline_id: string;
-  usage_type: 'reference' | 'used' | 'planned';
-  usage_notes?: string;
-}
-
-export interface PlotCardChapterOutlineLinkBatch {
-  links: PlotCardChapterOutlineLinkCreate[];
-}
-
-export interface PlotCardChapterOutlineLinkUpdate {
-  usage_type?: 'reference' | 'used' | 'planned';
-  usage_notes?: string;
-}
 
 // 扩展响应类型（包含关联信息）
 export interface PlotLineWithLinks {
@@ -1194,15 +988,6 @@ export interface PlotLineWithLinks {
   };
 }
 
-export interface ChapterOutlineWithLinks {
-  id: string;
-  chapter_number: number;
-  title: string;
-  summary?: string;
-  plot_line_count: number;
-  card_count: number;
-}
-
 export interface PlotCardWithLinks {
   id: string;
   title: string;
@@ -1212,61 +997,7 @@ export interface PlotCardWithLinks {
   chapter_count: number;
 }
 
-export interface LinkOverviewTopEntity {
-  id: string;
-  title: string;
-  type: 'plot_line' | 'chapter_outline' | 'plot_card';
-  totalLinks: number;
-}
-
-export type LinkGraphEntityType = 'project' | 'plot_line' | 'chapter_outline' | 'plot_card';
-
-export interface LinkGraphNode {
-  id: string;
-  title: string;
-  type: LinkGraphEntityType;
-  level: number;
-  description?: string;
-  stats?: {
-    chapterCount?: number;
-    plotCardCount?: number;
-    plotLineCount?: number;
-  };
-  expandable?: boolean;
-  expanded?: boolean;
-}
-
-export interface LinkGraphEdge {
-  id: string;
-  source: string;
-  target: string;
-  relation: 'line-outline' | 'line-card' | 'outline-card' | 'outline-line' | 'card-line' | 'card-outline' | 'project-line';
-  weight?: number;
-}
-
-export interface LinkGraphPayload {
-  nodes: LinkGraphNode[];
-  edges: LinkGraphEdge[];
-}
-
 // 关联管理请求类型
-export interface LinkChapterOutlinesRequest {
-  chapter_outline_ids: string[];
-  role?: 'main' | 'sub' | 'character';
-}
-
-export interface LinkPlotCardsRequest {
-  plot_card_ids: string[];
-}
-
-export interface LinkPlotLinesRequest {
-  plot_line_ids: string[];
-}
-
-export interface UpdatePlotCardUsageRequest {
-  usage_type: 'reference' | 'used' | 'planned';
-  usage_notes?: string;
-}
 
 // 世界规则系统类型定义
 export interface WorldRule {
@@ -1310,82 +1041,22 @@ export interface WorldRuleListResponse {
 // ============================================
 
 // 创建会话请求
-export interface SceneSessionCreateRequest {
-  chapter_outline_id: string;
-  provider?: string;
-  model?: string;
-  enable_mcp?: boolean;
-  selected_plugins?: string[];
-  writing_style_id?: string;
-  target_word_count?: number;
-}
 
 // 会话响应
-export interface SceneSessionResponse {
-  session_id: string;
-  status: 'active' | 'completed' | 'expired' | 'cancelled';
-  chapter_outline_id: string;
-  created_at?: string;
-  expires_at?: string;
-}
 
 // 会话状态响应
-export interface SceneSessionStatusResponse {
-  session_id: string;
-  status: 'active' | 'completed' | 'expired' | 'cancelled';
-  is_expired: boolean;
-  total_word_count: number;
-  scenes_count: number;
-  created_at?: string;
-  expires_at?: string;
-}
 
 // 剧情卡片状态（场景生成用）
-export interface PlotCardSceneStatus {
-  id: string;
-  title: string;
-  content?: string;
-  generation_status: 'pending' | 'generating' | 'completed' | 'rejected';
-  generated_content?: string;
-  word_count_target: number;
-  word_count_actual: number;
-  generation_order: number;
-}
 
 // 生成场景请求
-export interface GenerateSceneRequest {
-  plot_card_id: string;
-}
 
 // 反馈请求
-export interface SceneFeedbackRequest {
-  plot_card_id: string;
-  is_satisfied: boolean;
-  feedback_text?: string;
-}
 
 // 重生成请求
-export interface SceneRegenerateRequest {
-  plot_card_id: string;
-  optimization_hint?: string;
-}
 
 // 完成会话响应
-export interface CompleteSessionResponse {
-  session_id: string;
-  status: string;
-  content: string;
-  total_word_count: number;
-  scenes_count: number;
-  completed_at: string;
-}
 
 // SSE 流式响应数据
-export interface SceneStreamData {
-  content?: string;
-  done?: boolean;
-  error?: string;
-}
 
 // ============================================
 // 拆书参考（Book Dissect）
@@ -1453,7 +1124,6 @@ export interface BookDissectUploadResponse {
 // V3 R6 废弃：BookDissectApplyField / BookDissectApplyRequest / BookDissectApplyResponse 已移除。
 // 后端 POST /api/book-dissect/{task_id}/apply-to-wizard 现返 410 Gone；
 // 请改用参考包挂载 + 一键仿写路径，详见 @/frontend/src/components/ImitationDialog.tsx。
-
 
 // ============================================================
 // 拆书 V2 浏览类型

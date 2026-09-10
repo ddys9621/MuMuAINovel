@@ -517,5 +517,3 @@ export function ImitationDialog({
     document.body,
   );
 }
-
-export default ImitationDialog;

@@ -297,5 +297,3 @@ function MarketplaceCard({ item, busy, onInstall }: MarketplaceCardProps) {
     </div>
   )
 }
-
-export default MCPMarketplace

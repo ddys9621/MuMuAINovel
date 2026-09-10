@@ -44,7 +44,7 @@ export interface GenerationSteps {
   plotLines: GenStepStatus;
 }
 
-export type StallLevel = 'none' | 'slow' | 'stalled';
+type StallLevel = 'none' | 'slow' | 'stalled';
 export interface GenerationMeta {
   startedAt: number | null;
   lastUpdateAt: number | null;

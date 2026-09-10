@@ -4,24 +4,10 @@
  * 对应后端 PlotBridge model（详见 backend/app/models/plot_bridge.py）
  */
 
-export type BridgePosition = 'intro' | 'build' | 'payoff' | 'aftermath';
-
-export const BRIDGE_POSITION_LABEL: Record<BridgePosition, string> = {
-  intro: 'C1 代入+信息差',
-  build: 'C2 拉扯+开装',
-  payoff: 'C3 兑现爽点',
-  aftermath: 'C4 善后+下一目标',
-};
-
-export const BRIDGE_POSITION_RATIO: Record<BridgePosition, string> = {
-  intro: '5:5',
-  build: '9:1',
-  payoff: '10:0',
-  aftermath: '6:4',
-};
+type BridgePosition = 'intro' | 'build' | 'payoff' | 'aftermath';
 
 /** 题材族模板 key（对应 backend/app/services/bridge_templates.py） */
-export type BridgeTemplateKey = 'showoff' | 'mystery' | 'romance' | 'infinite';
+type BridgeTemplateKey = 'showoff' | 'mystery' | 'romance' | 'infinite';
 
 export const BRIDGE_TEMPLATE_UI: Record<
   BridgeTemplateKey,
@@ -152,13 +138,6 @@ export const BRIDGE_STATUS_LABEL: Record<BridgeStatus, string> = {
   completed: '已展开',
 };
 
-export const BRIDGE_STATUS_COLOR: Record<BridgeStatus, string> = {
-  draft: 'default',
-  ready: 'processing',
-  generating: 'warning',
-  completed: 'success',
-};
-
 /** 副线任务：支线/角色线节点挂到主线桥段（由后端 bridge_slot_planner 计算） */
 export interface SecondaryBeatTask {
   plot_line_id: string;
@@ -175,7 +154,7 @@ export interface SecondaryBeatTask {
   relation?: 'offset' | 'merge';
 }
 
-export type LineMode = 'companion' | 'inserted' | 'converge';
+type LineMode = 'companion' | 'inserted' | 'converge';
 
 export const LINE_MODE_LABEL: Record<LineMode, string> = {
   companion: '伴生',

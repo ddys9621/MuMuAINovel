@@ -24,7 +24,6 @@ import type {
   CharacterUpdate,
   Chapter,
   ChapterCreate,
-  ChapterGenerateRequest,
   ChapterUpdate,
   GenerateCharacterRequest,
   GenerateCharactersResponse,
@@ -43,8 +42,6 @@ import type {
   MCPPluginUpdate,
   MCPTestResult,
   MCPTool,
-  MCPToolCallRequest,
-  MCPToolCallResponse,
   MCPMarketplaceListResponse,
   MCPMarketplaceInstallRequest,
   PlotCard,
@@ -60,8 +57,6 @@ import type {
   PlotLineReorderRequest,
   PlotLineListResponse,
   PlotLineProgress,
-  TimelineData,
-  TimelineCoverageUpdate,
   ChapterOutline,
   ChapterOutlineCreate,
   ChapterOutlineUpdate,
@@ -69,7 +64,6 @@ import type {
   ChapterOutlineListResponse,
   ChapterOutlineBatchCreateRequest,
   PlotLineWithLinks,
-  ChapterOutlineWithLinks,
   PlotCardWithLinks,
   WorldRule,
   WorldRuleCreate,
@@ -211,11 +205,6 @@ export const settingsApi = {
   saveSettings: (data: SettingsUpdate) =>
     api.post<unknown, Settings>('/settings', data),
   
-  updateSettings: (data: SettingsUpdate) =>
-    api.put<unknown, Settings>('/settings', data),
-  
-  deleteSettings: () => api.delete<unknown, { message: string; user_id: string }>('/settings'),
-  
   getAvailableModels: (params: { api_key: string; api_base_url: string; provider: string }) =>
     api.get<unknown, { provider: string; models: Array<{ value: string; label: string; description: string }>; count?: number }>('/settings/models', { params }),
   
@@ -256,11 +245,6 @@ export const projectApi = {
   
   deleteProject: (id: string) => api.delete(`/projects/${id}`),
   
-  exportProject: (id: string) => {
-    window.open(`/api/projects/${id}/export`, '_blank');
-  },
-  
-  // 导出项目数据为JSON
   exportProjectData: async (id: string, options: { include_generation_history?: boolean; include_writing_styles?: boolean }) => {
     const response = await axios.post(
       `/api/projects/${id}/export-data`,
@@ -347,8 +331,6 @@ export const outlineApi = {
   getOutlines: (projectId: string) =>
     api.get<unknown, Outline[]>(`/projects/${projectId}/story-outlines`),
   
-  getOutline: (id: string) => api.get<unknown, Outline>(`/story-outlines/${id}`),
-  
   createOutline: (projectId: string, data: OutlineCreate) => 
     api.post<unknown, Outline>(`/projects/${projectId}/story-outlines`, data),
   
@@ -369,8 +351,6 @@ export const characterApi = {
   getCharacters: (projectId: string) =>
     api.get<unknown, Character[] | PaginationResponse<Character>>(`/characters/project/${projectId}`)
       .then(res => Array.isArray(res) ? res : (res.items || [])),
-  
-  getCharacter: (id: string) => api.get<unknown, Character>(`/characters/${id}`),
   
   createCharacter: (data: {
     project_id: string;
@@ -422,10 +402,6 @@ export const chapterApi = {
     api.get<unknown, import('../types').ChapterCanGenerateResponse>(`/chapters/${chapterId}/can-generate`),
   
   // 根据章纲获取或创建章节
-  getOrCreateChapterFromOutline: (outlineId: string) =>
-    api.post<unknown, Chapter>(`/chapters/chapter-outlines/${outlineId}/chapter`),
-
-  // 从章纲批量同步章节
   syncFromOutlines: (projectId: string) =>
     api.post<unknown, { created: number; skipped: number; total_outlines: number; message: string }>(
       `/chapters/project/${projectId}/sync-from-outlines`
@@ -449,25 +425,6 @@ export const chapterApi = {
     }>(`/chapters/${chapterId}/regeneration/tasks`, { params: { limit } }),
 
   // 重新生成任务详情（含新旧稿全文）
-  getRegenerationTask: (chapterId: string, taskId: string) =>
-    api.get<unknown, {
-      task_id: string;
-      chapter_id: string;
-      status: string;
-      version_number: number | null;
-      version_note: string | null;
-      modification_instructions: string | null;
-      custom_instructions: string | null;
-      original_word_count: number | null;
-      regenerated_word_count: number | null;
-      original_content: string | null;
-      regenerated_content: string | null;
-      error_message: string | null;
-      created_at: string | null;
-      completed_at: string | null;
-    }>(`/chapters/${chapterId}/regeneration/tasks/${taskId}`),
-
-  // 应用某个版本到章节正文（regenerated=新稿 / original=回滚原稿）
   applyRegenerationTask: (chapterId: string, taskId: string, source: 'regenerated' | 'original') =>
     api.post<unknown, { message: string; applied_source: string; word_count: number }>(
       `/chapters/${chapterId}/regeneration/tasks/${taskId}/apply`,
@@ -483,17 +440,6 @@ export const chapterApi = {
     }>(`/chapters/${chapterId}/navigation`),
 
   // 生成章节内容（流式）
-  generateChapterStream: (
-    chapterId: string,
-    data?: ChapterGenerateRequest,
-    options?: SSEClientOptions
-  ) => ssePost(
-    `/api/chapters/${chapterId}/generate-stream`,
-    data || {},
-    options
-  ),
-
-  // 获取章节分析任务状态
   getAnalysisStatus: (chapterId: string) =>
     api.get<unknown, {
       has_task: boolean;
@@ -509,39 +455,10 @@ export const chapterApi = {
     api.get<unknown, ChapterAnalysisResponse>(`/chapters/${chapterId}/analysis`),
 
   // 获取章节标注
-  getAnnotations: (chapterId: string) =>
-    api.get<unknown, Record<string, unknown>>(`/chapters/${chapterId}/annotations`),
-
-  // 触发章节分析
   analyzeChapter: (chapterId: string) =>
     api.post<unknown, { task_id: string; status: string }>(`/chapters/${chapterId}/analyze`),
 
   // 批量生成章节
-  batchGenerate: (projectId: string, data?: Record<string, unknown>) =>
-    api.post<unknown, { batch_id: string; status: string }>(`/chapters/project/${projectId}/batch-generate`, data || {}),
-
-  // 获取批量生成状态
-  getBatchGenerateStatus: (batchId: string) =>
-    api.get<unknown, { batch_id: string; status: string; progress?: number; results?: Array<Record<string, unknown>> }>(`/chapters/batch-generate/${batchId}/status`),
-
-  // 获取活跃的批量生成任务
-  getActiveBatchGenerate: (projectId: string) =>
-    api.get<unknown, Array<{ batch_id: string; status: string; progress?: number }>>(`/chapters/project/${projectId}/batch-generate/active`),
-
-  // 取消批量生成
-  cancelBatchGenerate: (batchId: string) =>
-    api.post<unknown, { message: string }>(`/chapters/batch-generate/${batchId}/cancel`),
-
-  // 重新生成章节（流式）
-  regenerateChapterStream: (
-    chapterId: string,
-    data?: Record<string, unknown>,
-    options?: SSEClientOptions
-  ) => ssePost(
-    `/api/chapters/${chapterId}/regenerate-stream`,
-    data || {},
-    options
-  ),
 };
 
 export const writingStyleApi = {
@@ -570,8 +487,6 @@ export const writingStyleApi = {
     api.post<unknown, WritingStyle>(`/writing-styles/${styleId}/set-default`, { project_id: projectId }),
   
   // 为项目初始化默认风格（如果没有任何风格）
-  initializeDefaultStyles: (projectId: string) =>
-    api.post<unknown, WritingStyleListResponse>(`/writing-styles/project/${projectId}/init-defaults`, {}),
 };
 
 export const inspirationApi = {
@@ -716,21 +631,6 @@ export const wizardStreamApi = {
     options
   ),
 
-  updateWorldBuildingStream: (
-    projectId: string,
-    data: {
-      time_period?: string;
-      location?: string;
-      atmosphere?: string;
-      rules?: string;
-    },
-    options?: SSEClientOptions<WorldBuildingResponse>
-  ) => ssePost<WorldBuildingResponse>(
-    '/api/wizard-stream/world-building',
-    { ...data, project_id: projectId, mode: 'update' },
-    options
-  ),
-
   regenerateWorldBuildingStream: (
     projectId: string,
     data?: {
@@ -771,10 +671,6 @@ export const mcpPluginApi = {
     api.get<unknown, MCPPlugin[]>('/mcp/plugins', { params }),
   
   // 获取单个插件
-  getPlugin: (id: string) =>
-    api.get<unknown, MCPPlugin>(`/mcp/plugins/${id}`),
-  
-  // 创建插件
   createPlugin: (data: MCPPluginCreate) =>
     api.post<unknown, MCPPlugin>('/mcp/plugins', data),
   
@@ -803,20 +699,6 @@ export const mcpPluginApi = {
     api.get<unknown, { tools: MCPTool[] }>(`/mcp/plugins/${id}/tools`),
   
   // 调用工具
-  callTool: (data: MCPToolCallRequest) =>
-    api.post<unknown, MCPToolCallResponse>('/mcp/plugins/call', data),
-
-  // 获取工具调用指标
-  getMetrics: (toolName?: string) =>
-    api.get<unknown, Record<string, unknown>>('/mcp/plugins/metrics', { params: { tool_name: toolName } }),
-
-  // 获取缓存统计
-  getCacheStats: () =>
-    api.get<unknown, Record<string, unknown>>('/mcp/plugins/cache/stats'),
-
-  // 清理缓存
-  clearCache: (userId?: string, pluginName?: string) =>
-    api.post<unknown, { success: boolean; message: string }>('/mcp/plugins/cache/clear', null, { params: { user_id: userId, plugin_name: pluginName } }),
 };
 
 // MCP 商城（内置精选目录 + 一键安装）
@@ -909,10 +791,6 @@ export const plotCardApi = {
     api.get<unknown, PlotCardListResponse>(`/plot-cards/project/${projectId}`, { params }),
 
   // 获取单个剧情卡片
-  getPlotCard: (cardId: string) =>
-    api.get<unknown, PlotCard>(`/plot-cards/${cardId}`),
-
-  // 创建剧情卡片
   createPlotCard: (data: PlotCardCreate) =>
     api.post<unknown, PlotCard>('/plot-cards', data),
 
@@ -948,10 +826,6 @@ export const plotLineApi = {
     api.get<unknown, PlotLineListResponse>(`/plot-lines/project/${projectId}`, { params }),
 
   // 获取单个剧情线
-  getPlotLine: (lineId: string) =>
-    api.get<unknown, PlotLine>(`/plot-lines/${lineId}`),
-
-  // 创建剧情线
   createPlotLine: (data: PlotLineCreate) =>
     api.post<unknown, PlotLine>('/plot-lines', data),
 
@@ -988,8 +862,6 @@ export const plotLineApi = {
     api.get<unknown, PlotLineProgress>(`/plot-lines/${lineId}/progress`),
 
   // 更新时间线数据
-  updateTimeline: (lineId: string, data: TimelineData) =>
-    api.put<unknown, PlotLine>(`/plot-lines/${lineId}/timeline`, data),
 };
 
 // 章纲 API
@@ -1003,10 +875,6 @@ export const chapterOutlineApi = {
     api.get<unknown, ChapterOutlineListResponse>(`/chapter-outlines/project/${projectId}`, { params }),
 
   // 获取单个章纲
-  getChapterOutline: (outlineId: string) =>
-    api.get<unknown, ChapterOutline>(`/chapter-outlines/${outlineId}`),
-
-  // 创建章纲
   createChapterOutline: (data: ChapterOutlineCreate) =>
     api.post<unknown, ChapterOutline>('/chapter-outlines', data),
 
@@ -1043,49 +911,6 @@ export const chapterOutlineApi = {
 // 关联管理 API
 // ============================================
 
-// 剧情线关联管理 API
-export const plotLineLinkApi = {
-  // 查询关联
-  getChapterOutlines: (lineId: string) =>
-    api.get<unknown, ChapterOutlineWithLinks[]>(`/plot-lines/${lineId}/chapter-outlines`),
-
-  getPlotCards: (lineId: string) =>
-    api.get<unknown, PlotCardWithLinks[]>(`/plot-lines/${lineId}/plot-cards`),
-
-  // 管理关联
-  linkChapterOutlines: (lineId: string, data: { chapter_outline_ids: string[]; role?: string }) =>
-    api.post<unknown, { message: string; created_count: number; skipped_count: number }>(
-      `/plot-lines/${lineId}/link-chapter-outlines`,
-      {
-        chapter_outline_ids: data.chapter_outline_ids,
-        role: data.role || 'main'
-      }
-    ),
-
-  unlinkChapterOutlines: (lineId: string, chapterOutlineIds: string[]) =>
-    api.delete<unknown, { message: string; removed_count: number }>(
-      `/plot-lines/${lineId}/unlink-chapter-outlines`,
-      {
-        data: { ids: chapterOutlineIds }
-      }
-    ),
-
-  linkPlotCards: (lineId: string, plotCardIds: string[]) =>
-    api.post<unknown, { message: string; created_count: number; skipped_count: number }>(
-      `/plot-lines/${lineId}/link-plot-cards`,
-      {
-        plot_card_ids: plotCardIds
-      }
-    ),
-
-  unlinkPlotCards: (lineId: string, plotCardIds: string[]) =>
-    api.delete<unknown, { message: string; removed_count: number }>(
-      `/plot-lines/${lineId}/unlink-plot-cards`,
-      {
-        data: { ids: plotCardIds }
-      }
-    ),
-};
 
 // 章纲关联管理 API
 export const chapterOutlineLinkApi = {
@@ -1114,93 +939,8 @@ export const chapterOutlineLinkApi = {
       }
     ),
 
-  linkPlotCards: (outlineId: string, data: { plot_card_ids: string[]; usage_type?: string; usage_notes?: string }) =>
-    api.post<unknown, { message: string; created_count: number; skipped_count: number }>(
-      `/chapter-outlines/${outlineId}/link-plot-cards`,
-      {
-        plot_card_ids: data.plot_card_ids,
-        usage_type: data.usage_type || 'reference',
-        usage_notes: data.usage_notes
-      }
-    ),
-
-  unlinkPlotCards: (outlineId: string, plotCardIds: string[]) =>
-    api.delete<unknown, { message: string; removed_count: number }>(
-      `/chapter-outlines/${outlineId}/unlink-plot-cards`,
-      {
-        data: { ids: plotCardIds }
-      }
-    ),
-
-  updatePlotCardUsage: (outlineId: string, cardId: string, data: {
-    usage_type: string;
-    usage_notes?: string;
-  }) =>
-    api.put<unknown, { message: string }>(
-      `/chapter-outlines/${outlineId}/plot-cards/${cardId}/usage`,
-      data
-    ),
-
-  // 更新节点覆盖度
-  updateTimelineCoverage: (
-    chapterId: string,
-    linkId: string,
-    data: TimelineCoverageUpdate
-  ) =>
-    api.put<unknown, { message: string; updated_beats_count: number }>(
-      `/chapter-outlines/${chapterId}/plot-line-links/${linkId}/timeline-coverage`,
-      data
-    ),
-
-  // 获取剧情线节点的贡献度分布
-  getBeatContributions: (plotLineId: string) =>
-    api.get<unknown, Record<number, { total_coverage: number; chapters: Array<{ chapter_id: string; chapter_number: number; chapter_title: string; coverage: number }> }>>(
-      `/chapter-outlines/plot-lines/${plotLineId}/beat-contributions`
-    ),
 };
 
-// 剧情卡片关联管理 API
-export const plotCardLinkApi = {
-  // 查询关联
-  getPlotLines: (cardId: string) =>
-    api.get<unknown, PlotLineWithLinks[]>(`/plot-cards/${cardId}/plot-lines`),
-
-  getChapterOutlines: (cardId: string) =>
-    api.get<unknown, ChapterOutlineWithLinks[]>(`/plot-cards/${cardId}/chapter-outlines`),
-
-  // 管理关联
-  linkPlotLines: (cardId: string, plotLineIds: string[]) =>
-    api.post<unknown, { message: string; created_count: number; skipped_count: number }>(
-      `/plot-cards/${cardId}/link-plot-lines`,
-      { plot_line_ids: plotLineIds }
-    ),
-
-  unlinkPlotLines: (cardId: string, plotLineIds: string[]) =>
-    api.delete<unknown, { message: string; removed_count: number }>(
-      `/plot-cards/${cardId}/unlink-plot-lines`,
-      {
-        data: { ids: plotLineIds }
-      }
-    ),
-
-  linkChapterOutlines: (cardId: string, links: Array<{
-    chapter_outline_id: string;
-    usage_type: string;
-    usage_notes?: string;
-  }>) =>
-    api.post<unknown, { message: string; created_count: number; skipped_count: number }>(
-      `/plot-cards/${cardId}/link-chapter-outlines`,
-      { links }
-    ),
-
-  unlinkChapterOutlines: (cardId: string, chapterOutlineIds: string[]) =>
-    api.delete<unknown, { message: string; removed_count: number }>(
-      `/plot-cards/${cardId}/unlink-chapter-outlines`,
-      {
-        data: { ids: chapterOutlineIds }
-      }
-    ),
-};
 
 // 世界规则系统 API
 export const worldRulesApi = {
@@ -1257,7 +997,6 @@ export const sceneGenerationApi = {
   ) => ssePost('/api/scene-generation/generate-scene-stream', data, options),
 
   // 流式生成场景的 URL（兼容现有裸 fetch 用法）
-  getGenerateSceneStreamUrl: () => '/api/scene-generation/generate-scene-stream',
 };
 
 // ============================================
@@ -1281,10 +1020,6 @@ export const relationshipApi = {
     api.get<unknown, Array<Record<string, unknown>>>(`/relationships/project/${projectId}`),
 
   // 获取关系图谱数据
-  getGraph: (projectId: string) =>
-    api.get<unknown, { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> }>(`/relationships/graph/${projectId}`),
-
-  // 创建关系
   createRelationship: (data: {
     project_id: string;
     character_from_id: string;
@@ -1323,10 +1058,6 @@ export const organizationApi = {
     api.get<unknown, Array<Record<string, unknown>>>(`/organizations/project/${projectId}`),
 
   // 获取组织详情
-  getOrganization: (orgId: string) =>
-    api.get<unknown, Record<string, unknown>>(`/organizations/${orgId}`),
-
-  // 创建组织（需要先通过 characterApi.createCharacter 创建 is_organization=true 的角色）
   createOrganization: (data: {
     character_id: string;
     project_id: string;
@@ -1397,17 +1128,6 @@ export const organizationApi = {
     api.post<unknown, Record<string, unknown>>('/organizations/generate', data),
 
   // AI流式生成组织
-  generateOrganizationStream: (
-    data: {
-      project_id: string;
-      requirements?: string;
-    },
-    options?: SSEClientOptions
-  ) => ssePost(
-    '/api/organizations/generate-stream',
-    data,
-    options
-  ),
 };
 
 // ============================================
@@ -1415,10 +1135,6 @@ export const organizationApi = {
 // ============================================
 export const memoryApi = {
   // 分析章节记忆
-  analyzeChapterMemory: (projectId: string, chapterId: string) =>
-    api.post<unknown, { success: boolean; message: string; analysis: Record<string, unknown>; memories_count: number }>(`/memories/projects/${projectId}/analyze-chapter/${chapterId}`),
-
-  // 获取项目记忆列表
   getProjectMemories: (projectId: string, params?: {
     memory_type?: string;
     chapter_id?: string;
@@ -1427,10 +1143,6 @@ export const memoryApi = {
     api.get<unknown, { success: boolean; memories: Array<Record<string, unknown>>; total: number }>(`/memories/projects/${projectId}/memories`, { params }),
 
   // 获取章节分析结果
-  getChapterAnalysis: (projectId: string, chapterId: string) =>
-    api.get<unknown, { success: boolean; analysis: Record<string, unknown> }>(`/memories/projects/${projectId}/analysis/${chapterId}`),
-
-  // 搜索记忆
   searchMemories: (projectId: string, data: {
     query: string;
     memory_types?: string[];

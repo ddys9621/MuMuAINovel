@@ -12,7 +12,7 @@ export const UPDATE_STORAGE_KEYS = {
 
 export const AUTO_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
 
-export interface UpdateInfo {
+interface UpdateInfo {
   current_version: string
   run_mode: RunMode
 }

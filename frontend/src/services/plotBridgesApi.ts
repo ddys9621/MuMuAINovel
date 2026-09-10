@@ -87,13 +87,6 @@ export const plotBridgesApi = {
    * 获取单个桥段详情
    * GET /api/bridges/{bridgeId}
    */
-  get: (bridgeId: string) =>
-    api.get<unknown, PlotBridge>(`/bridges/${bridgeId}`),
-
-  /**
-   * 更新桥段（手工编辑 4 章卡片内容）
-   * PATCH /api/bridges/{bridgeId}
-   */
   update: (bridgeId: string, payload: UpdateBridgeRequest) =>
     api.patch<unknown, PlotBridge>(`/bridges/${bridgeId}`, payload),
 

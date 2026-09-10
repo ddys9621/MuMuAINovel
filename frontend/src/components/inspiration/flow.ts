@@ -6,7 +6,7 @@ import type { OptionGenerationStep, Step } from './types';
 export const FLOW_STEPS = ['idea', 'title', 'description', 'theme', 'genre', 'perspective', 'confirm'] as const;
 export type FlowStep = (typeof FLOW_STEPS)[number];
 
-export type StepChipStatus = 'done' | 'current' | 'upcoming';
+type StepChipStatus = 'done' | 'current' | 'upcoming';
 
 /** 状态机 Step → 头部步骤条使用的展示步骤 */
 export function getFlowStep(step: Step): FlowStep {

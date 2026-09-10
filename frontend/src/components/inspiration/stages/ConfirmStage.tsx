@@ -10,7 +10,7 @@ import type { GenerationNodeKey } from '../useProjectGeneration';
 
 const META = STEP_META.confirm;
 
-export interface ResumeOption {
+interface ResumeOption {
   /** 中断在哪个环节 */
   node: GenerationNodeKey;
   /** 各环节当前状态，用于在流水线格子上标出已完成 / 失败 */

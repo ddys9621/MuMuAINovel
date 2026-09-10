@@ -20,7 +20,6 @@ import type {
   ChapterCreate,
   ChapterUpdate,
   ChapterGenerateRequest,
-  // GenerateOutlineRequest,
   GenerateCharacterRequest
 } from '../types';
 

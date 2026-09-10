@@ -22,10 +22,10 @@ export interface MemoryAnnotation {
 }
 
 /** 标注没有给出长度时默认标记的字符数 */
-export const DEFAULT_ANNOTATION_LENGTH = 30;
+const DEFAULT_ANNOTATION_LENGTH = 30;
 
 /** 一条标注在正文中对应的 [start, end) 区间 */
-export interface AnnotationSpan {
+interface AnnotationSpan {
   annotation: MemoryAnnotation;
   start: number;
   end: number;
@@ -42,7 +42,7 @@ export interface TextSegment {
   starting: MemoryAnnotation[];
 }
 
-export function isAnnotationType(type: string): type is AnnotationType {
+function isAnnotationType(type: string): type is AnnotationType {
   return (ANNOTATION_TYPES as readonly string[]).includes(type);
 }
 

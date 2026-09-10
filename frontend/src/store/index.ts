@@ -36,44 +36,27 @@ interface AppState {
 
   // 剧情卡片状态
   plotCards: PlotCard[];
-  plotCardsLoading: boolean;
   setPlotCards: (plotCards: PlotCard[]) => void;
   addPlotCard: (plotCard: PlotCard) => void;
   updatePlotCard: (plotCard: PlotCard) => void;
   removePlotCard: (id: string) => void;
-  setPlotCardsLoading: (loading: boolean) => void;
 
   // 剧情线状态
   plotLines: PlotLine[];
-  plotLinesLoading: boolean;
   setPlotLines: (plotLines: PlotLine[]) => void;
   addPlotLine: (plotLine: PlotLine) => void;
   updatePlotLine: (plotLine: PlotLine) => void;
   removePlotLine: (id: string) => void;
-  setPlotLinesLoading: (loading: boolean) => void;
 
   // 章纲状态
   chapterOutlines: ChapterOutline[];
-  chapterOutlinesLoading: boolean;
   setChapterOutlines: (chapterOutlines: ChapterOutline[]) => void;
   addChapterOutline: (chapterOutline: ChapterOutline) => void;
   updateChapterOutline: (chapterOutline: ChapterOutline) => void;
   removeChapterOutline: (id: string) => void;
-  setChapterOutlinesLoading: (loading: boolean) => void;
 
   loading: boolean;
   setLoading: (loading: boolean) => void;
-
-  lastUpdated: {
-    projects?: number;
-    outlines?: number;
-    characters?: number;
-    chapters?: number;
-    plotCards?: number;
-    plotLines?: number;
-    chapterOutlines?: number;
-  };
-  markUpdated: (key: 'projects' | 'outlines' | 'characters' | 'chapters' | 'plotCards' | 'plotLines' | 'chapterOutlines') => void;
 
   clearProjectData: () => void;
 }
@@ -153,7 +136,6 @@ export const useStore = create<AppState>((set) => ({
 
   // 剧情卡片状态实现
   plotCards: [],
-  plotCardsLoading: false,
   setPlotCards: (plotCards) => set({ plotCards }),
   addPlotCard: (plotCard) => set((state) => ({ 
     plotCards: [...state.plotCards, plotCard] 
@@ -166,11 +148,9 @@ export const useStore = create<AppState>((set) => ({
   removePlotCard: (id) => set((state) => ({
     plotCards: state.plotCards.filter((card) => card.id !== id),
   })),
-  setPlotCardsLoading: (loading) => set({ plotCardsLoading: loading }),
 
   // 剧情线状态实现
   plotLines: [],
-  plotLinesLoading: false,
   setPlotLines: (plotLines) => set({ plotLines }),
   addPlotLine: (plotLine) => set((state) => ({ 
     plotLines: [...state.plotLines, plotLine] 
@@ -183,11 +163,9 @@ export const useStore = create<AppState>((set) => ({
   removePlotLine: (id) => set((state) => ({
     plotLines: state.plotLines.filter((line) => line.id !== id),
   })),
-  setPlotLinesLoading: (loading) => set({ plotLinesLoading: loading }),
 
   // 章纲状态实现
   chapterOutlines: [],
-  chapterOutlinesLoading: false,
   setChapterOutlines: (chapterOutlines) => set({ chapterOutlines }),
   addChapterOutline: (chapterOutline) => set((state) => ({ 
     chapterOutlines: [...state.chapterOutlines, chapterOutline] 
@@ -200,18 +178,9 @@ export const useStore = create<AppState>((set) => ({
   removeChapterOutline: (id) => set((state) => ({
     chapterOutlines: state.chapterOutlines.filter((outline) => outline.id !== id),
   })),
-  setChapterOutlinesLoading: (loading) => set({ chapterOutlinesLoading: loading }),
 
   loading: false,
   setLoading: (loading) => set({ loading }),
-
-  lastUpdated: {},
-  markUpdated: (key) => set((state) => ({
-    lastUpdated: {
-      ...state.lastUpdated,
-      [key]: Date.now(),
-    },
-  })),
 
   clearProjectData: () => set({
     outlines: [],
@@ -219,10 +188,7 @@ export const useStore = create<AppState>((set) => ({
     chapters: [],
     currentChapter: null,
     plotCards: [],
-    plotCardsLoading: false,
     plotLines: [],
-    plotLinesLoading: false,
     chapterOutlines: [],
-    chapterOutlinesLoading: false,
   }),
 }));

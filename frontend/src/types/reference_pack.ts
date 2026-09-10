@@ -230,11 +230,4 @@ export interface ImitatePromptPreview {
 }
 
 /** SSE 流式事件载荷（meta 事件） */
-export interface ImitationStreamMeta {
-  type: 'meta';
-  used_packs: ImitationPackUsage[];
-  used_dimensions: string[];
-  strength: ReferenceStrength;
-  project_context_chars: number;
-  reference_chars: number;
-}
+

@@ -29,7 +29,6 @@ export function usePlotCardSync() {
     addPlotCard,
     updatePlotCard,
     removePlotCard,
-    setPlotCardsLoading,
   } = useStore();
 
   // 刷新剧情卡片列表
@@ -40,7 +39,6 @@ export function usePlotCardSync() {
     chapter_outline_id?: string;
   }) => {
     try {
-      setPlotCardsLoading(true);
       const response = await plotCardApi.getPlotCards(projectId, params);
       setPlotCards(response.items);
       return response;
@@ -48,10 +46,8 @@ export function usePlotCardSync() {
       console.error('获取剧情卡片失败:', error);
       toast.error('获取剧情卡片失败');
       throw error;
-    } finally {
-      setPlotCardsLoading(false);
     }
-  }, [setPlotCards, setPlotCardsLoading]);
+  }, [setPlotCards]);
 
   // 创建剧情卡片
   const createPlotCard = useCallback(async (data: PlotCardCreate) => {
@@ -151,7 +147,6 @@ export function usePlotLineSync() {
     addPlotLine,
     updatePlotLine,
     removePlotLine,
-    setPlotLinesLoading,
   } = useStore();
 
   // 刷新剧情线列表
@@ -161,7 +156,6 @@ export function usePlotLineSync() {
     line_type?: string;
   }) => {
     try {
-      setPlotLinesLoading(true);
       const response = await plotLineApi.getPlotLines(projectId, params);
       setPlotLines(response.items);
       return response;
@@ -169,10 +163,8 @@ export function usePlotLineSync() {
       console.error('获取剧情线失败:', error);
       toast.error('获取剧情线失败');
       throw error;
-    } finally {
-      setPlotLinesLoading(false);
     }
-  }, [setPlotLines, setPlotLinesLoading]);
+  }, [setPlotLines]);
 
   // 创建剧情线
   const createPlotLine = useCallback(async (data: PlotLineCreate) => {
@@ -298,7 +290,6 @@ export function useChapterOutlineSync() {
     addChapterOutline,
     updateChapterOutline,
     removeChapterOutline,
-    setChapterOutlinesLoading,
   } = useStore();
 
   // 刷新章纲列表
@@ -308,7 +299,6 @@ export function useChapterOutlineSync() {
     plot_line_id?: string;
   }) => {
     try {
-      setChapterOutlinesLoading(true);
       const response = await chapterOutlineApi.getChapterOutlines(projectId, params);
       setChapterOutlines(response.items);
       return response;
@@ -316,10 +306,8 @@ export function useChapterOutlineSync() {
       console.error('获取章纲失败:', error);
       toast.error('获取章纲失败');
       throw error;
-    } finally {
-      setChapterOutlinesLoading(false);
     }
-  }, [setChapterOutlines, setChapterOutlinesLoading]);
+  }, [setChapterOutlines]);
 
   // 创建章纲
   const createChapterOutline = useCallback(async (data: ChapterOutlineCreate) => {

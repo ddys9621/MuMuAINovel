@@ -5,7 +5,7 @@ import type { FlowStep } from './flow';
 import type { GenerationNodeKey } from './useProjectGeneration';
 import type { GenStepStatus, OptionGenerationStep } from './types';
 
-export interface StepMeta {
+interface StepMeta {
   eyebrow: string;
   title: string;
   description: string;
@@ -106,7 +106,7 @@ export const SAMPLE_SEEDS = [
   '修仙界的外卖员，靠送餐结识各路大佬，却被卷进宗门秘辛',
 ];
 
-export interface NodeMeta {
+interface NodeMeta {
   key: GenerationNodeKey;
   label: string;
   hint: string;
@@ -137,7 +137,7 @@ export const NODE_STATUS_LABEL: Record<GenStepStatus, string> = {
 };
 
 export const CONFIRM_CREATE_OPTION = '✅ 确认创建';
-export const RESTART_OPTION = '🔄 重新开始';
+
 /** 状态机里表示"我自己写"的候选项，不作为选项卡片展示 */
 export const MANUAL_INPUT_OPTIONS = new Set(['我自己输入书名', '我自己输入']);
 /** 状态机里表示"重试"的候选项，改由错误提示条上的按钮触发 */

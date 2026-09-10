@@ -4,7 +4,7 @@ import type { WizardState, WizardAction, Message } from './types';
 import { createInitialState } from './types';
 
 let _msgCounter = 0;
-export const genMsgId = (): string => `msg_${Date.now()}_${++_msgCounter}`;
+const genMsgId = (): string => `msg_${Date.now()}_${++_msgCounter}`;
 
 /** 将最后一条带 options 的 AI 消息标记为 disabled */
 const disableLastOptions = (messages: Message[]): Message[] => {
