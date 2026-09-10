@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     
     # 应用配置
     app_name: str = "MuMuAINovel"
-    app_version: str = "1.0.0"
+    app_version: str = "1.1.0"
     app_host: str = "0.0.0.0"
     app_port: int = 8000
     debug: bool = True
