@@ -9,7 +9,7 @@ class WritingStyle(Base):
     __tablename__ = "writing_styles"
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True, comment="所属项目ID（NULL表示全局预设风格）")
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True, index=True, comment="所属项目ID（NULL表示全局预设风格）")
     name = Column(String(100), nullable=False, comment="风格名称")
     style_type = Column(String(50), nullable=False, comment="风格类型：preset/custom")
     preset_id = Column(String(50), comment="预设风格ID：natural/classical/modern等")

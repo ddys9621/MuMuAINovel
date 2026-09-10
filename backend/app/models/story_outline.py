@@ -11,7 +11,7 @@ class StoryOutline(Base):
     __tablename__ = "story_outlines"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     title = Column(String(200), nullable=False, comment="大纲标题")
     content = Column(Text, comment="故事前提内容(premise)")
     version = Column(Integer, default=1, comment="版本号")

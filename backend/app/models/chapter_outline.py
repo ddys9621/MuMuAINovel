@@ -11,7 +11,7 @@ class ChapterOutline(Base):
     __tablename__ = "chapter_outlines"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     chapter_number = Column(Integer, nullable=False, comment="章节序号")
     title = Column(String(200), nullable=False, comment="章节标题")
 

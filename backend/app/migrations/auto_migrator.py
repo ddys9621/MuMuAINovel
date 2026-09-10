@@ -469,6 +469,22 @@ async def ensure_chapter_outline_bridge_columns(engine: AsyncEngine):
     await _ensure_columns(engine, "chapter_outlines", CHAPTER_OUTLINE_BRIDGE_COLUMNS, "V4 P2-1")
 
 
+PROJECT_ID_INDEX_TABLES: tuple[str, ...] = (
+    "chapters", "chapter_outlines", "plot_lines", "plot_cards", "characters",
+    "story_outlines", "generation_history", "writing_styles", "project_default_styles",
+)
+
+
+async def ensure_project_id_indexes(engine: AsyncEngine):
+    """热表 project_id 索引：几乎所有查询都按 project_id 过滤，旧库此前全表扫描。
+
+    索引名与 SQLAlchemy `index=True` 的默认命名（ix_<table>_<column>）一致，新库 create_all 已建，此处 IF NOT EXISTS 幂等。
+    """
+    async with engine.begin() as conn:
+        for table in PROJECT_ID_INDEX_TABLES:
+            await conn.execute(text(f"CREATE INDEX IF NOT EXISTS ix_{table}_project_id ON {table} (project_id)"))
+
+
 async def run_auto_migrations(engine: AsyncEngine):
     try:
         await ensure_users_email_column(engine)  # 登录方式后台开关：邮箱注册用户
@@ -489,6 +505,7 @@ async def run_auto_migrations(engine: AsyncEngine):
         await ensure_plot_bridge_secondary_beats_column(engine)  # 工程化桥段流水线：副线任务
         await ensure_plot_bridge_generation_meta_column(engine)  # 桥段填充溯源
         await ensure_character_aliases_column(engine)  # 角色曾用名（改名级联兜底）
+        await ensure_project_id_indexes(engine)  # 热表 project_id 索引（旧库补建）
         logger.info("✅ Auto migrations finished")
     except Exception as exc:
         logger.error("❌ Auto migrations failed: %s", exc, exc_info=True)

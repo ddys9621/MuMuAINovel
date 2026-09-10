@@ -9,7 +9,7 @@ class ProjectDefaultStyle(Base):
     __tablename__ = "project_default_styles"
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, comment="项目ID")
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True, comment="项目ID")
     style_id = Column(Integer, ForeignKey("writing_styles.id", ondelete="CASCADE"), nullable=False, comment="风格ID")
     created_at = Column(DateTime, server_default=func.now(), comment="创建时间")
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), comment="更新时间")

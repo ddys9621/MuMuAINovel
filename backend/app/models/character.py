@@ -10,7 +10,7 @@ class Character(Base):
     __tablename__ = "characters"
     
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     
     # 基本信息
     name = Column(String(100), nullable=False, comment="角色/组织名称")

@@ -11,7 +11,7 @@ class PlotCard(Base):
     __tablename__ = "plot_cards"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     chapter_outline_id = Column(String(36), ForeignKey("chapter_outlines.id", ondelete="SET NULL"), nullable=True, comment="关联的章纲ID")
     title = Column(String(200), nullable=False, comment="卡片标题")
     content = Column(Text, comment="卡片内容描述")

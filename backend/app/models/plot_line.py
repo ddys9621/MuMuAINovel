@@ -11,7 +11,7 @@ class PlotLine(Base):
     __tablename__ = "plot_lines"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     story_outline_id = Column(String(36), ForeignKey("story_outlines.id", ondelete="CASCADE"), nullable=True, comment="关联的故事大纲ID")
     title = Column(String(200), nullable=False, comment="剧情线标题")
     description = Column(Text, comment="剧情线描述")
