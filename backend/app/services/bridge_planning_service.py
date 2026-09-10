@@ -106,6 +106,16 @@ async def load_plot_line_data(db: AsyncSession, project_id: str) -> list[PlotLin
     return [parse_plot_line(line) for line in result.scalars().all()]
 
 
+def _secondary_task_line(t: dict[str, Any], *, with_desc: bool) -> str:
+    text = (
+        f"- {t.get('line_type')}《{t.get('line_title')}》[节点 {t.get('beat_index')}] {t.get('beat_title')}："
+        f"进度 {float(t.get('coverage_start', 0)) * 100:.0f}% → {float(t.get('coverage_end', 0)) * 100:.0f}%"
+    )
+    if with_desc and t.get("beat_description"):
+        text += f"｜{str(t['beat_description'])[:120]}"
+    return text
+
+
 async def _load_beat_context_for_bridge(
     db: AsyncSession, bridge: PlotBridge
 ) -> str:
@@ -206,14 +216,16 @@ async def _load_beat_context_for_bridge(
     except (json.JSONDecodeError, TypeError):
         secondary = []
     if secondary:
-        lines.append("")
-        lines.append("【🧵 副线任务（本桥段 4 章内须推进，不得抢占主线爽点）】")
-        for t in secondary:
-            lines.append(
-                f"- {t.get('line_type')}《{t.get('line_title')}》[节点 {t.get('beat_index')}] {t.get('beat_title')}："
-                f"进度 {float(t.get('coverage_start', 0)) * 100:.0f}% → {float(t.get('coverage_end', 0)) * 100:.0f}%"
-                + (f"｜{str(t['beat_description'])[:120]}" if t.get("beat_description") else "")
-            )
+        primary = [t for t in secondary if isinstance(t, dict) and t.get("role", "primary") != "mention"]
+        mention = [t for t in secondary if isinstance(t, dict) and t.get("role", "primary") == "mention"]
+        if primary:
+            lines.append("")
+            lines.append("【🧵 副线任务 · 主 B 线（本桥段 4 章内须推进到位，不得抢占主线爽点）】")
+            lines.extend(_secondary_task_line(t, with_desc=True) for t in primary)
+        if mention:
+            lines.append("")
+            lines.append("【🧵 副线任务 · 保温提及（一句话带过现状，不展开新事件）】")
+            lines.extend(_secondary_task_line(t, with_desc=False) for t in mention)
     return "\n".join(lines)
 
 
@@ -231,7 +243,8 @@ BRIDGE_FILL_TASK_PROMPT = """请为下面 {count} 个桥段槽位填写内容。
 # 约束
 - 只输出标 ★ 的 {count} 个对象，严格按槽位顺序，`bridge_number` 必须与槽位一致
 - 每个桥段的 goal 必须落在所属节点主题内，进度按覆盖区间推进（区间末尾对应节点完成度）
-- 有副线任务的桥段，须在 c1-c4 中安排该副线的推进（不得抢占主线{payoff_label}）
+- 标「主B线」的桥段：该支线节点所述事件必须在本桥段 4 章内发生并推进到位（建议放 C1 下半或 C4，不得抢占主线{payoff_label}）
+- 标「保温」的支线：只需一句话带过其现状，不得展开新事件
 - 金手指使用方式在相邻桥段间不得重复
 - 人名、地名、势力名只能使用【本书角色】【世界规则表】里已有的；确需新角色时在 goal 里用“新角色：身份”标注
 - 最后一个桥段的 next_bridge_hook 要为下一节点开头留引子
@@ -561,12 +574,15 @@ class BridgePlanningService:
             except (json.JSONDecodeError, TypeError):
                 secondary = []
             for t in secondary:
+                if not isinstance(t, dict):
+                    continue
+                label = "保温" if t.get("role", "primary") == "mention" else "主B线"
                 row += (
-                    f"\n    · 副线任务：{t.get('line_type')}《{t.get('line_title')}》"
+                    f"\n    · {label}：{t.get('line_type')}《{t.get('line_title')}》"
                     f"[节点 {t.get('beat_index')}] {t.get('beat_title')} "
                     f"进度 {float(t.get('coverage_start', 0)) * 100:.0f}% → {float(t.get('coverage_end', 0)) * 100:.0f}%"
                 )
-                if t.get("beat_description"):
+                if label == "主B线" and t.get("beat_description"):
                     row += f"｜{str(t['beat_description'])[:80]}"
             rows.append(row)
         return "\n".join(rows)
@@ -855,6 +871,8 @@ class BridgePlanningService:
                 ),
             ))
             for order, t in enumerate(secondary, start=1):
+                if not isinstance(t, dict) or t.get("role", "primary") == "mention":
+                    continue
                 cov = (float(t.get("coverage_end", 0)) - float(t.get("coverage_start", 0))) / CHAPTERS_PER_BRIDGE
                 db.add(ChapterOutlinePlotLineLink(
                     chapter_outline_id=co.id,
@@ -897,9 +915,11 @@ class BridgePlanningService:
         await db.commit()
         for c in created:
             await db.refresh(c)
+        primary_count = sum(1 for t in secondary if isinstance(t, dict) and t.get("role", "primary") != "mention")
         logger.info(
-            "[BridgeExpansion] 桥段 %d《%s》→ 第 %d-%d 章，%d 张场景卡，副线任务 %d 条",
-            bridge.bridge_number, bridge.title, c_start, c_end, plot_card_count, len(secondary),
+            "[BridgeExpansion] 桥段 %d《%s》→ 第 %d-%d 章，%d 张场景卡，主B线任务 %d 条，保温 %d 条",
+            bridge.bridge_number, bridge.title, c_start, c_end, plot_card_count,
+            primary_count, len(secondary) - primary_count,
         )
         return created
 
