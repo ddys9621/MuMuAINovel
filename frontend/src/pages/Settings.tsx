@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { settingsApi } from '@/services/api'
 import type { Settings as SettingsType, SettingsUpdate } from '@/types'
+import { UpdatePanel } from '@/components/settings/UpdatePanel'
 import { toast } from 'sonner'
 import {
   Eye,
@@ -387,6 +388,9 @@ export default function Settings() {
             </p>
           </div>
         </section>
+
+        {/* 关于与更新（独立于上面的表单，不受保存/重置影响） */}
+        <UpdatePanel />
 
         {/* 底部操作栏 */}
         <div className="flex items-center gap-3 pb-8">

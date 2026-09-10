@@ -3,8 +3,10 @@ import { Outlet } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Header } from './Header'
 import { cn } from '@/lib/utils'
+import { useUpdateAutoCheck } from '@/hooks/useUpdateAutoCheck'
 
 export function AppLayout() {
+  useUpdateAutoCheck()
   const [collapsed, setCollapsed] = useState(() => {
     return localStorage.getItem('sidebar-collapsed') === 'true'
   })

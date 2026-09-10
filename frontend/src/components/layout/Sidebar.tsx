@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { BrandLogo } from '@/components/ui/BrandLogo'
+import { useUpdateStore } from '@/store/updateStore'
 
 interface SidebarProps {
   collapsed: boolean
@@ -39,6 +40,8 @@ const navGroups = [
 export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   // 根路径 `/` 也渲染项目列表，需让「我的项目」保持高亮
   const isRootProjects = useLocation().pathname === '/'
+  // 有新版本时「设置」入口出红点（检查逻辑在 useUpdateAutoCheck / 设置页）
+  const hasUpdate = useUpdateStore((s) => s.hasUpdate)
 
   return (
     <aside
@@ -85,8 +88,20 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                     {({ isActive }) => (
                       <>
                         {(isActive || forceActive) && <span className="absolute inset-y-2 left-0 w-[3px] bg-brand" aria-hidden />}
-                        <item.icon className="h-[18px] w-[18px] shrink-0" />
+                        <span className="relative shrink-0">
+                          <item.icon className="h-[18px] w-[18px]" />
+                          {hasUpdate && item.path === '/settings' && (
+                            <span
+                              className="absolute -right-1 -top-1 h-2 w-2 bg-red-500 ring-2 ring-white"
+                              title="有新版本可用"
+                              aria-label="有新版本可用"
+                            />
+                          )}
+                        </span>
                         {!collapsed && <span className="flex-1 truncate">{item.label}</span>}
+                        {!collapsed && hasUpdate && item.path === '/settings' && (
+                          <span className="shrink-0 bg-red-500/10 px-1.5 py-0.5 text-[10px] font-medium text-red-600">新版本</span>
+                        )}
                         {collapsed && (
                           <span className="hh-glass pointer-events-none absolute left-full ml-3 hidden whitespace-nowrap px-2.5 py-1.5 text-xs text-content group-hover:block">
                             {item.label}

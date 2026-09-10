@@ -7,6 +7,7 @@ interface MCPPluginSimpleCreate {
 import { toast } from 'sonner';
 import { ssePost } from '../utils/sseClient';
 import type { SSEClientOptions } from '../utils/sseClient';
+import type { UpdateCheckResult, UpdateJobStatus } from '../types/system_update';
 import type {
   User,
   Project,
@@ -230,6 +231,16 @@ export const settingsApi = {
       error_type?: string;
       suggestions?: string[];
     }>('/settings/test', params),
+};
+
+/** 系统更新：检查 GitHub Release / 一键更新 / 任务进度（类型见 types/system_update.ts） */
+export const systemUpdateApi = {
+  check: (force = false) =>
+    api.get<unknown, UpdateCheckResult>('/system/update/check', { params: { force } }),
+
+  apply: () => api.post<unknown, UpdateJobStatus>('/system/update/apply'),
+
+  status: () => api.get<unknown, UpdateJobStatus>('/system/update/status'),
 };
 
 export const projectApi = {

@@ -28,7 +28,6 @@ class Settings(BaseSettings):
     
     # 应用配置
     app_name: str = "MuMuAINovel"
-    app_version: str = "1.1.0"
     app_host: str = "0.0.0.0"
     app_port: int = 8000
     debug: bool = True
@@ -100,7 +99,19 @@ class Settings(BaseSettings):
     # 会话配置
     SESSION_EXPIRE_MINUTES: int = 120  # 会话过期时间（分钟），默认2小时
     SESSION_REFRESH_THRESHOLD_MINUTES: int = 30  # 会话刷新阈值（分钟），剩余时间少于此值时可刷新
+
+    # 检查更新（更新源 = GitHub Releases，tag v*，安装包资产 MuMuAINovel-Setup-v{ver}.exe）
+    update_check_enabled: bool = True  # 内网/离线部署可关：关掉后不再联网检查
+    update_repo: str = "ddys9621/MuMuAINovel"  # owner/repo
+    update_github_proxy: str = ""  # 安装包下载加速前缀（如 https://gh-proxy.com/），为空直连 github.com
     
+    @property
+    def app_version(self) -> str:
+        """版本号唯一来源是 app/__init__.py 的 __version__，刻意不做成可被 .env / APP_VERSION 覆盖的字段：
+        旧版 .env.example 写死过 APP_VERSION=1.0.0，若仍从环境读取，升级后检查更新会永远认为自己是 1.0.0。"""
+        from app import __version__
+        return __version__
+
     @field_validator("debug", mode="before")
     @classmethod
     def normalize_debug_value(cls, value):

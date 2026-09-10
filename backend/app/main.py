@@ -235,6 +235,10 @@ app.include_router(users.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
 
+# 系统更新：检查 GitHub Release / 一键更新（exe 下载安装包、源码 git pull、容器给命令）
+from app.api import system_update as _system_update
+app.include_router(_system_update.router, prefix="/api")
+
 app.include_router(projects.router, prefix="/api")
 app.include_router(wizard_stream.router, prefix="/api")
 app.include_router(inspiration.router, prefix="/api")
