@@ -4,13 +4,6 @@ on:
   push:
     branches: [master]
     tags: ['v*']
-    paths-ignore:
-      - '**.md'
-      - 'Dockerfile'
-      - '.dockerignore'
-      - 'docker-compose*.yml'
-      - 'docker-entrypoint.sh'
-      - 'deploy.*'
   workflow_dispatch:
 
 concurrency:
