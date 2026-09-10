@@ -1,5 +1,5 @@
 """MCP插件管理API"""
-from fastapi import APIRouter, HTTPException, Depends, Query, Request
+from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List, Optional
@@ -21,17 +21,11 @@ from app.mcp.server_config import ServerConfigError, parse_server_config
 from app.services.mcp_plugin_service import upsert_plugin
 from app.services.mcp_test_service import mcp_test_service
 from app.logger import get_logger
+from app.api.deps import require_login
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/mcp/plugins", tags=["MCP插件管理"])
-
-
-def require_login(request: Request) -> User:
-    """依赖：要求用户已登录"""
-    if not hasattr(request.state, "user") or not request.state.user:
-        raise HTTPException(status_code=401, detail="需要登录")
-    return request.state.user
 
 
 @router.get("", response_model=List[MCPPluginResponse])

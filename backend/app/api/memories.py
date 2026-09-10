@@ -5,32 +5,12 @@ from sqlalchemy import select, and_, desc
 from typing import List, Optional
 from app.database import get_db
 from app.models.memory import StoryMemory
-from app.models.project import Project
 from app.services.memory_service import memory_service
 from app.logger import get_logger
+from app.api.deps import verify_project_access
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/memories", tags=["memories"])
-
-
-async def verify_project_access(project_id: str, user_id: str, db: AsyncSession) -> Project:
-    """验证用户是否有权访问指定项目"""
-    if not user_id:
-        raise HTTPException(status_code=401, detail="未登录")
-    
-    result = await db.execute(
-        select(Project).where(
-            Project.id == project_id,
-            Project.user_id == user_id
-        )
-    )
-    project = result.scalar_one_or_none()
-    
-    if not project:
-        logger.warning(f"项目访问被拒绝: project_id={project_id}, user_id={user_id}")
-        raise HTTPException(status_code=404, detail="项目不存在或无权访问")
-    
-    return project
 
 
 @router.get("/projects/{project_id}/memories")

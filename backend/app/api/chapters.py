@@ -45,45 +45,13 @@ from app.utils.character_names import build_name_index
 from app.utils.data_consistency import sync_organization_member_count
 from app.utils.sse_response import create_sse_response
 from app.utils.text_utils import count_words
+from app.api.deps import verify_project_access
 
 router = APIRouter(prefix="/chapters", tags=["章节管理"])
 logger = get_logger(__name__)
 
 # 全局数据库写入锁（每个用户一个锁，用于保护SQLite写入操作）
 db_write_locks: dict[str, Lock] = {}
-
-
-async def verify_project_access(project_id: str, user_id: str, db: AsyncSession) -> Project:
-    """
-    验证用户是否有权访问指定项目
-    
-    Args:
-        project_id: 项目ID
-        user_id: 用户ID
-        db: 数据库会话
-        
-    Returns:
-        Project: 项目对象
-        
-    Raises:
-        HTTPException: 401 未登录，404 项目不存在或无权访问
-    """
-    if not user_id:
-        raise HTTPException(status_code=401, detail="未登录")
-    
-    result = await db.execute(
-        select(Project).where(
-            Project.id == project_id,
-            Project.user_id == user_id
-        )
-    )
-    project = result.scalar_one_or_none()
-    
-    if not project:
-        logger.warning(f"项目访问被拒绝: project_id={project_id}, user_id={user_id}")
-        raise HTTPException(status_code=404, detail="项目不存在或无权访问")
-    
-    return project
 
 
 async def get_db_write_lock(user_id: str) -> Lock:

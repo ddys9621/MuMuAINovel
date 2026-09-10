@@ -1,7 +1,7 @@
 """
 设置管理 API
 """
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import Dict, Any, Optional
@@ -15,6 +15,7 @@ from app.user_manager import User
 from app.logger import get_logger
 from app.config import settings as app_settings
 from app.services.ai_service import AIService, create_user_ai_service
+from app.api.deps import require_login
 
 logger = get_logger(__name__)
 
@@ -31,13 +32,6 @@ def read_env_defaults() -> Dict[str, Any]:
         "temperature": app_settings.default_temperature,
         "max_tokens": app_settings.default_max_tokens,
     }
-
-
-def require_login(request: Request):
-    """依赖：要求用户已登录"""
-    if not hasattr(request.state, "user") or not request.state.user:
-        raise HTTPException(status_code=401, detail="需要登录")
-    return request.state.user
 
 
 async def get_user_ai_service(

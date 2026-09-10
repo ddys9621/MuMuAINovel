@@ -1,5 +1,5 @@
 """MCP 商城 API - 内置精选目录浏览 + 一键安装为当前用户的插件"""
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,17 +16,11 @@ from app.schemas.mcp_plugin import (
 )
 from app.services.mcp_plugin_service import upsert_plugin
 from app.user_manager import User
+from app.api.deps import require_login
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/mcp/marketplace", tags=["MCP商城"])
-
-
-def require_login(request: Request) -> User:
-    """依赖：要求用户已登录"""
-    if not hasattr(request.state, "user") or not request.state.user:
-        raise HTTPException(status_code=401, detail="需要登录")
-    return request.state.user
 
 
 @router.get("", response_model=MCPMarketplaceListResponse)

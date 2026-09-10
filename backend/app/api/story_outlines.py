@@ -8,7 +8,6 @@ import uuid
 from app.database import get_db
 from app.logger import get_logger
 from app.models.plot_line import PlotLine
-from app.models.project import Project
 from app.models.story_outline import StoryOutline
 from app.schemas.story_outline import (
     StoryOutlineCreate,
@@ -16,27 +15,10 @@ from app.schemas.story_outline import (
     StoryOutlineUpdate,
 )
 from app.services.story_outline_service import StoryOutlineService
+from app.api.deps import verify_project_access
 
 logger = get_logger(__name__)
 router = APIRouter(tags=["story-outlines"])
-
-
-async def verify_project_access(project_id: str, user_id: str, db: AsyncSession) -> Project:
-    """验证用户是否有权访问指定项目"""
-    if not user_id:
-        raise HTTPException(status_code=401, detail="未登录")
-
-    result = await db.execute(
-        select(Project).where(
-            Project.id == project_id,
-            Project.user_id == user_id,
-        )
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        logger.warning(f"故事大纲访问被拒绝: project_id={project_id}, user_id={user_id}")
-        raise HTTPException(status_code=404, detail="项目不存在或无权访问")
-    return project
 
 
 async def get_outline_with_access_check(outline_id: str, user_id: str, db: AsyncSession) -> StoryOutline:

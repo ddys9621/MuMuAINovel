@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +32,7 @@ from app.schemas.reference_pack import (
     UpdateAttachmentRequest,
 )
 from app.user_manager import User
+from app.api.deps import require_login
 
 logger = get_logger(__name__)
 
@@ -39,13 +40,6 @@ logger = get_logger(__name__)
 # ============================================================
 # 共用依赖与工具
 # ============================================================
-
-
-def require_login(request: Request) -> User:
-    """依赖：要求用户已登录（与 book_dissect.py 同款）。"""
-    if not hasattr(request.state, "user") or not request.state.user:
-        raise HTTPException(status_code=401, detail="需要登录")
-    return request.state.user
 
 
 def _safe_load_json(raw: Optional[str], default):

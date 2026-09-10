@@ -7,7 +7,6 @@ from typing import Optional
 
 from app.database import get_db
 from app.models.character import Character
-from app.models.project import Project
 from app.models.generation_history import GenerationHistory
 from app.models.relationship import CharacterRelationship, Organization, OrganizationMember
 from app.services.relationship_matcher import match_relationship_type
@@ -25,42 +24,10 @@ from app.logger import get_logger
 from app.api.settings import get_user_ai_service
 from app.utils.role_type import normalize_role_type
 from app.utils.character_names import record_former_name
+from app.api.deps import verify_project_access
 
 router = APIRouter(prefix="/characters", tags=["角色管理"])
 logger = get_logger(__name__)
-
-
-async def verify_project_access(project_id: str, user_id: str, db: AsyncSession) -> Project:
-    """
-    验证用户是否有权访问指定项目
-    
-    Args:
-        project_id: 项目ID
-        user_id: 用户ID
-        db: 数据库会话
-        
-    Returns:
-        Project: 项目对象
-        
-    Raises:
-        HTTPException: 401 未登录，404 项目不存在或无权访问
-    """
-    if not user_id:
-        raise HTTPException(status_code=401, detail="未登录")
-    
-    result = await db.execute(
-        select(Project).where(
-            Project.id == project_id,
-            Project.user_id == user_id
-        )
-    )
-    project = result.scalar_one_or_none()
-    
-    if not project:
-        logger.warning(f"项目访问被拒绝: project_id={project_id}, user_id={user_id}")
-        raise HTTPException(status_code=404, detail="项目不存在或无权访问")
-    
-    return project
 
 
 def _parse_member_snapshot(raw: Optional[str]) -> list[str]:

@@ -48,6 +48,7 @@ from app.services.ai_service import AIService
 from app.services.book_dissect.chapter_splitter import split_bytes
 from app.services.book_dissect.extractor_v2 import run_extraction_v2_background
 from app.user_manager import User
+from app.api.deps import require_login
 
 logger = get_logger(__name__)
 
@@ -65,13 +66,6 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # 切分预览返回的最大章节数（仅截取前 N 章给前端）
 PREVIEW_LIMIT = 10
-
-
-def require_login(request: Request) -> User:
-    """依赖：要求用户已登录"""
-    if not hasattr(request.state, "user") or not request.state.user:
-        raise HTTPException(status_code=401, detail="需要登录")
-    return request.state.user
 
 
 def _validate_filename(name: str) -> None:
