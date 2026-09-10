@@ -277,7 +277,7 @@ async def build_bridge_position(db: AsyncSession, ctx: Any) -> str:
         format_position_constraint,
     )
 
-    return format_position_constraint(
+    text = format_position_constraint(
         position=ctx.bridge_position,
         bridge_title=ctx.bridge_context.get("title", "未命名桥段"),
         bridge_goal=ctx.bridge_context.get("goal", ""),
@@ -288,6 +288,13 @@ async def build_bridge_position(db: AsyncSession, ctx: Any) -> str:
         ),
         template=ctx.bridge_context.get("template") or "showoff",
     )
+    primary_secondary = ctx.bridge_context.get("primary_secondary")
+    if text and primary_secondary:
+        text += (
+            f"\n\n【🧵 本桥段主 B 线】{primary_secondary}\n"
+            "本章可用 1-2 个场景推进这条支线（放在不与上面位置语义冲突的位置），不得让它抢走本章主线重心。"
+        )
+    return text
 
 
 async def build_history_full(db: AsyncSession, ctx: Any) -> str:

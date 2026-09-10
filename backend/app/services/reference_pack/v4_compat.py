@@ -233,12 +233,24 @@ async def fetch_bridge_context(
         )).scalar_one_or_none()
         template_key = resolve_template(getattr(project, "genre", None), explicit_key=recorded).key
 
+        try:
+            secondary = json.loads(bridge.secondary_beats) if bridge.secondary_beats else []
+        except (json.JSONDecodeError, TypeError):
+            secondary = []
+        primary_secondary = "；".join(
+            f"{t.get('line_type')}《{t.get('line_title')}》[节点 {t.get('beat_index')}] {t.get('beat_title')}"
+            + (f"：{str(t['beat_description'])[:100]}" if t.get("beat_description") else "")
+            for t in secondary
+            if isinstance(t, dict) and t.get("role", "primary") != "mention"
+        )
+
         return {
             "title": bridge.title,
             "goal": bridge.goal,
             "showoff_point": bridge.showoff_point,
             "next_bridge_goal": next_bridge.goal if next_bridge else "（下一桥段未设定）",
             "template": template_key,
+            "primary_secondary": primary_secondary,
         }
     except Exception as exc:
         logger.warning("[v4_compat] fetch_bridge_context 失败: %s", exc)
