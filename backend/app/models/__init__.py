@@ -30,7 +30,6 @@ from app.models.chapter_outline_plot_line_link import ChapterOutlinePlotLineLink
 from app.models.plot_card_plot_line_link import PlotCardPlotLineLink
 from app.models.plot_card_chapter_outline_link import PlotCardChapterOutlineLink
 from app.models.world_rule import WorldRule
-from app.models.chapter_generation_session import ChapterGenerationSession
 from app.models.chapter_causal_link import ChapterCausalLink
 from app.models.narrative_promise import NarrativePromise
 from app.models.relationship_event import RelationshipEvent
@@ -76,7 +75,6 @@ __all__ = [
     "PlotCardPlotLineLink",
     "PlotCardChapterOutlineLink",
     "WorldRule",
-    "ChapterGenerationSession",
     "ChapterCausalLink",
     "NarrativePromise",
     "RelationshipEvent",

@@ -38,8 +38,7 @@ $rootFiles = @(
     ".env.example",
     "deploy.ps1",
     "deploy.sh",
-    "config.ini.template",
-    "setup_database.ps1"
+    "config.ini.template"
 )
 foreach ($file in $rootFiles) {
     if (Test-Path $file) {
@@ -78,7 +77,6 @@ $backendFiles = @(
     "backend\install_deps.ps1",
     "backend\build_exe.ps1",
     "backend\mumuai.spec",
-    "backend\setup_database.sql",
     "backend\readme.txt"
 )
 foreach ($file in $backendFiles) {

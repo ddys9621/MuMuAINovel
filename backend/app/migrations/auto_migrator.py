@@ -434,6 +434,41 @@ async def ensure_users_email_column(engine: AsyncEngine):
         ])
 
 
+REFERENCE_PACK_V4_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("bridges_json", "TEXT"),
+    ("character_archive_json", "TEXT"),
+    *(
+        (f"{dim}_{tier}", "TEXT")
+        for dim in ("methodology", "style", "structure", "archetypes", "worldbuilding", "synopsis", "bridges", "character_archive")
+        for tier in ("light", "medium", "deep")
+    ),
+)
+
+CHAPTER_OUTLINE_BRIDGE_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("bridge_id", "VARCHAR(36)"),
+    ("bridge_position", "VARCHAR(20)"),
+    ("position_constraints", "TEXT"),
+)
+
+
+async def _ensure_columns(engine: AsyncEngine, table: str, columns: tuple[tuple[str, str], ...], tag: str):
+    async with engine.begin() as conn:
+        for col_name, col_def in columns:
+            if not await column_exists(conn, table, col_name):
+                logger.info("🔧 Adding %s.%s column (%s)", table, col_name, tag)
+                await apply_sql(conn, [f"ALTER TABLE {table} ADD COLUMN {col_name} {col_def}"])
+
+
+async def ensure_reference_pack_v4_columns(engine: AsyncEngine):
+    """V4 P0-5：reference_packs 的 2 个 V4.1 维度 JSON + 24 个 K5 三档预压缩列（原 v4_phase0 手工脚本）。"""
+    await _ensure_columns(engine, "reference_packs", REFERENCE_PACK_V4_COLUMNS, "V4 P0-5")
+
+
+async def ensure_chapter_outline_bridge_columns(engine: AsyncEngine):
+    """V4 P2-1：chapter_outlines 的桥段三列（原 v4_phase2 手工脚本；plot_bridges 表由 create_all 建）。"""
+    await _ensure_columns(engine, "chapter_outlines", CHAPTER_OUTLINE_BRIDGE_COLUMNS, "V4 P2-1")
+
+
 async def run_auto_migrations(engine: AsyncEngine):
     try:
         await ensure_users_email_column(engine)  # 登录方式后台开关：邮箱注册用户
@@ -446,8 +481,10 @@ async def run_auto_migrations(engine: AsyncEngine):
         await ensure_book_dissect_v2_columns(engine)  # 拆书 V2 字段
         await ensure_book_dissect_v31_columns(engine)  # 拆书 V3.1 字段
         await ensure_reference_pack_v32_columns(engine)  # 拆书 V3.2 synopsis 复活
+        await ensure_reference_pack_v4_columns(engine)  # V4 P0-5：维度 JSON + 三档预压缩列
         await ensure_project_generation_prompt_column(engine)
         await ensure_project_bridge_planning_column(engine)  # F3：桥段规划开关（T2.1 前置）
+        await ensure_chapter_outline_bridge_columns(engine)  # V4 P2-1：章纲桥段三列
         await ensure_plot_bridge_beat_columns(engine)  # V4.1 方案 C：桥段绑定剧情线节点
         await ensure_plot_bridge_secondary_beats_column(engine)  # 工程化桥段流水线：副线任务
         await ensure_plot_bridge_generation_meta_column(engine)  # 桥段填充溯源
