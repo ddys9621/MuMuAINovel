@@ -42,6 +42,17 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const isRootProjects = useLocation().pathname === '/'
   // 有新版本时「设置」入口出红点（检查逻辑在 useUpdateAutoCheck / 设置页）
   const hasUpdate = useUpdateStore((s) => s.hasUpdate)
+  const info = useUpdateStore((s) => s.info)
+  const result = useUpdateStore((s) => s.result)
+  const currentVersion = info?.current_version ?? result?.current_version ?? null
+  // 底部版本行的"新版本"文案：exe/docker 看 Release 版本，源码看落后提交数
+  const updateLabel = !hasUpdate || !result
+    ? null
+    : result.run_mode === 'source'
+      ? `远端有 ${result.git?.behind ?? 0} 个新提交`
+      : result.latest
+        ? `新版本 v${result.latest.version}`
+        : '有新版本'
 
   return (
     <aside
@@ -119,6 +130,35 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
       </nav>
 
       <div className="shrink-0 border-t border-surface-border/80 p-2.5">
+        {/* 版本行：常驻显示当前版本；有新版本时整行变为可点的提示，进入设置页更新 */}
+        {currentVersion && (
+          <NavLink
+            to="/settings"
+            title={updateLabel ? `${updateLabel}，点击前往更新` : `当前版本 v${currentVersion}`}
+            className={cn(
+              'mb-1 flex items-center gap-2 px-3 py-1.5 text-[11px] transition-colors hover:bg-white/70',
+              collapsed && 'justify-center px-0',
+              updateLabel ? 'text-red-600' : 'text-content-tertiary'
+            )}
+          >
+            <span className="relative inline-flex shrink-0">
+              <span className="tabular-nums">v{currentVersion}</span>
+              {updateLabel && collapsed && (
+                <span className="absolute -right-2 top-0 h-1.5 w-1.5 bg-red-500" aria-hidden />
+              )}
+            </span>
+            {!collapsed && (
+              updateLabel ? (
+                <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 shrink-0 animate-pulse bg-red-500" aria-hidden />
+                  <span className="truncate font-medium">{updateLabel}</span>
+                </span>
+              ) : (
+                <span className="truncate">{info?.run_mode === 'source' ? '源码运行' : info?.run_mode === 'docker' ? 'Docker' : info?.run_mode === 'exe' ? '安装版' : ''}</span>
+              )
+            )}
+          </NavLink>
+        )}
         <button
           onClick={onToggle}
           className={cn(

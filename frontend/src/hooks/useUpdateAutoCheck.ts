@@ -5,18 +5,27 @@ import { AUTO_CHECK_INTERVAL_MS, UPDATE_STORAGE_KEYS, useUpdateStore } from '@/s
 import { updateKeyOf } from '@/types/system_update'
 
 /**
- * 启动时自动检查更新：每 24 小时最多一次（后端另有 10 分钟缓存），发现新版本弹一次提示并点亮侧栏红点。
- * 同一个新版本只提醒一次（localStorage 记录 notifiedKey）；用户在设置页关闭自动检查后不再触发。
+ * 进入应用先拉当前版本（侧栏常驻显示）；启动时自动检查更新：每 24 小时最多一次（后端另有 10 分钟缓存），
+ * 发现新版本弹一次提示并点亮侧栏红点。同一个新版本只提醒一次（localStorage 记录 notifiedKey）；
+ * 用户在设置页关闭自动检查后只显示版本号、不再联网。
  */
 export function useUpdateAutoCheck() {
   const navigate = useNavigate()
   const autoCheck = useUpdateStore((s) => s.autoCheck)
   const runCheck = useUpdateStore((s) => s.runCheck)
+  const loadInfo = useUpdateStore((s) => s.loadInfo)
   const ran = useRef(false)
 
   useEffect(() => {
-    if (!autoCheck || ran.current) return
+    if (ran.current) return
     ran.current = true
+    void loadInfo()
+  }, [loadInfo])
+
+  const checked = useRef(false)
+  useEffect(() => {
+    if (!autoCheck || checked.current) return
+    checked.current = true
 
     let last = 0
     try {

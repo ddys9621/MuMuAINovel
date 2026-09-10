@@ -30,6 +30,13 @@ def _require_admin(request: Request):
     return user
 
 
+@router.get("/info")
+async def update_info_endpoint(request: Request):
+    """当前版本与运行形态（不联网；侧栏常驻显示用）。"""
+    _require_login(request)
+    return {"current_version": update_service.current_version, "run_mode": update_service.run_mode}
+
+
 @router.get("/check")
 async def check_update_endpoint(request: Request, force: bool = Query(False, description="忽略缓存强制联网检查")):
     _require_login(request)
