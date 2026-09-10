@@ -188,12 +188,6 @@
 
 ### 数据模型（已存在）
 
-#### backend/app/models/chapter_generation_session.py
-- **ChapterGenerationSession 模型**：章节生成会话表
-  - `base_context`: 缓存的基础上下文（JSON）
-  - `generated_scenes`: 已生成的场景列表（JSON）
-  - `status`: 会话状态（active/completed/expired/cancelled）
-
 #### backend/app/models/plot_card.py
 - **PlotCard 模型新增字段**：
   - `generation_status`: 场景生成状态
@@ -653,9 +647,6 @@
 ##### 6. backend/app/utils/text_utils.py（新增）
 - **创建中英文混合字数统计工具**：
   - `count_words(text)`: 统计字数（中文字符+英文单词+数字序列）
-  - `count_words_detailed(text)`: 返回详细统计（总数、中文、英文、数字）
-  - `count_characters(text)`: 统计字符数（不含空白）
-  - `count_characters_with_spaces(text)`: 统计字符数（含空白）
 
 ##### 7. backend/app/api/chapters.py
 - **更新字数统计逻辑**：
