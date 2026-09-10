@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { Plus, Pencil, Trash2, Shield, ShieldOff, KeyRound, Loader2, Users, UserCheck, UserX, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { adminApi } from '@/services/api'
+import { LoginSettingsCard } from '@/components/admin/LoginSettingsCard'
 import type { User } from '@/types'
 
 export default function UserManagement() {
@@ -110,6 +111,8 @@ export default function UserManagement() {
 
   return (
     <div className="space-y-6">
+      <LoginSettingsCard />
+
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-content">用户管理 ({total})</h1>
         <button onClick={() => setShowCreateModal(true)} className="bg-brand hover:bg-brand-600 text-white rounded-btn px-4 py-2 text-sm font-medium transition-colors inline-flex items-center gap-1.5">

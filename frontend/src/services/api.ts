@@ -10,6 +10,9 @@ import type { SSEClientOptions } from '../utils/sseClient';
 import type { UpdateCheckResult, UpdateJobStatus } from '../types/system_update';
 import type {
   User,
+  AuthConfig,
+  AuthSettingsView,
+  AuthSettingsUpdate,
   Project,
   ProjectCreate,
   ProjectUpdate,
@@ -121,9 +124,15 @@ api.interceptors.response.use(
           errorMessage = data?.detail || '请求参数错误';
           break;
         case 401:
-          errorMessage = '未授权，请先登录';
           if (window.location.pathname !== '/login') {
+            errorMessage = '未授权，请先登录';
             window.location.href = '/login';
+          } else if (typeof error.config?.url === 'string' && error.config.url.endsWith('/auth/user')) {
+            // 登录页探测登录态，「未登录」是正常结果，不提示
+            return Promise.reject(error);
+          } else {
+            // 登录页上的其他 401 是凭据错误，直接展示后端原因（用户名或密码错误 / 邮箱或密码错误）
+            errorMessage = data?.detail || '账号或密码错误';
           }
           break;
         case 403:
@@ -161,10 +170,23 @@ api.interceptors.response.use(
 );
 
 export const authApi = {
-  getAuthConfig: () => api.get<unknown, { local_auth_enabled: boolean }>('/auth/config'),
+  getAuthConfig: () => api.get<unknown, AuthConfig>('/auth/config'),
   
   localLogin: (username: string, password: string) =>
     api.post<unknown, { success: boolean; message: string; user: User }>('/auth/local/login', { username, password }),
+
+  // Linux.do OAuth：拿到授权地址后整页跳转，回调由后端设 Cookie 并 302 回首页
+  getLinuxDOAuthUrl: () => api.get<unknown, { auth_url: string; state: string }>('/auth/linuxdo/url'),
+
+  // 邮箱注册（验证码）/ 邮箱密码登录
+  emailSendCode: (email: string) =>
+    api.post<unknown, { success: boolean; message: string; cooldown_seconds: number }>('/auth/email/send-code', { email }),
+
+  emailRegister: (data: { email: string; code: string; password: string; display_name?: string }) =>
+    api.post<unknown, { success: boolean; message: string; user: User }>('/auth/email/register', data),
+
+  emailLogin: (email: string, password: string) =>
+    api.post<unknown, { success: boolean; message: string; user: User }>('/auth/email/login', { email, password }),
   
   getCurrentUser: () => api.get<unknown, User>('/auth/user'),
   
@@ -885,6 +907,15 @@ export const adminApi = {
       success: boolean;
       message: string;
     }>(`/admin/users/${userId}`),
+
+  // 登录方式设置（Linux.do / 邮箱 开关与凭据；秘密字段只回传 *_set）
+  getAuthSettings: () => api.get<unknown, AuthSettingsView>('/admin/auth-settings'),
+
+  updateAuthSettings: (data: AuthSettingsUpdate) =>
+    api.put<unknown, AuthSettingsView>('/admin/auth-settings', data),
+
+  sendTestEmail: (to: string) =>
+    api.post<unknown, { success: boolean; message: string }>('/admin/auth-settings/test-email', { to }),
 };
 
 // 剧情卡片 API

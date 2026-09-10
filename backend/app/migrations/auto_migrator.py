@@ -415,8 +415,28 @@ async def ensure_character_aliases_column(engine: AsyncEngine):
             logger.info("✅ characters.aliases already exists")
 
 
+async def ensure_users_email_column(engine: AsyncEngine):
+    """Ensure users.email exists（邮箱注册用户的登录标识，nullable + 唯一索引）。
+
+    场景：旧 DB 升级到「Linux.do / 邮箱登录后台开关」版本。SQLite 唯一索引允许多个 NULL，
+    老用户（本地 / 管理员创建 / Linux.do）email 为空互不冲突。
+    """
+    async with engine.begin() as conn:
+        if not await column_exists(conn, "users", "email"):
+            logger.info("🔧 Adding users.email column (邮箱注册用户)")
+            await apply_sql(conn, [
+                "ALTER TABLE users ADD COLUMN email VARCHAR(200)",
+            ])
+        else:
+            logger.info("✅ users.email already exists")
+        await apply_sql(conn, [
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users (email)",
+        ])
+
+
 async def run_auto_migrations(engine: AsyncEngine):
     try:
+        await ensure_users_email_column(engine)  # 登录方式后台开关：邮箱注册用户
         await ensure_chapter_outline_columns(engine)
         await ensure_story_outline_columns(engine)
         await ensure_plot_line_link_columns(engine)

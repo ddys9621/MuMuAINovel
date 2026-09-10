@@ -20,6 +20,7 @@ from app.models.writing_style import WritingStyle
 from app.models.project_default_style import ProjectDefaultStyle
 from app.models.mcp_plugin import MCPPlugin
 from app.models.user import User, UserPassword
+from app.models.system_setting import SystemSetting
 from app.models.regeneration_task import RegenerationTask
 from app.models.plot_bridge import PlotBridge
 from app.models.plot_card import PlotCard
@@ -66,6 +67,7 @@ __all__ = [
     "MCPPlugin",
     "User",
     "UserPassword",
+    "SystemSetting",
     "RegenerationTask",
     "PlotBridge",
     "PlotCard",

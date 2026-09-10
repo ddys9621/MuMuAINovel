@@ -8,8 +8,54 @@ export interface User {
   is_admin: boolean;
   is_active?: boolean;
   linuxdo_id: string;
+  email?: string | null;
   created_at: string;
   last_login: string;
+}
+
+// 登录页可用的登录方式（后端返回的是「有效开关」：开关开着且凭据齐全）
+export interface AuthConfig {
+  local_auth_enabled: boolean;
+  linuxdo_login_enabled: boolean;
+  linuxdo_register_enabled: boolean;
+  email_login_enabled: boolean;
+  email_register_enabled: boolean;
+}
+
+export type SmtpEncryption = 'ssl' | 'starttls' | 'none';
+
+// 管理员「登录方式设置」视图：秘密字段不回传，只给 *_set
+export interface AuthSettingsView {
+  linuxdo_login_enabled: boolean;
+  linuxdo_register_enabled: boolean;
+  linuxdo_client_id: string;
+  linuxdo_client_secret_set: boolean;
+  linuxdo_redirect_uri: string;
+  email_login_enabled: boolean;
+  email_register_enabled: boolean;
+  smtp_host: string;
+  smtp_port: number;
+  smtp_encryption: SmtpEncryption;
+  smtp_username: string;
+  smtp_password_set: boolean;
+  smtp_from: string;
+}
+
+// PUT 部分更新：不传 = 不改；秘密字段传空串 = 清空
+export interface AuthSettingsUpdate {
+  linuxdo_login_enabled?: boolean;
+  linuxdo_register_enabled?: boolean;
+  linuxdo_client_id?: string;
+  linuxdo_client_secret?: string;
+  linuxdo_redirect_uri?: string;
+  email_login_enabled?: boolean;
+  email_register_enabled?: boolean;
+  smtp_host?: string;
+  smtp_port?: number;
+  smtp_encryption?: SmtpEncryption;
+  smtp_username?: string;
+  smtp_password?: string;
+  smtp_from?: string;
 }
 
 // 设置类型定义

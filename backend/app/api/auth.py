@@ -1,17 +1,26 @@
 """
-Authentication API - local username/password only.
+认证 API - 本地账号密码 + Linux.do OAuth2 + 邮箱验证码注册/密码登录
+
+Linux.do / 邮箱两种方式是否开放由管理员后台（system_settings.auth）决定，本地账号由 .env 决定。
 """
 from fastapi import APIRouter, HTTPException, Response, Request
-from pydantic import BaseModel
-from typing import Optional
+from fastapi.responses import RedirectResponse
+from pydantic import BaseModel, Field
+from typing import Dict, Optional
 import hashlib
+import re
+import secrets
+import time
 from datetime import datetime, timedelta, timezone
 
-from app.user_manager import user_manager
+from app.user_manager import user_manager, is_email_user, normalize_email
 from app.user_password import password_manager
 from app.database import init_db
 from app.logger import get_logger
 from app.config import settings
+from app.services.auth_settings_service import AuthSettings, auth_settings_store
+from app.services.email_service import BRAND_NAME, CooldownError, SmtpConfig, email_code_store, send_email
+from app.services.oauth_service import LinuxDOOAuthService
 
 
 CHINA_TZ = timezone(timedelta(hours=8))
@@ -61,10 +70,11 @@ class PasswordStatusResponse(BaseModel):
 
 @router.get("/config")
 async def get_auth_config():
-    """获取认证配置信息"""
+    """获取认证配置信息：本地账号来自 .env，Linux.do / 邮箱来自管理员后台（返回的是有效开关）"""
+    auth_settings = await auth_settings_store.get()
     return {
         "local_auth_enabled": settings.LOCAL_AUTH_ENABLED,
-        "linuxdo_enabled": False,
+        **auth_settings.effective_flags(),
     }
 
 
@@ -123,6 +133,9 @@ async def _authenticate_database_local_account(username: str, password: str):
     all_users = await user_manager.get_all_users()
 
     for user in all_users:
+        if is_email_user(user.user_id):
+            # 邮箱注册用户只走 /auth/email/login，受「邮箱登录」开关约束
+            continue
         password_username = await password_manager.get_username(user.user_id)
         if user.username != username and password_username != username:
             continue
@@ -140,6 +153,15 @@ async def _authenticate_database_local_account(username: str, password: str):
 
     logger.info(f"[本地登录] 未找到匹配的本地账号: {username}")
     return None
+
+
+async def _init_user_db(user_id: str, label: str):
+    """登录/注册后确保用户数据表就位；失败只记日志，不阻断登录"""
+    try:
+        await init_db(user_id)
+        logger.info(f"{label} {user_id} 数据库初始化成功")
+    except Exception as e:
+        logger.error(f"{label} {user_id} 数据库初始化失败: {e}")
 
 
 async def _set_session_cookies(response: Response, user_id: str):
@@ -177,11 +199,7 @@ async def local_login(request: LocalLoginRequest, response: Response):
     if not user:
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
-    try:
-        await init_db(user.user_id)
-        logger.info(f"本地用户 {user.user_id} 数据库初始化成功")
-    except Exception as e:
-        logger.error(f"本地用户 {user.user_id} 数据库初始化失败: {e}")
+    await _init_user_db(user.user_id, "本地用户")
 
     await _set_session_cookies(response, user.user_id)
     logger.info(f"✅ [登录] 用户 {user.user_id} 登录成功，会话有效期 {settings.SESSION_EXPIRE_MINUTES} 分钟")
@@ -191,6 +209,219 @@ async def local_login(request: LocalLoginRequest, response: Response):
         message="登录成功",
         user=user.dict(),
     )
+
+
+# ==================== Linux.do OAuth2 ====================
+
+class AuthUrlResponse(BaseModel):
+    auth_url: str
+    state: str
+
+
+# OAuth state 临时存储 {state: 过期时间戳}，防 CSRF；5 分钟内未回调即失效
+_oauth_states: Dict[str, float] = {}
+_OAUTH_STATE_TTL_SECONDS = 300
+
+
+def _cleanup_expired_oauth_states():
+    now = time.time()
+    for state in [s for s, expires in _oauth_states.items() if now > expires]:
+        del _oauth_states[state]
+
+
+def _oauth_service_factory(auth_settings: AuthSettings) -> LinuxDOOAuthService:
+    """按当前后台配置构造 OAuth 客户端（测试用替身替换）"""
+    return LinuxDOOAuthService(
+        client_id=auth_settings.linuxdo_client_id,
+        client_secret=auth_settings.linuxdo_client_secret,
+        redirect_uri=auth_settings.linuxdo_redirect_uri,
+    )
+
+
+def _login_error_redirect(code: str) -> RedirectResponse:
+    """回调链路里的失败统一带错误码跳回登录页，由前端翻译成提示"""
+    return RedirectResponse(url=f"/login?error={code}", status_code=302)
+
+
+@router.get("/linuxdo/url", response_model=AuthUrlResponse)
+async def get_linuxdo_auth_url():
+    """获取 Linux.do 授权地址"""
+    auth_settings = await auth_settings_store.get()
+    if not auth_settings.effective_flags()["linuxdo_login_enabled"]:
+        raise HTTPException(status_code=403, detail="Linux.do 登录未开启")
+
+    _cleanup_expired_oauth_states()
+    state = secrets.token_urlsafe(32)
+    _oauth_states[state] = time.time() + _OAUTH_STATE_TTL_SECONDS
+    auth_url = _oauth_service_factory(auth_settings).authorization_url(state)
+    return AuthUrlResponse(auth_url=auth_url, state=state)
+
+
+@router.get("/linuxdo/callback")
+async def linuxdo_callback(
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+):
+    """Linux.do OAuth2 回调：换 token → 拉用户 → 建/更新用户 → 设 Cookie 跳首页"""
+    auth_settings = await auth_settings_store.get()
+    flags = auth_settings.effective_flags()
+    if not flags["linuxdo_login_enabled"]:
+        return _login_error_redirect("linuxdo_disabled")
+
+    if error:
+        logger.warning(f"[Linux.do] 授权被拒绝或出错: {error}")
+        return _login_error_redirect("oauth_denied")
+
+    _cleanup_expired_oauth_states()
+    if not code or not state or _oauth_states.pop(state, None) is None:
+        logger.warning("[Linux.do] 回调 state 无效或已使用")
+        return _login_error_redirect("invalid_state")
+
+    oauth_service = _oauth_service_factory(auth_settings)
+    access_token = await oauth_service.fetch_access_token(code)
+    if not access_token:
+        return _login_error_redirect("token_failed")
+
+    user_info = await oauth_service.fetch_user_info(access_token)
+    if not user_info or user_info.get("id") is None:
+        return _login_error_redirect("userinfo_failed")
+
+    linuxdo_id = str(user_info["id"])
+    username = str(user_info.get("username") or f"linuxdo_{linuxdo_id}")
+    existing = await user_manager.get_user_by_linuxdo_id(linuxdo_id)
+    if existing is None and not flags["linuxdo_register_enabled"]:
+        logger.info(f"[Linux.do] 注册已关闭，拒绝新用户 {username} (id={linuxdo_id})")
+        return _login_error_redirect("register_disabled")
+
+    user = await user_manager.upsert_linuxdo_user(
+        linuxdo_id=linuxdo_id,
+        username=username,
+        display_name=str(user_info.get("name") or username),
+        avatar_url=user_info.get("avatar_url"),
+        trust_level=int(user_info.get("trust_level") or 0),
+    )
+    if user.trust_level == -1:
+        logger.warning(f"[Linux.do] 禁用用户尝试登录: {user.user_id} ({user.username})")
+        return _login_error_redirect("user_disabled")
+
+    await _init_user_db(user.user_id, "Linux.do 用户")
+
+    response = RedirectResponse(url="/", status_code=302)
+    await _set_session_cookies(response, user.user_id)
+    logger.info(f"✅ [Linux.do登录] 用户 {user.user_id} ({user.username}) 登录成功{'' if existing else '（新注册）'}")
+    return response
+
+
+# ==================== 邮箱验证码注册 / 邮箱密码登录 ====================
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+class EmailSendCodeRequest(BaseModel):
+    email: str
+
+
+class EmailRegisterRequest(BaseModel):
+    email: str
+    code: str
+    password: str
+    display_name: Optional[str] = Field(None, max_length=50)
+
+
+class EmailLoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+def _validate_email(raw: str) -> str:
+    email = normalize_email(raw)
+    if len(email) > 200 or not _EMAIL_RE.match(email):
+        raise HTTPException(status_code=400, detail="邮箱格式不正确")
+    return email
+
+
+async def _require_email_flag(flag: str, message: str) -> AuthSettings:
+    auth_settings = await auth_settings_store.get()
+    if not auth_settings.effective_flags()[flag]:
+        raise HTTPException(status_code=403, detail=message)
+    return auth_settings
+
+
+@router.post("/email/send-code")
+async def email_send_code(request: EmailSendCodeRequest):
+    """向待注册邮箱发送 6 位验证码"""
+    auth_settings = await _require_email_flag("email_register_enabled", "邮箱注册未开启")
+    email = _validate_email(request.email)
+    if await user_manager.get_user_by_email(email):
+        raise HTTPException(status_code=409, detail="该邮箱已注册，请直接登录")
+
+    try:
+        code = email_code_store.issue(email)
+    except CooldownError as e:
+        raise HTTPException(status_code=429, detail=f"发送过于频繁，请 {e.remaining} 秒后再试")
+
+    ttl_minutes = email_code_store.ttl_seconds // 60
+    try:
+        await send_email(
+            SmtpConfig.from_auth_settings(auth_settings),
+            email,
+            f"【{BRAND_NAME}】邮箱验证码",
+            f"您正在注册 {BRAND_NAME} 账号，验证码：{code}（{ttl_minutes} 分钟内有效）。\n\n如非本人操作，请忽略本邮件。",
+        )
+    except Exception as e:
+        email_code_store.discard(email)  # 没发出去就不占冷却，让用户能立刻重试
+        logger.error(f"[邮箱注册] 验证码发送到 {email} 失败: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=502, detail="验证码发送失败，请稍后重试或联系管理员")
+
+    logger.info(f"[邮箱注册] 验证码已发送到 {email}")
+    return {
+        "success": True,
+        "message": "验证码已发送，请查收邮件",
+        "cooldown_seconds": email_code_store.cooldown_seconds,
+    }
+
+
+@router.post("/email/register", response_model=LocalLoginResponse)
+async def email_register(request: EmailRegisterRequest, response: Response):
+    """邮箱 + 验证码 + 密码 注册，成功即登录"""
+    await _require_email_flag("email_register_enabled", "邮箱注册未开启")
+    email = _validate_email(request.email)
+    if len(request.password) < 6:
+        raise HTTPException(status_code=400, detail="密码长度至少为6个字符")
+    if await user_manager.get_user_by_email(email):
+        raise HTTPException(status_code=409, detail="该邮箱已注册，请直接登录")
+    if not email_code_store.verify(email, request.code):
+        raise HTTPException(status_code=400, detail="验证码错误或已过期")
+
+    display_name = (request.display_name or "").strip() or email.split("@", 1)[0]
+    user = await user_manager.create_email_user(email=email, display_name=display_name)
+    await password_manager.set_password(user.user_id, user.username, request.password)
+    await _init_user_db(user.user_id, "邮箱用户")
+
+    await _set_session_cookies(response, user.user_id)
+    logger.info(f"✅ [邮箱注册] 用户 {user.user_id} ({email}) 注册并登录成功")
+    return LocalLoginResponse(success=True, message="注册成功", user=user.model_dump())
+
+
+@router.post("/email/login", response_model=LocalLoginResponse)
+async def email_login(request: EmailLoginRequest, response: Response):
+    """邮箱 + 密码 登录"""
+    await _require_email_flag("email_login_enabled", "邮箱登录未开启")
+    email = _validate_email(request.email)
+
+    user = await user_manager.get_user_by_email(email)
+    if not user or not await password_manager.verify_password(user.user_id, request.password):
+        logger.info(f"[邮箱登录] 邮箱或密码错误: {email}")
+        raise HTTPException(status_code=401, detail="邮箱或密码错误")
+    if user.trust_level == -1:
+        logger.warning(f"[邮箱登录] 禁用用户尝试登录: {user.user_id} ({email})")
+        raise HTTPException(status_code=403, detail="账号已被禁用，请联系管理员")
+
+    await _init_user_db(user.user_id, "邮箱用户")
+    await _set_session_cookies(response, user.user_id)
+    logger.info(f"✅ [邮箱登录] 用户 {user.user_id} ({email}) 登录成功")
+    return LocalLoginResponse(success=True, message="登录成功", user=user.model_dump())
 
 
 @router.post("/refresh")

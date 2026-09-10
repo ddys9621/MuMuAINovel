@@ -15,6 +15,8 @@ from app.database import get_db, init_db
 from app.models.user import User
 from app.user_manager import user_manager
 from app.user_password import password_manager
+from app.services.auth_settings_service import AuthSettingsUpdate, auth_settings_store
+from app.services.email_service import BRAND_NAME, SmtpConfig, send_email
 from app.logger import get_logger, get_log_buffer
 
 logger = get_logger(__name__)
@@ -72,6 +74,11 @@ class CreateUserResponse(BaseModel):
     message: str
     user: dict
     default_password: Optional[str] = None
+
+
+class TestEmailRequest(BaseModel):
+    """发送测试邮件请求"""
+    to: str = Field(..., min_length=3, max_length=200, description="收件邮箱")
 
 
 # ==================== 权限检查依赖 ====================
@@ -382,6 +389,52 @@ async def delete_user(
     except Exception as e:
         logger.error(f"删除用户失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"删除用户失败: {str(e)}")
+
+
+# ==================== 登录方式设置 API ====================
+
+@router.get("/auth-settings", summary="获取登录方式设置（脱敏）")
+async def get_auth_settings(admin: User = Depends(check_admin)):
+    """Linux.do / 邮箱 登录注册开关与凭据；秘密字段只返回 *_set 布尔"""
+    settings = await auth_settings_store.get()
+    return settings.to_admin_view()
+
+
+@router.put("/auth-settings", summary="更新登录方式设置")
+async def update_auth_settings(
+    data: AuthSettingsUpdate,
+    admin: User = Depends(check_admin),
+):
+    """部分更新：未传（None）的字段保持不变，秘密字段传空串才会清空"""
+    settings = await auth_settings_store.apply_update(data)
+    changed = sorted(data.model_dump(exclude_none=True).keys())
+    logger.info(f"管理员 {admin.user_id} 更新登录方式设置: {changed}")
+    return settings.to_admin_view()
+
+
+@router.post("/auth-settings/test-email", summary="用当前 SMTP 配置发送测试邮件")
+async def send_test_email(
+    data: TestEmailRequest,
+    admin: User = Depends(check_admin),
+):
+    """校验 SMTP 配置可用性；发送失败把 SMTP 报错原文返给管理员排查"""
+    settings = await auth_settings_store.get()
+    if not settings.smtp_configured():
+        raise HTTPException(status_code=400, detail="请先填写并保存 SMTP 服务器与发件人邮箱")
+
+    try:
+        await send_email(
+            SmtpConfig.from_auth_settings(settings),
+            data.to,
+            f"【{BRAND_NAME}】SMTP 测试邮件",
+            "这是一封测试邮件，收到即表示 SMTP 配置可用。",
+        )
+    except Exception as e:
+        logger.warning(f"管理员 {admin.user_id} 发送测试邮件到 {data.to} 失败: {e}")
+        raise HTTPException(status_code=502, detail=f"发送失败: {e}")
+
+    logger.info(f"管理员 {admin.user_id} 发送测试邮件到 {data.to} 成功")
+    return {"success": True, "message": f"测试邮件已发送至 {data.to}"}
 
 
 # ==================== 日志查看 API ====================

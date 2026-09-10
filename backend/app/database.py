@@ -51,6 +51,7 @@ from app.models.relationship import (  # noqa: F401
 from app.models.relationship_event import RelationshipEvent  # noqa: F401
 from app.models.settings import Settings  # noqa: F401
 from app.models.story_outline import StoryOutline  # noqa: F401
+from app.models.system_setting import SystemSetting  # noqa: F401
 from app.models.timeline_event import TimelineEvent  # noqa: F401
 from app.models.world_rule import WorldRule  # noqa: F401
 from app.models.writing_style import WritingStyle  # noqa: F401
