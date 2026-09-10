@@ -85,9 +85,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $exe = (Get-ChildItem backend/installer_output/*.exe | Select-Object -First 1).FullName
+          # 发布说明：仓库里有 .github/release-notes/<tag>.md 就用它，否则退回 GitHub 自动生成的提交列表
+          $notes = ".github/release-notes/$env:GITHUB_REF_NAME.md"
           gh release view $env:GITHUB_REF_NAME *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $env:GITHUB_REF_NAME $exe --clobber
+            if (Test-Path $notes) { gh release edit $env:GITHUB_REF_NAME --notes-file $notes }
+          } elseif (Test-Path $notes) {
+            gh release create $env:GITHUB_REF_NAME $exe --title $env:GITHUB_REF_NAME --notes-file $notes
           } else {
             gh release create $env:GITHUB_REF_NAME $exe --title $env:GITHUB_REF_NAME --generate-notes
           }
