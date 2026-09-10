@@ -1,10 +1,12 @@
 """工程化桥段流水线 — 槽位规划器（纯函数，无 DB / 无 LLM）。
 
-规则（设计文档 @/agent-docs/features/engineered_bridge_pipeline.md §0.3）：
+规则（设计文档 @/agent-docs/plans/2026-09-10-sub-line-anchoring-phase1.md §0.3）：
 - 且仅一条主线；桥段总数 T = max(1, round(estimated_chapters / 4))
 - 节点配额 = 最大余数法，每节点至少 1 个桥段
 - 桥段 n 覆盖第 4(n-1)+1 … 4n 章
-- 副线节点按累计权重铺满全书 [0,1]，与桥段所占全书区间求交后挂到桥段
+- 锚定支线（所有节点带 anchor_beat）：节点整体落进所锚定主线节点的一个桥段（merge → 末桥段，offset → 均匀散开避开末桥段）
+- 未锚定支线（旧数据）：节点按累计权重铺满全书 [0,1]，与桥段区间求交
+- 每桥段只保留一条主 B 线（role=primary），其余 mention；锚定支线主推桥段数受 estimated_chapters/4 配额约束
 """
 from __future__ import annotations
 
@@ -26,12 +28,18 @@ class BridgePlanningConflictError(RuntimeError):
     """状态冲突，例如骨架已存在 / 已有展开章纲（API 层映射为 409）。"""
 
 
+VALID_MODES: tuple[str, ...] = ("companion", "inserted", "converge")
+VALID_RELATIONS: tuple[str, ...] = ("offset", "merge")
+
+
 @dataclass(frozen=True)
 class BeatData:
     index: int
     title: str
     description: str
     weight: float
+    anchor_beat: int | None = None   # 锚定的主线节点 index；None = 未锚定（旧数据）
+    relation: str = "offset"         # offset（与主线错峰推进）/ merge（汇入主线该节点的兑现桥段）
 
 
 @dataclass(frozen=True)
@@ -41,6 +49,9 @@ class PlotLineData:
     line_type: str
     estimated_chapters: int | None
     beats: tuple[BeatData, ...]
+    mode: str | None = None          # companion / inserted / converge；None = 未锚定
+    anchor_start_beat: int | None = None
+    anchor_end_beat: int | None = None
 
 
 @dataclass(frozen=True)
@@ -53,6 +64,22 @@ class SecondaryBeatTask:
     beat_description: str
     coverage_start: float
     coverage_end: float
+    role: str = "primary"            # primary（本桥段主 B 线，须推进）/ mention（保温提及一句）
+    relation: str = "offset"
+
+
+def is_anchored(line: PlotLineData) -> bool:
+    """全部节点都带 anchor_beat 才算锚定支线；否则整条线走均匀铺满（旧算法）。"""
+    return bool(line.beats) and all(b.anchor_beat is not None for b in line.beats)
+
+
+def _opt_int(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
 
 
 @dataclass(frozen=True)
@@ -115,14 +142,18 @@ def apportion(weights: list[float], total: int, minimum: int = 1) -> list[int]:
 
 
 def parse_plot_line(line: Any) -> PlotLineData:
-    """ORM PlotLine → 纯数据。timeline_data 损坏 / 非 dict 元素一律丢弃。"""
-    beats: list[BeatData] = []
-    raw_beats: list[Any] = []
+    """ORM PlotLine → 纯数据。timeline_data 损坏 / 非 dict / 非 dict 元素一律丢弃；锚点字段缺失或非法 → None / offset。"""
+    raw: dict[str, Any] = {}
     if getattr(line, "timeline_data", None):
         try:
-            raw_beats = json.loads(line.timeline_data).get("beats", []) or []
-        except (json.JSONDecodeError, TypeError, AttributeError):
-            raw_beats = []
+            loaded = json.loads(line.timeline_data)
+            raw = loaded if isinstance(loaded, dict) else {}
+        except (json.JSONDecodeError, TypeError):
+            raw = {}
+    raw_beats = raw.get("beats") or []
+    if not isinstance(raw_beats, list):
+        raw_beats = []
+    beats: list[BeatData] = []
     for i, b in enumerate(raw_beats):
         if not isinstance(b, dict):
             continue
@@ -130,19 +161,26 @@ def parse_plot_line(line: Any) -> PlotLineData:
             weight = float(b.get("weight") or 0.0)
         except (TypeError, ValueError):
             weight = 0.0
+        relation = b.get("relation")
         beats.append(BeatData(
             index=int(b.get("index", i + 1)),
             title=str(b.get("title") or f"节点{i + 1}").strip(),
             description=str(b.get("description") or "").strip(),
             weight=weight,
+            anchor_beat=_opt_int(b.get("anchor_beat")),
+            relation=relation if relation in VALID_RELATIONS else "offset",
         ))
     beats.sort(key=lambda x: x.index)
+    mode = raw.get("mode")
     return PlotLineData(
         id=line.id,
         title=(line.title or "").strip(),
         line_type=normalize_plot_line_type(getattr(line, "line_type", None)),
         estimated_chapters=getattr(line, "estimated_chapters", None),
         beats=tuple(beats),
+        mode=mode if mode in VALID_MODES else None,
+        anchor_start_beat=_opt_int(raw.get("anchor_start_beat")),
+        anchor_end_beat=_opt_int(raw.get("anchor_end_beat")),
     )
 
 
