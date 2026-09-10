@@ -256,13 +256,27 @@ async def build_plot_lines_with_beats(db: AsyncSession, ctx: Any) -> str:
         )
 
     label = {"sub": "支线", "character": "角色线"}
+    mode_label = {"companion": "伴生", "inserted": "插入", "converge": "汇流"}
+    budgets = {b.plot_line_id: b for b in plan.line_budgets}
     for line in lines:
         if line.line_type == "main" or not line.beats:
             continue
-        chunks.append(f"\n▼ {label.get(line.line_type, '其他')}：{line.title}（按进度比例挂到主线桥段）")
+        budget = budgets.get(line.id)
+        if budget is not None and budget.anchored:
+            head = (
+                f"{mode_label.get(line.mode or '', line.mode)}型，锚定主线节点 {line.anchor_start_beat}-{line.anchor_end_beat}，"
+                f"预算 {line.estimated_chapters} 章 ≈ 主推 {budget.primary_quota} 个桥段"
+                f"（实际主推 {budget.primary_bridges}，保温 {budget.mention_bridges}）"
+            )
+        else:
+            head = "未锚定，按进度比例挂到主线桥段"
+        chunks.append(f"\n▼ {label.get(line.line_type, '其他')}：{line.title}（{head}）")
         for beat in line.beats:
             desc_part = f"｜{beat.description[:60]}" if beat.description else ""
-            chunks.append(f"  [节点 {beat.index}] {beat.title}  权重 {beat.weight:.0%}{desc_part}")
+            anchor_part = ""
+            if beat.anchor_beat is not None:
+                anchor_part = f"  → 主线节点 {beat.anchor_beat}{'（汇流）' if beat.relation == 'merge' else ''}"
+            chunks.append(f"  [节点 {beat.index}] {beat.title}  权重 {beat.weight:.0%}{anchor_part}{desc_part}")
     return "\n".join(chunks)
 
 async def build_bridge_position(db: AsyncSession, ctx: Any) -> str:
