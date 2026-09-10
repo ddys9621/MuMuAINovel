@@ -227,12 +227,13 @@ from app.api import (
     mcp_plugins, mcp_marketplace, admin, inspiration,
     plot_cards, plot_lines, chapter_outlines, story_outlines,
     world_rules, scene_generation, book_dissect,
-    reference_pack, imitation
+    reference_pack, imitation, announcement
 )
 
 app.include_router(auth.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
+app.include_router(announcement.router, prefix="/api")  # 登录后公告弹窗（管理员在用户管理页配置）
 
 # 系统更新：检查 GitHub Release / 一键更新（exe 下载安装包、源码 git pull、容器给命令）
 from app.api import system_update as _system_update

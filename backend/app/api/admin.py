@@ -1,16 +1,21 @@
 """
-管理员API - 用户管理功能
+管理员API - 用户管理功能 + 登录方式设置 + 公告弹窗设置
 """
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Request, Depends, File, UploadFile
 from pydantic import BaseModel, Field
 from typing import Optional
+from datetime import datetime, timezone
 import hashlib
+import os
+import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db, init_db
 from app.models.user import User
 from app.user_manager import user_manager
 from app.user_password import password_manager
+from app.services import announcement_service
+from app.services.announcement_service import AnnouncementUpdate, announcement_store
 from app.services.auth_settings_service import AuthSettingsUpdate, auth_settings_store
 from app.services.email_service import BRAND_NAME, SmtpConfig, send_email
 from app.logger import get_logger
@@ -417,3 +422,47 @@ async def send_test_email(
 
     logger.info(f"管理员 {admin.user_id} 发送测试邮件到 {data.to} 成功")
     return {"success": True, "message": f"测试邮件已发送至 {data.to}"}
+
+
+# ==================== 公告弹窗设置 API ====================
+
+@router.get("/announcement", summary="获取公告弹窗设置")
+async def get_announcement_settings(admin: User = Depends(check_admin)):
+    settings = await announcement_store.get()
+    return settings.to_admin_view(datetime.now(timezone.utc))
+
+
+@router.put("/announcement", summary="更新公告弹窗设置")
+async def update_announcement_settings(
+    data: AnnouncementUpdate,
+    admin: User = Depends(check_admin),
+):
+    """部分更新：未传（None）的字段保持不变；start_at / end_at 传空串清空。"""
+    settings = await announcement_store.apply_update(data)
+    changed = sorted(data.model_dump(exclude_none=True).keys())
+    logger.info(f"管理员 {admin.user_id} 更新公告弹窗设置: {changed}")
+    return settings.to_admin_view(datetime.now(timezone.utc))
+
+
+@router.post("/announcement/image", summary="上传公告图片（≤2MB，jpg/png/gif/webp）")
+async def upload_announcement_image(
+    file: UploadFile = File(...),
+    admin: User = Depends(check_admin),
+):
+    """按文件头识别格式（不信任 Content-Type），保存后直接写入配置并清理被替换的旧图。"""
+    data = await file.read(announcement_service.MAX_IMAGE_BYTES + 1)
+    if len(data) > announcement_service.MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail=f"图片过大，上限 {announcement_service.MAX_IMAGE_BYTES // 1024 // 1024}MB")
+    ext = announcement_service.sniff_image_ext(data)
+    if not ext:
+        raise HTTPException(status_code=400, detail="只支持 jpg / png / gif / webp 图片")
+
+    os.makedirs(announcement_service.IMAGE_DIR, exist_ok=True)
+    name = f"{uuid.uuid4().hex}.{ext}"
+    with open(os.path.join(announcement_service.IMAGE_DIR, name), "wb") as fh:
+        fh.write(data)
+
+    image_url = f"{announcement_service.IMAGE_URL_PREFIX}{name}"
+    await announcement_store.apply_update(AnnouncementUpdate(image_url=image_url))
+    logger.info(f"管理员 {admin.user_id} 上传公告图片 {name}（{len(data)} 字节）")
+    return {"image_url": image_url}

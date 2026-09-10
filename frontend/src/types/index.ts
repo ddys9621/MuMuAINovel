@@ -58,6 +58,43 @@ export interface AuthSettingsUpdate {
   smtp_from?: string;
 }
 
+// 公告弹窗：显示频率 —— once 内容不改只弹一次 / daily 每天一次 / always 每个浏览器会话一次
+export type AnnouncementFrequency = 'once' | 'daily' | 'always';
+
+// 展示字段（登录用户与管理员视图共用）
+export interface AnnouncementContent {
+  badge: string;
+  title: string;
+  content: string;
+  image_url: string;
+  button_text: string;
+  link_text: string;
+  link_url: string;
+}
+
+// GET /announcement：不生效时只有 active=false
+export type AnnouncementView =
+  | { active: false }
+  | (AnnouncementContent & { active: true; revision: string; frequency: AnnouncementFrequency });
+
+// 管理员视图：全部字段 + 当前是否生效
+export interface AnnouncementSettingsView extends AnnouncementContent {
+  enabled: boolean;
+  frequency: AnnouncementFrequency;
+  start_at: string | null;
+  end_at: string | null;
+  active: boolean;
+  revision: string;
+}
+
+// PUT 部分更新：不传 = 不改；start_at / end_at 传空串 = 清空
+export interface AnnouncementUpdate extends Partial<AnnouncementContent> {
+  enabled?: boolean;
+  frequency?: AnnouncementFrequency;
+  start_at?: string;
+  end_at?: string;
+}
+
 // 设置类型定义
 export interface Settings {
   id: string;

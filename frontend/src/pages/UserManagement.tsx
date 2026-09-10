@@ -3,6 +3,7 @@ import { Plus, Pencil, Trash2, Shield, ShieldOff, KeyRound, Loader2, Users, User
 import { toast } from 'sonner'
 import { adminApi } from '@/services/api'
 import { LoginSettingsCard } from '@/components/admin/LoginSettingsCard'
+import { AnnouncementSettingsCard } from '@/components/admin/AnnouncementSettingsCard'
 import type { User } from '@/types'
 
 export default function UserManagement() {
@@ -112,6 +113,7 @@ export default function UserManagement() {
   return (
     <div className="space-y-6">
       <LoginSettingsCard />
+      <AnnouncementSettingsCard />
 
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-content">用户管理 ({total})</h1>

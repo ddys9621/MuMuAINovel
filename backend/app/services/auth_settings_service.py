@@ -6,15 +6,11 @@ PUT 时秘密字段为 None 表示不改，空串才是清空。
 """
 from __future__ import annotations
 
-import json
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, ValidationError, field_validator
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from pydantic import BaseModel, Field, field_validator
 
-from app.logger import get_logger
-
-logger = get_logger(__name__)
+from app.services.system_settings_store import JsonSettingsStore
 
 AUTH_SETTINGS_KEY = "auth"
 SECRET_FIELDS = ("linuxdo_client_secret", "smtp_password")
@@ -89,47 +85,11 @@ class AuthSettingsUpdate(_StripStrings):
     smtp_from: Optional[str] = None
 
 
-class AuthSettingsStore:
-    """system_settings 表 key="auth" 的读写（与 user_manager 共用全局引擎）"""
+class AuthSettingsStore(JsonSettingsStore[AuthSettings]):
+    """system_settings 表 key="auth" 的读写（通用实现见 system_settings_store）"""
 
-    async def _get_session(self) -> AsyncSession:
-        from app.database import get_engine
-
-        engine = await get_engine("_global_users_")
-        return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)()
-
-    async def get(self) -> AuthSettings:
-        from app.models.system_setting import SystemSetting
-
-        async with await self._get_session() as session:
-            row = await session.get(SystemSetting, AUTH_SETTINGS_KEY)
-
-        if not row or not row.value:
-            return AuthSettings()
-        try:
-            return AuthSettings.model_validate(json.loads(row.value))
-        except (ValueError, ValidationError) as e:
-            logger.error(f"登录方式配置解析失败，回退默认值: {e}")
-            return AuthSettings()
-
-    async def save(self, settings: AuthSettings) -> AuthSettings:
-        from app.models.system_setting import SystemSetting
-
-        payload = settings.model_dump_json()
-        async with await self._get_session() as session:
-            row = await session.get(SystemSetting, AUTH_SETTINGS_KEY)
-            if row:
-                row.value = payload
-            else:
-                session.add(SystemSetting(key=AUTH_SETTINGS_KEY, value=payload))
-            await session.commit()
-        return settings
-
-    async def apply_update(self, update: AuthSettingsUpdate) -> AuthSettings:
-        current = await self.get()
-        changes = update.model_dump(exclude_none=True)
-        merged = AuthSettings.model_validate({**current.model_dump(), **changes})
-        return await self.save(merged)
+    def __init__(self):
+        super().__init__(AUTH_SETTINGS_KEY, AuthSettings, "登录方式")
 
 
 # 全局实例

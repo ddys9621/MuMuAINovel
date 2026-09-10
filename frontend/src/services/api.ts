@@ -13,6 +13,9 @@ import type {
   AuthConfig,
   AuthSettingsView,
   AuthSettingsUpdate,
+  AnnouncementView,
+  AnnouncementSettingsView,
+  AnnouncementUpdate,
   Project,
   ProjectCreate,
   ProjectUpdate,
@@ -777,6 +780,25 @@ export const adminApi = {
 
   sendTestEmail: (to: string) =>
     api.post<unknown, { success: boolean; message: string }>('/admin/auth-settings/test-email', { to }),
+
+  // 公告弹窗设置
+  getAnnouncement: () => api.get<unknown, AnnouncementSettingsView>('/admin/announcement'),
+
+  updateAnnouncement: (data: AnnouncementUpdate) =>
+    api.put<unknown, AnnouncementSettingsView>('/admin/announcement', data),
+
+  uploadAnnouncementImage: (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post<unknown, { image_url: string }>('/admin/announcement/image', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+};
+
+// 登录后公告弹窗（内容由管理员在用户管理页配置）
+export const announcementApi = {
+  get: () => api.get<unknown, AnnouncementView>('/announcement'),
 };
 
 // 剧情卡片 API

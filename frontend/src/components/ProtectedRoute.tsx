@@ -1,6 +1,7 @@
 import { useState, useEffect, type ReactNode } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { authApi } from '@/services/api'
+import { AnnouncementGate } from '@/components/AnnouncementGate'
 import { PageLoading } from '@/components/ui/PageLoading'
 import { sessionManager } from '@/utils/sessionManager'
 
@@ -38,5 +39,11 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
   if (!authenticated) {
     return <Navigate to={`/login?redirect=${encodeURIComponent(location.pathname)}`} replace />
   }
-  return <>{children}</>
+  // 公告弹窗只在登录后出现；同一浏览器会话关过就不再弹（见 AnnouncementGate）
+  return (
+    <>
+      {children}
+      <AnnouncementGate />
+    </>
+  )
 }
