@@ -751,7 +751,163 @@ class PlotPromptTemplates:
 ]
 ```"""
         return prompt
-    
+
+    @classmethod
+    def _main_timeline_table(cls, main_ctx: Dict[str, Any], highlight: Optional[tuple] = None) -> str:
+        """主线节点表：| 节点 | 标题 | 权重 | 对应章节 | 概要 |；highlight=(a,b) 时区间内节点前缀 ★。"""
+        rows = ["| 节点 | 标题 | 权重 | 对应章节 | 概要 |", "|---|---|---|---|---|"]
+        for r in main_ctx.get("beats", []):
+            idx = r.get("index")
+            mark = "★ " if highlight and highlight[0] <= idx <= highlight[1] else ""
+            ch = (
+                f"第 {r['chapter_start']}-{r['chapter_end']} 章"
+                if r.get("chapter_start") and r.get("chapter_end") else "待定"
+            )
+            desc = str(r.get("description") or "")[:60]
+            rows.append(f"| {mark}{idx} | {r.get('title', '')} | {float(r.get('weight') or 0):.0%} | {ch} | {desc} |")
+        return "\n".join(rows)
+
+    @classmethod
+    def get_sub_line_prompt(
+        cls,
+        project_data: Dict[str, Any],
+        outline_content: Optional[str],
+        main_ctx: Dict[str, Any],
+        existing_subs: List[Dict[str, Any]],
+        line_type: str,
+        custom_prompt: Optional[str],
+        sequence_index: int,
+        total: int,
+        budget_cap: Optional[int],
+    ) -> str:
+        """支线结构 prompt：把支线放到主线时间轴上设计（并行交织，不是主线续集）。"""
+        genre = project_data.get('genre', '通用')
+        climax = main_ctx.get("climax_beat")
+        climax_title = next((r.get("title", "") for r in main_ctx.get("beats", []) if r.get("index") == climax), "")
+        prompt = f"""
+# 支线设计任务（第 {sequence_index}/{total} 条）
+
+## 项目信息
+| 项目 | 内容 |
+|------|------|
+| 书名 | {project_data.get('title', '未命名项目')} |
+| 类型 | {genre} |
+| 主题 | {project_data.get('theme', '待定')} |
+| 全书章数 | {main_ctx.get('estimated_chapters') or '待定'} |
+
+## 主线时间轴（支线必须挂在这条轴上）
+主线《{main_ctx.get('title', '')}》共 {len(main_ctx.get('beats', []))} 个节点；权重最高的是 [节点 {climax}] {climax_title}（全书最大高潮所在）。
+{cls._main_timeline_table(main_ctx)}
+
+## 已有支线（不得重复其题材、角色诉求与高潮位置）
+"""
+        if existing_subs:
+            for s in existing_subs:
+                desc = str(s.get("description") or "")[:100]
+                prompt += (
+                    f"- 《{s.get('title', '')}》（{s.get('mode') or '未锚定'}，锚定节点 "
+                    f"{s.get('anchor_start_beat', '?')}-{s.get('anchor_end_beat', '?')}）：{desc}\n"
+                )
+        else:
+            prompt += "（暂无）\n"
+
+        cap_rule = f"本条 ≤ {budget_cap} 章；" if budget_cap else ""
+        prompt += f"""
+## 支线三种模式（必选其一）
+- companion 伴生：贯穿 ≥3 个主线节点，低频保温 + 1-2 次爆发。典型：感情线、成长线、师徒线
+- inserted 插入：集中在 1-2 个主线节点内完成起承转合后退场。典型：某张地图的势力线、配角线、一次任务线
+- converge 汇流：独立发展一段，最后并入主线某个节点的兑现。典型：复仇线、身世线、暗中布局线
+
+## 网文支线纪律
+1. 支线为主线服务：共享主角/配角但诉求不同，不得复述主线已有事件
+2. 支线高潮与主线最大高潮（节点 {climax}）错峰；只有 converge 模式可以把结局并入主线节点
+3. 支线有明确起点与终点：anchor_start_beat / anchor_end_beat 必须是上表中的节点序号，区间外这条线不出场
+4. estimated_chapters 是篇幅预算：这条线作为 B 线重点推进的章数（不是独立章）。{cap_rule}companion 取接近上限，inserted 取 4-8，converge 取 6-12
+5. 描述（300-500 字）写清：核心诉求、涉及角色、起点事件 → 中段波折 → 终点状态，以及它在哪个主线节点期间最活跃
+"""
+        characters = project_data.get('characters', [])
+        if characters:
+            prompt += "\n## 主要角色\n" + "\n".join(
+                f"- **{c.get('name', '未命名')}** ({c.get('role_type', '角色')}): {str(c.get('personality') or '待定')[:50]}"
+                for c in characters[:8]
+            ) + "\n"
+        if outline_content:
+            prompt += f"\n## 参考大纲\n{outline_content}\n"
+        if custom_prompt:
+            prompt += f"\n## 特殊要求\n{custom_prompt}\n"
+
+        prompt += """
+## 输出格式（严格 JSON，英文字段名，简体中文内容）
+```json
+[
+    {
+        "title": "支线标题（10-30 字，要有网文感）",
+        "description": "支线整体描述（300-500 字）",
+        "line_type": "__LINE_TYPE__",
+        "mode": "companion | inserted | converge",
+        "anchor_start_beat": 1,
+        "anchor_end_beat": 3,
+        "estimated_chapters": 12,
+        "plot_cards": []
+    }
+]
+```
+**严格要求**：
+1. 数组必须且只能有 1 个元素
+2. mode 只能是 companion / inserted / converge 之一
+3. anchor_start_beat ≤ anchor_end_beat，且都是主线时间轴表中的节点序号（阿拉伯数字整型）
+4. estimated_chapters 为阿拉伯数字整型，不带单位
+5. 所有文字内容使用简体中文
+""".replace("__LINE_TYPE__", line_type)
+        return prompt.strip()
+
+    @classmethod
+    def get_sub_line_beats_prompt(
+        cls,
+        project_data: Dict[str, Any],
+        line: Dict[str, Any],
+        main_ctx: Dict[str, Any],
+        quota: int,
+    ) -> str:
+        """支线节点 prompt：每个节点标 anchor_beat（落在哪个主线节点期间）与 relation。"""
+        genre = project_data.get('genre', '通用')
+        beat_types_hint = "opening, power_up, face_slap, twist, climax, cliff_hanger"
+        for key in cls.GENRE_PLOT_STRUCTURES:
+            if key in genre or genre in key:
+                beat_types_hint = ", ".join(list(cls.GENRE_PLOT_STRUCTURES[key]['beat_types'].keys())[:6])
+                break
+        a, b = line.get("anchor_start_beat"), line.get("anchor_end_beat")
+        max_beats = min(12, max(3, quota + 2))
+        climax = main_ctx.get("climax_beat")
+        highlight = (a, b) if a is not None and b is not None else None
+        prompt = f"""为支线《{line.get('title', '未命名')}》设计节点（beats）。支线节点 = 这条支线在某个主线节点期间发生的一件完整的事，会整体落进那个主线节点的某一个桥段（4 章）里写完。
+
+【项目】{project_data.get('title', '未命名')}（{genre}）
+【支线】{line.get('title', '未命名')}（{line.get('mode', '')} 型，{line.get('line_type', 'sub')}）
+【描述】{line.get('description', '')}
+【活跃区间】主线节点 {a}-{b}（区间外不出场）
+【篇幅预算】{line.get('estimated_chapters')} 章 ≈ {quota} 个桥段 → 请设计 {quota} 个左右的节点（最少 3，最多 {max_beats}）
+
+【主线时间轴】（★ = 本支线活跃区间）
+{cls._main_timeline_table(main_ctx, highlight=highlight)}
+
+【节点设计纪律】
+1. 每个节点标 anchor_beat：它发生在哪个主线节点期间，必须在 {a}-{b} 内；节点按 anchor_beat 非降序排列
+2. 同一主线节点最多挂 2 个支线节点；companion 型至少覆盖 3 个不同主线节点
+3. 支线高潮节点权重最高，但不要与主线最大高潮 [节点 {climax}] 同节点（converge 型除外）
+4. relation：offset = 与主线错峰推进（默认）；merge = 汇入主线该节点的兑现，只有 converge 型的最后一个节点填 merge
+5. 每个节点结尾留钩子；description 150-250 字写清：核心事件、涉及角色、与主线当时局面的关系、产出/变化
+6. key 取节点类型之一：{beat_types_hint}
+
+【输出格式】仅输出 JSON 数组，权重之和 = 1.0：
+```json
+[
+  {{"index": 1, "key": "opening", "title": "初遇", "description": "...", "weight": 0.2, "anchor_beat": {a}, "relation": "offset"}},
+  {{"index": 2, "key": "twist", "title": "并肩杀敌", "description": "...", "weight": 0.3, "anchor_beat": {b}, "relation": "offset"}}
+]
+```"""
+        return prompt
+
 
 
 class PlotPromptService:
@@ -814,3 +970,31 @@ class PlotPromptService:
     ) -> str:
         """生成单条剧情线节点规划 Prompt（精简版）"""
         return self.templates.get_single_line_beats_prompt(project_data, line)
+
+    def generate_sub_line_prompt(
+        self,
+        project_data: Dict[str, Any],
+        outline_content: Optional[str],
+        main_ctx: Dict[str, Any],
+        existing_subs: List[Dict[str, Any]],
+        line_type: str,
+        custom_prompt: Optional[str],
+        sequence_index: int,
+        total: int,
+        budget_cap: Optional[int],
+    ) -> str:
+        """生成支线结构 Prompt（锚定主线时间轴）"""
+        return self.templates.get_sub_line_prompt(
+            project_data, outline_content, main_ctx, existing_subs, line_type, custom_prompt,
+            sequence_index, total, budget_cap,
+        )
+
+    def generate_sub_line_beats_prompt(
+        self,
+        project_data: Dict[str, Any],
+        line: Dict[str, Any],
+        main_ctx: Dict[str, Any],
+        quota: int,
+    ) -> str:
+        """生成支线节点规划 Prompt（带 anchor_beat / relation）"""
+        return self.templates.get_sub_line_beats_prompt(project_data, line, main_ctx, quota)
